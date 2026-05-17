@@ -145,7 +145,7 @@ public enum ToolCatalog {
             "properties": [
                 "key": [
                     "type": "string",
-                    "description": "Key name, e.g. \"return\", \"escape\", \"tab\", \"a\"."
+                    "description": "Key name: a letter or digit, or one of return, enter, tab, space, escape, delete, forwarddelete, up, down, left, right, home, end, pageup, pagedown, f1-f12."
                 ],
                 "modifiers": [
                     "type": "array",

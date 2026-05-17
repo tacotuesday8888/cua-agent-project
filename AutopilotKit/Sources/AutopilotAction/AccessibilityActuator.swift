@@ -244,7 +244,11 @@ extension AccessibilityActuator.ActuationError: LocalizedError {
             choose an editable element marked settable.
             """
         case .unknownKey(let key):
-            return "Unknown key '\(key)'. Use a supported key name such as return, escape, tab, or a single character."
+            return """
+            Unknown key '\(key)'. Supported names: a letter or digit; return, \
+            enter, tab, space, escape, delete, forwarddelete; the arrow keys \
+            up, down, left, and right; home, end, pageup, pagedown; and f1-f12.
+            """
         }
     }
 }
