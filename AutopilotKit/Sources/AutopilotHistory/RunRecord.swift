@@ -35,6 +35,10 @@ public struct RunRecord: Sendable, Hashable, Codable, Identifiable {
     /// Ordered raw tool names performed during the run — high-level actions
     /// only, carrying no element labels or typed values.
     public let actions: [String]
+    /// Total input tokens the run's LLM calls consumed.
+    public let inputTokens: Int
+    /// Total output tokens the run's LLM calls produced.
+    public let outputTokens: Int
     /// When the run started.
     public let startedAt: Date
     /// When the run ended.
@@ -48,6 +52,8 @@ public struct RunRecord: Sendable, Hashable, Codable, Identifiable {
         status: RunStatus,
         summary: String,
         actions: [String] = [],
+        inputTokens: Int = 0,
+        outputTokens: Int = 0,
         startedAt: Date,
         finishedAt: Date
     ) {
@@ -58,12 +64,24 @@ public struct RunRecord: Sendable, Hashable, Codable, Identifiable {
         self.status = status
         self.summary = summary
         self.actions = actions
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
         self.startedAt = startedAt
         self.finishedAt = finishedAt
     }
 
     /// How many actions the agent performed during the run.
     public var actionCount: Int { actions.count }
+
+    /// Total tokens (input + output) the run consumed.
+    public var totalTokens: Int { inputTokens + outputTokens }
+
+    /// A compact human label for total token usage, e.g. "8.2k".
+    public var compactTokens: String {
+        totalTokens < 1000
+            ? "\(totalTokens)"
+            : String(format: "%.1fk", Double(totalTokens) / 1000)
+    }
 
     /// How long the run took.
     public var duration: TimeInterval {

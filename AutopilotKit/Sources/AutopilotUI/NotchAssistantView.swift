@@ -352,7 +352,7 @@ public struct NotchAssistantView: View {
                     .foregroundStyle(.white.opacity(0.82))
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                Text("\(run.appName) · \(run.actionCount)")
+                Text("\(run.appName) · \(run.actionCount) · \(run.compactTokens) tok")
                     .font(.system(size: 9))
                     .foregroundStyle(.white.opacity(0.4))
                     .lineLimit(1)

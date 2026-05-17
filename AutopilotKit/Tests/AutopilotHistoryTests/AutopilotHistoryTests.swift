@@ -17,6 +17,16 @@ struct RunRecordTests {
         #expect(record.actionCount == 3)
     }
 
+    @Test func totalTokensSumsInputAndOutput() {
+        let record = makeRecord(inputTokens: 1200, outputTokens: 340)
+        #expect(record.totalTokens == 1540)
+        #expect(record.compactTokens == "1.5k")
+    }
+
+    @Test func compactTokensStaysExactBelowAThousand() {
+        #expect(makeRecord(inputTokens: 200, outputTokens: 50).compactTokens == "250")
+    }
+
     @Test func durationIsNeverNegative() {
         let now = Date()
         let record = makeRecord(startedAt: now, finishedAt: now.addingTimeInterval(-5))
@@ -127,6 +137,8 @@ private func makeRecord(
     status: RunStatus = .completed,
     summary: String = "Done.",
     actions: [String] = [],
+    inputTokens: Int = 0,
+    outputTokens: Int = 0,
     startedAt: Date = Date(),
     finishedAt: Date? = nil
 ) -> RunRecord {
@@ -137,6 +149,8 @@ private func makeRecord(
         status: status,
         summary: summary,
         actions: actions,
+        inputTokens: inputTokens,
+        outputTokens: outputTokens,
         startedAt: startedAt,
         finishedAt: finishedAt ?? startedAt.addingTimeInterval(12)
     )

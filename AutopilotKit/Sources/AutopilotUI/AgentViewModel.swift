@@ -561,6 +561,8 @@ public final class AgentViewModel: UserInteraction {
             status: Self.runStatus(for: outcome.status),
             summary: outcome.summary,
             actions: pending.performedTools,
+            inputTokens: runInputTokens,
+            outputTokens: runOutputTokens,
             startedAt: pending.startedAt,
             finishedAt: Date()
         )
