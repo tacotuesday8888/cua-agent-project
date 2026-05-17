@@ -8,16 +8,24 @@ import Foundation
 /// `AgentSession`, so this store must not be used for secrets.
 public actor MemoryStore {
     private let fileURL: URL
+    /// The most memories to keep; the oldest are dropped once a new one would
+    /// push the store past this.
+    private let limit: Int
     /// In-memory cache; `nil` until the first disk read.
     private var cache: [MemoryItem]?
 
     /// Create a store.
     ///
-    /// - Parameter directory: the directory holding `memory.json`. Tests pass a
-    ///   temporary directory; production uses Application Support.
-    public init(directory: URL? = nil) {
+    /// - Parameters:
+    ///   - directory: the directory holding `memory.json`. Tests pass a
+    ///     temporary directory; production uses Application Support.
+    ///   - limit: the most memories to keep. When a new memory pushes the
+    ///     store past this, the oldest are dropped — so recalled memory, and
+    ///     the system prompt it feeds, stays bounded on a long-lived install.
+    public init(directory: URL? = nil, limit: Int = 500) {
         let directory = directory ?? Self.defaultDirectory()
         self.fileURL = directory.appendingPathComponent("memory.json", isDirectory: false)
+        self.limit = max(1, limit)
     }
 
     /// Every stored memory, newest first.
@@ -34,6 +42,10 @@ public actor MemoryStore {
             return false
         }
         items.append(item)
+        if items.count > limit {
+            // Keep the newest `limit` memories; drop the oldest.
+            items = Array(items.sorted { $0.createdAt > $1.createdAt }.prefix(limit))
+        }
         commit(items)
         return true
     }

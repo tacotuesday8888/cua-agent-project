@@ -113,4 +113,20 @@ struct MemoryStoreTests {
         #expect(!second)
         #expect(await store.all().count == 1)
     }
+
+    @Test func cappingDropsTheOldestMemories() async {
+        let store = MemoryStore(directory: tempDirectory(), limit: 3)
+        let base = Date(timeIntervalSince1970: 1_000_000)
+        for index in 0..<5 {
+            await store.add(MemoryItem(
+                text: "fact \(index)",
+                source: .explicit,
+                createdAt: base.addingTimeInterval(Double(index))
+            ))
+        }
+        // Only the newest three survive the limit; the two oldest are dropped.
+        let all = await store.all()
+        #expect(all.count == 3)
+        #expect(all.map(\.text) == ["fact 4", "fact 3", "fact 2"])
+    }
 }
