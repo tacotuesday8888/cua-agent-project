@@ -221,21 +221,34 @@ public struct ComputerUseSmokeRunner: Sendable {
 
     public func run(
         computer: any ComputerControl,
-        plan: ComputerUseSmokePlan
+        plan: ComputerUseSmokePlan,
+        includeScreenshot: Bool = false
     ) async -> ComputerUseSmokeReport {
-        await run(computer: computer, initialPlan: plan, planResolver: nil)
+        await run(
+            computer: computer,
+            initialPlan: plan,
+            includeScreenshot: includeScreenshot,
+            planResolver: nil
+        )
     }
 
     public func run(
         computer: any ComputerControl,
+        includeScreenshot: Bool = false,
         planForState planResolver: @escaping @Sendable (ComputerAppState) throws -> ComputerUseSmokePlan
     ) async -> ComputerUseSmokeReport {
-        await run(computer: computer, initialPlan: nil, planResolver: planResolver)
+        await run(
+            computer: computer,
+            initialPlan: nil,
+            includeScreenshot: includeScreenshot,
+            planResolver: planResolver
+        )
     }
 
     private func run(
         computer: any ComputerControl,
         initialPlan: ComputerUseSmokePlan?,
+        includeScreenshot: Bool,
         planResolver: (@Sendable (ComputerAppState) throws -> ComputerUseSmokePlan)?
     ) async -> ComputerUseSmokeReport {
         var steps: [ComputerUseSmokeStepResult] = []
@@ -254,13 +267,21 @@ public struct ComputerUseSmokeRunner: Sendable {
         }
 
         step = await record("get_app_state", {
-            let state = try await computer.getAppState(includeScreenshot: false)
+            let state = try await computer.getAppState(includeScreenshot: includeScreenshot)
             let count = state.snapshot.root.flattened.count
             guard count > 0 else {
                 throw AgentError.computer("get_app_state returned an empty tree")
             }
+            if includeScreenshot {
+                guard let screenshot = state.screenshot, !screenshot.isEmpty else {
+                    throw AgentError.computer("get_app_state did not return screenshot bytes")
+                }
+            }
             if let planResolver {
                 plan = try planResolver(state)
+            }
+            if includeScreenshot {
+                return "Read \(count) element(s) and captured screenshot."
             }
             return "Read \(count) element(s)."
         })

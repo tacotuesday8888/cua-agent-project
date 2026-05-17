@@ -14,6 +14,7 @@ struct AutopilotSmokeCLI {
         }
 
         let target = value(after: "--app", in: arguments) ?? "AutopilotFixtureApp"
+        let includeScreenshot = arguments.contains("--include-screenshot")
         let app = await MainActor.run {
             AppLocator().runningApp(matching: target)
         }
@@ -38,6 +39,7 @@ struct AutopilotSmokeCLI {
 
         let report = await ComputerUseSmokeRunner().run(
             computer: computer,
+            includeScreenshot: includeScreenshot,
             planForState: { state in
                 try ComputerUseSmokePlan.autopilotFixturePlan(
                     for: state.snapshot
@@ -76,7 +78,7 @@ struct AutopilotSmokeCLI {
         print("""
         Usage:
           swift run --package-path AutopilotKit AutopilotFixtureApp
-          swift run --package-path AutopilotKit AutopilotSmokeCLI [--app AutopilotFixtureApp]
+          swift run --package-path AutopilotKit AutopilotSmokeCLI [--app AutopilotFixtureApp] [--include-screenshot]
 
         The fixture app must be running and the smoke runner process must have
         Accessibility permission in System Settings > Privacy & Security.

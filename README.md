@@ -18,8 +18,9 @@ exercise the 9-tool driver surface without an LLM:
 ```sh
 swift run --package-path AutopilotKit AutopilotFixtureApp
 swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp
+swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp --include-screenshot
 ```
 
 The smoke runner process needs Accessibility permission in System Settings >
-Privacy & Security > Accessibility. Screen Recording is useful for screenshot
-fallbacks, but this smoke test does not require screenshots.
+Privacy & Security > Accessibility. Add `--include-screenshot` to also require
+Screen Recording and validate target-window screenshot bytes.
