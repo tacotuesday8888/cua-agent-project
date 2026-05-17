@@ -191,6 +191,15 @@ public actor AgentSession {
 
             let toolUses = response.toolUses
             if toolUses.isEmpty {
+                // No tool calls ends the run — but cleanly only if the model
+                // chose to stop. A reply cut off at the token limit has not
+                // finished; reporting it as completed would be a false success.
+                if response.stopReason == .maxTokens {
+                    return fail("""
+                    The model's reply was cut off at the response token limit \
+                    before it finished the task or called done.
+                    """)
+                }
                 let summary = assistantText.isEmpty ? "Finished." : assistantText
                 emit(.finished(summary: summary))
                 return AgentOutcome(status: .completed, summary: summary)

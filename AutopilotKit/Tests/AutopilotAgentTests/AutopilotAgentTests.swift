@@ -390,6 +390,29 @@ struct AgentSessionTests {
         #expect(events.contains { if case .finished = $0 { true } else { false } })
     }
 
+    @Test func truncatedReplyFailsRatherThanReportingFalseSuccess() async {
+        // A reply cut off at the token limit, with no tool calls, must end the
+        // run as failed — not as a clean completion.
+        let llm = ScriptedLLMProvider([
+            LLMResponse(
+                content: [.text("A partial answer that the model never fin")],
+                stopReason: .maxTokens,
+                usage: .init(inputTokens: 1, outputTokens: 1)
+            )
+        ])
+        let session = AgentSession(
+            llm: llm,
+            computer: musicComputer(),
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory()
+        )
+
+        let outcome = await session.run(task: "do something")
+        #expect(outcome.status == .failed)
+        #expect(outcome.summary.contains("cut off"))
+    }
+
     @Test func typeTextWithElementIndexUsesFocusedTypingPath() async {
         let llm = ScriptedLLMProvider([
             toolResponse(
