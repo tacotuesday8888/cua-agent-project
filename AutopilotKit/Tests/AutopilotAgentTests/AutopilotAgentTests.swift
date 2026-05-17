@@ -1,10 +1,144 @@
-@testable import AutopilotAgent
+import AutopilotCore
+import AutopilotLLM
+import Foundation
 import Testing
+@testable import AutopilotAgent
 
-struct AutopilotAgentTests {
-    @Test func moduleImports() {
-        let tools = AgentTool.allCases
+struct RiskClassifierTests {
+    private func snapshot(buttonLabel: String) -> UITreeSnapshot {
+        let button = UIElement(id: "e2", role: "AXButton", label: buttonLabel)
+        let root = UIElement(id: "e1", role: "AXWindow", children: [button])
+        return UITreeSnapshot(appName: "App", root: root)
+    }
 
-        #expect(tools.contains(.done))
+    @Test func destructiveButtonIsRisky() {
+        let risk = RiskClassifier().assess(
+            tool: .clickElement,
+            input: ["element_id": "e2"],
+            snapshot: snapshot(buttonLabel: "Delete Playlist")
+        )
+        #expect(risk == .risky)
+    }
+
+    @Test func ordinaryButtonIsSafe() {
+        let risk = RiskClassifier().assess(
+            tool: .clickElement,
+            input: ["element_id": "e2"],
+            snapshot: snapshot(buttonLabel: "Play")
+        )
+        #expect(risk == .safe)
+    }
+
+    @Test func nonClickToolsAreSafe() {
+        let classifier = RiskClassifier()
+        #expect(classifier.assess(tool: .readTree, input: [:], snapshot: nil) == .safe)
+        #expect(classifier.assess(tool: .setValue, input: [:], snapshot: nil) == .safe)
+        #expect(classifier.assess(tool: .scroll, input: [:], snapshot: nil) == .safe)
+    }
+}
+
+struct AgentSessionTests {
+    private func musicComputer() -> MockComputer {
+        let field = UIElement(id: "e2", role: "AXTextField", label: "Search", value: "")
+        let button = UIElement(id: "e3", role: "AXButton", label: "Play")
+        let root = UIElement(id: "e1", role: "AXWindow", label: "Music",
+                             children: [field, button])
+        return MockComputer(appName: "Music", root: root, windowTitle: "Library")
+    }
+
+    private func toolResponse(id: String, tool: String, input: JSONValue) -> LLMResponse {
+        LLMResponse(
+            content: [.toolUse(ToolUse(id: id, name: tool, input: input))],
+            stopReason: .toolUse,
+            usage: .init(inputTokens: 1, outputTokens: 1)
+        )
+    }
+
+    @Test func runsToolSequenceToCompletion() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "t1", tool: "set_value",
+                         input: ["element_id": "e2", "value": "jazz"]),
+            toolResponse(id: "t2", tool: "click_element", input: ["element_id": "e3"]),
+            toolResponse(id: "t3", tool: "done", input: ["summary": "Played jazz."])
+        ])
+        let computer = musicComputer()
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: "test", maxSteps: 10)
+        )
+
+        let outcome = await session.run(task: "Play some jazz")
+        #expect(outcome.status == .completed)
+        #expect(outcome.summary == "Played jazz.")
+
+        let actions = await computer.performedActions
+        #expect(actions == ["setValue:e2=jazz", "click:e3"])
+    }
+
+    @Test func deniedRiskyActionIsNotPerformed() async {
+        let deleteButton = UIElement(id: "e2", role: "AXButton", label: "Delete Playlist")
+        let root = UIElement(id: "e1", role: "AXWindow", children: [deleteButton])
+        let computer = MockComputer(appName: "Music", root: root)
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "t1", tool: "click_element", input: ["element_id": "e2"]),
+            toolResponse(id: "t2", tool: "done", input: ["summary": "Did not delete."])
+        ])
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: DenyingInteraction(),
+            configuration: AgentConfiguration(model: "test")
+        )
+
+        let outcome = await session.run(task: "delete the playlist")
+        #expect(outcome.status == .completed)
+        let actions = await computer.performedActions
+        #expect(actions.isEmpty)
+    }
+
+    @Test func emitsLifecycleEvents() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "t1", tool: "done", input: ["summary": "Done."])
+        ])
+        let collector = EventCollector()
+        let session = AgentSession(
+            llm: llm,
+            computer: musicComputer(),
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: "test"),
+            eventHandler: { collector.append($0) }
+        )
+
+        _ = await session.run(task: "noop")
+
+        let events = collector.all()
+        #expect(events.contains { if case .started = $0 { true } else { false } })
+        #expect(events.contains { if case .finished = $0 { true } else { false } })
+    }
+}
+
+/// A `UserInteraction` that declines every risky action, for tests.
+struct DenyingInteraction: UserInteraction {
+    func confirmRiskyAction(summary: String) async -> Bool { false }
+    func askQuestion(_ question: String) async -> String { "" }
+}
+
+/// A thread-safe sink that records emitted `AgentEvent`s for assertions.
+final class EventCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var events: [AgentEvent] = []
+
+    func append(_ event: AgentEvent) {
+        lock.lock()
+        defer { lock.unlock() }
+        events.append(event)
+    }
+
+    func all() -> [AgentEvent] {
+        lock.lock()
+        defer { lock.unlock() }
+        return events
     }
 }
