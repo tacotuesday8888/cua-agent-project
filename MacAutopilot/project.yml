@@ -1,0 +1,76 @@
+name: MacAutopilot
+options:
+  minimumXcodeGenVersion: 2.45.4
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "26.3"
+  createIntermediateGroups: true
+
+packages:
+  AutopilotKit:
+    path: ../AutopilotKit
+
+settings:
+  base:
+    SWIFT_VERSION: 6.0
+    MACOSX_DEPLOYMENT_TARGET: 14.0
+
+targets:
+  MacAutopilot:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: MacAutopilot
+    dependencies:
+      - package: AutopilotKit
+        products:
+          - AutopilotCore
+          - AutopilotLLM
+          - AutopilotAgent
+    entitlements:
+      path: MacAutopilot/MacAutopilot.entitlements
+      properties: {}
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.langqi.MacAutopilot
+        PRODUCT_NAME: MacAutopilot
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_HARDENED_RUNTIME: YES
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Mac Autopilot
+        INFOPLIST_KEY_NSHumanReadableCopyright: ""
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 1.0
+        SWIFT_VERSION: 6.0
+
+  MacAutopilotTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: MacAutopilotTests
+    dependencies:
+      - target: MacAutopilot
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.langqi.MacAutopilotTests
+        SWIFT_VERSION: 6.0
+        CODE_SIGN_STYLE: Automatic
+
+schemes:
+  MacAutopilot:
+    build:
+      targets:
+        MacAutopilot: all
+        MacAutopilotTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - MacAutopilotTests
+    archive:
+      config: Release
+    management:
+      shared: true

@@ -1,0 +1,470 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0A234545A4775E4289E39A25 /* AutopilotAgent in Frameworks */ = {isa = PBXBuildFile; productRef = E2C1701687B09E7182366316 /* AutopilotAgent */; };
+		A5D7F6E0EF733CE249BBEE96 /* AutopilotCore in Frameworks */ = {isa = PBXBuildFile; productRef = 8FF2EC3426FF996A35B951FF /* AutopilotCore */; };
+		B18B37A2430BA4993177A607 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D8FF34B626C1F73BBCB7465 /* ContentView.swift */; };
+		CB4671DB015FAA38964052DC /* MacAutopilotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D0BF057B2091CE0320A5958 /* MacAutopilotTests.swift */; };
+		CE9A5658CB90F9C2375E368C /* MacAutopilotApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E7DB48C234ECB4F9FD5A111 /* MacAutopilotApp.swift */; };
+		D8372C345B3276B9AE06800B /* AutopilotLLM in Frameworks */ = {isa = PBXBuildFile; productRef = 4C6C024C9585F7102B43F33D /* AutopilotLLM */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		9DC62A9AE4D6C3DE38214B65 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 119B7806EE29B7AE054D9ECF /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4857B33A1BBE12372CE92711;
+			remoteInfo = MacAutopilot;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		36D00CB693ECB52CB13153DC /* MacAutopilot.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MacAutopilot.entitlements; sourceTree = "<group>"; };
+		3D0BF057B2091CE0320A5958 /* MacAutopilotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacAutopilotTests.swift; sourceTree = "<group>"; };
+		5D8FF34B626C1F73BBCB7465 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		7E7DB48C234ECB4F9FD5A111 /* MacAutopilotApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacAutopilotApp.swift; sourceTree = "<group>"; };
+		8715E2D30943EF6543CEAB25 /* AutopilotKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = AutopilotKit; path = ../AutopilotKit; sourceTree = SOURCE_ROOT; };
+		A646B4FE57A1CE79B5371FE0 /* MacAutopilotTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MacAutopilotTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		BE75A44D29DB0A0EBA24C4E8 /* MacAutopilot.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MacAutopilot.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		B4D51C9951D6BAEC189E4168 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A5D7F6E0EF733CE249BBEE96 /* AutopilotCore in Frameworks */,
+				D8372C345B3276B9AE06800B /* AutopilotLLM in Frameworks */,
+				0A234545A4775E4289E39A25 /* AutopilotAgent in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		5F29DE82AFCC8BFFCE35C514 /* MacAutopilot */ = {
+			isa = PBXGroup;
+			children = (
+				5D8FF34B626C1F73BBCB7465 /* ContentView.swift */,
+				36D00CB693ECB52CB13153DC /* MacAutopilot.entitlements */,
+				7E7DB48C234ECB4F9FD5A111 /* MacAutopilotApp.swift */,
+			);
+			path = MacAutopilot;
+			sourceTree = "<group>";
+		};
+		634BFAD61D71ED326BCC7FE0 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				BE75A44D29DB0A0EBA24C4E8 /* MacAutopilot.app */,
+				A646B4FE57A1CE79B5371FE0 /* MacAutopilotTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		789BC079D16A74DC9C7896A4 = {
+			isa = PBXGroup;
+			children = (
+				5F29DE82AFCC8BFFCE35C514 /* MacAutopilot */,
+				8A5A65051484E3A294C906BF /* MacAutopilotTests */,
+				8B10128265ED67D566F64F41 /* Packages */,
+				634BFAD61D71ED326BCC7FE0 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		8A5A65051484E3A294C906BF /* MacAutopilotTests */ = {
+			isa = PBXGroup;
+			children = (
+				3D0BF057B2091CE0320A5958 /* MacAutopilotTests.swift */,
+			);
+			path = MacAutopilotTests;
+			sourceTree = "<group>";
+		};
+		8B10128265ED67D566F64F41 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				8715E2D30943EF6543CEAB25 /* AutopilotKit */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		4857B33A1BBE12372CE92711 /* MacAutopilot */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 77E85F43477BA5BE98AC93ED /* Build configuration list for PBXNativeTarget "MacAutopilot" */;
+			buildPhases = (
+				3A203D4BCA017563B6558516 /* Sources */,
+				B4D51C9951D6BAEC189E4168 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MacAutopilot;
+			packageProductDependencies = (
+				8FF2EC3426FF996A35B951FF /* AutopilotCore */,
+				4C6C024C9585F7102B43F33D /* AutopilotLLM */,
+				E2C1701687B09E7182366316 /* AutopilotAgent */,
+			);
+			productName = MacAutopilot;
+			productReference = BE75A44D29DB0A0EBA24C4E8 /* MacAutopilot.app */;
+			productType = "com.apple.product-type.application";
+		};
+		CA94C5EBDC60AC38645C41FC /* MacAutopilotTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 37A764700D217B12E91828B9 /* Build configuration list for PBXNativeTarget "MacAutopilotTests" */;
+			buildPhases = (
+				4923C7C761AB4A75C51E8104 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				AE8A53344CBE7169566C6C09 /* PBXTargetDependency */,
+			);
+			name = MacAutopilotTests;
+			packageProductDependencies = (
+			);
+			productName = MacAutopilotTests;
+			productReference = A646B4FE57A1CE79B5371FE0 /* MacAutopilotTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		119B7806EE29B7AE054D9ECF /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 2630;
+				TargetAttributes = {
+					4857B33A1BBE12372CE92711 = {
+						ProvisioningStyle = Automatic;
+					};
+					CA94C5EBDC60AC38645C41FC = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 38382C4DD9D7AC4211BA4690 /* Build configuration list for PBXProject "MacAutopilot" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 789BC079D16A74DC9C7896A4;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				68F75A66569323935A09652E /* XCLocalSwiftPackageReference "../AutopilotKit" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 634BFAD61D71ED326BCC7FE0 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				4857B33A1BBE12372CE92711 /* MacAutopilot */,
+				CA94C5EBDC60AC38645C41FC /* MacAutopilotTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		3A203D4BCA017563B6558516 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B18B37A2430BA4993177A607 /* ContentView.swift in Sources */,
+				CE9A5658CB90F9C2375E368C /* MacAutopilotApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4923C7C761AB4A75C51E8104 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CB4671DB015FAA38964052DC /* MacAutopilotTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		AE8A53344CBE7169566C6C09 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4857B33A1BBE12372CE92711 /* MacAutopilot */;
+			targetProxy = 9DC62A9AE4D6C3DE38214B65 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		15433BAF2C5CE88C74252D02 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		25F85DB381C4D91128720E2F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.langqi.MacAutopilotTests;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MacAutopilot.app/Contents/MacOS/MacAutopilot";
+			};
+			name = Debug;
+		};
+		30EC30CDC2523A1103CB3780 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = MacAutopilot/MacAutopilot.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Mac Autopilot";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.langqi.MacAutopilot;
+				PRODUCT_NAME = MacAutopilot;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		4022099C51E883B089679A66 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.langqi.MacAutopilotTests;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MacAutopilot.app/Contents/MacOS/MacAutopilot";
+			};
+			name = Release;
+		};
+		7E4D8D5957DDDE361A05A0FF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = MacAutopilot/MacAutopilot.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Mac Autopilot";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.langqi.MacAutopilot;
+				PRODUCT_NAME = MacAutopilot;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		F1B2BB1F4FC412ABDDE2A990 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		37A764700D217B12E91828B9 /* Build configuration list for PBXNativeTarget "MacAutopilotTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				25F85DB381C4D91128720E2F /* Debug */,
+				4022099C51E883B089679A66 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		38382C4DD9D7AC4211BA4690 /* Build configuration list for PBXProject "MacAutopilot" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F1B2BB1F4FC412ABDDE2A990 /* Debug */,
+				15433BAF2C5CE88C74252D02 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		77E85F43477BA5BE98AC93ED /* Build configuration list for PBXNativeTarget "MacAutopilot" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				30EC30CDC2523A1103CB3780 /* Debug */,
+				7E4D8D5957DDDE361A05A0FF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		68F75A66569323935A09652E /* XCLocalSwiftPackageReference "../AutopilotKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../AutopilotKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		4C6C024C9585F7102B43F33D /* AutopilotLLM */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AutopilotLLM;
+		};
+		8FF2EC3426FF996A35B951FF /* AutopilotCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AutopilotCore;
+		};
+		E2C1701687B09E7182366316 /* AutopilotAgent */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AutopilotAgent;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 119B7806EE29B7AE054D9ECF /* Project object */;
+}
