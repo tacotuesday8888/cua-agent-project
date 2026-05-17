@@ -107,7 +107,7 @@ cua agent project/                  ← git repo (remote: tacotuesday8888/cua-ag
       AutopilotAction/               performs AX actions + synthesized input
       AutopilotMac/                  MacComputer (production ComputerControl) + AppLocator
       AutopilotUI/                   the notch UI layer (PARTIAL — see §6)
-    Tests/                           ~24 tests (Core, LLM, Agent)
+    Tests/                           34 tests (Core, LLM, Agent)
   MacAutopilot.xcodeproj             the macOS app project
   MacAutopilot/                      app target sources (App entry, ContentView, entitlements)
   MacAutopilotTests/
@@ -128,21 +128,23 @@ cua agent project/                  ← git repo (remote: tacotuesday8888/cua-ag
   an actor), the tool catalog, `RiskClassifier` (flags risky actions),
   `ComputerControl` protocol (the seam to macOS), `MockComputer` (test mock),
   `AgentEvent` (observable run events), `UserInteraction` protocol (confirmations
-  + questions). **Agent tools:** `read_tree`, `click_element`, `set_value`,
-  `scroll`, `key`, `screenshot`, `ask_user`, `done`.
+  + questions). **Agent tools:** `list_apps`, `get_app_state`, `click`,
+  `scroll`, `type_text`, `press_key`, `set_value`, `drag`,
+  `perform_secondary_action`, plus orchestration tools `ask_user` and `done`.
 - **AutopilotPerception** — `AccessibilityTreeReader` (traverses an app's
   `AXUIElement` tree → `UITreeSnapshot` + a live element index), and
   `AccessibilityPermission` (checks/requests the Accessibility TCC permission).
 - **AutopilotAction** — `AccessibilityActuator` (AX `AXPress` / set-`AXValue`,
-  plus synthesized `CGEvent` keyboard & scroll), `KeyCodes`.
+  focus, point-click fallback, synthesized keyboard, scroll, and drag events),
+  `KeyCodes`.
 - **AutopilotMac** — `MacComputer`: the production `ComputerControl`, an actor
   that reads via Perception and acts via Action, keyed by the snapshot's element
   ids; screenshots via ScreenCaptureKit. `AppLocator`: finds running apps by
   name / bundle id.
 - **AutopilotUI** — `AgentViewModel` (`@MainActor @Observable` — assembles and
   runs an `AgentSession`, streams events into a display feed, bridges
-  confirmations to the UI; has a `Provider` enum for Z.ai-GLM vs Anthropic),
-  `NotchGeometry` (notch detection + window frames), `NotchWindow` (the
+  confirmations to the UI; has a `Provider` enum for Z.ai-GLM vs Anthropic;
+  stores API keys in Keychain), `NotchGeometry` (notch detection + window frames), `NotchWindow` (the
   borderless, non-activating transparent panel). **The notch VIEWS and
   controller are not yet built — see §6.**
 
@@ -160,14 +162,23 @@ prompt field, live feed) — NOT the notch UI.
 
 - The entire `AutopilotKit` package compiles; the `MacAutopilot` app builds
   (`xcodebuild` BUILD SUCCEEDED).
-- ~24 tests for the AI core; **22 pass, 2 fail** (see §7).
-- All committed to git on `main` (the GLM/Z.ai additions are uncommitted
-  working changes on top of the last commit).
+- `swift test --package-path AutopilotKit` is green: 34 tests pass.
+- The Open Computer Use / Cua-style 9-tool driver surface is implemented and
+  covered by mocks.
+- A real AppKit fixture app plus `AutopilotSmokeCLI` now validates the
+  production `MacComputer` path on a real Mac without an LLM:
+  Accessibility-tree read, target-window match, optional screenshot bytes,
+  click, scroll, direct set value, focused typing, key press, drag, and explicit
+  AX action. Latest live run passed all 9 steps with `--include-screenshot`.
+- API keys entered in the app harness are stored in Keychain, with migration
+  from the old `UserDefaults` keys.
+- All current engine changes are committed on `main`; do not push without the
+  owner's go-ahead.
 
-**Critical caveat:** **nothing has actually run on a real Mac yet.** The tests
-all use mocks. The real accessibility-tree reading, the AX actuation, and the
-LLM loop against a live API have **never executed**. The first real run is the
-single most important next step.
+**Remaining critical caveat:** the LLM-backed app loop has still not completed
+a real user task against a normal third-party app. The low-level AX/action path
+is now smoke-tested, but the perceive → decide → act loop with a live provider
+still needs an interactive run.
 
 ---
 
@@ -182,9 +193,12 @@ single most important next step.
      show / expand / collapse orchestration with the `NotchWindow`.
    - Wiring the notch UI into the app's `@main` (the app currently shows the
      test-harness `ContentView` in a normal window).
-2. **First real end-to-end run** — run the app, grant Accessibility + Screen
-   Recording permissions, give the agent a real task on a real app, and verify
-   the engine actually works. Expect bugs in the real AX/actuation code.
+2. **First LLM-backed end-to-end run** — run the app, grant Accessibility +
+   Screen Recording permissions, enter a provider API key, pick a real target
+   app, give the agent a low-risk task, and verify the full perceive → decide
+   → act → verify loop. The real AX/action layer has fixture smoke coverage now;
+   expect remaining bugs in LLM tool choice, recovery, and app-specific UI
+   interpretation.
 3. **`@app` targeting in the agent** — v1 uses an explicit target-app picker;
    the "agent guesses the app, asks to open it" flow is not built.
 4. **Per-app knowledge profiles** — deferred (future moat).
@@ -192,27 +206,17 @@ single most important next step.
 
 ---
 
-## 7. Known issue — the 2 failing tests
+## 7. Known issues / current risks
 
-`swift test --package-path AutopilotKit` shows 2 failures:
-
-- `AnthropicProviderTests.decodesAnthropicResponse` — fails decoding: missing
-  key `content`.
-- `ZAIProviderTests.decodesZAIResponse` — fails decoding: missing key `choices`.
-
-**Diagnosis:** each provider's decode test receives the *other* provider's
-canned JSON (Anthropic's decoder wants `content`; Z.ai's wants `choices`). It is
-a **test-isolation bug** — the two provider test suites use `URLProtocol` HTTP
-stubs (`StubURLProtocol` and `ZAIStubURLProtocol` in
-`AutopilotKit/Tests/AutopilotLLMTests/AutopilotLLMTests.swift`) and run in
-parallel, and their stub state cross-contaminates. The **providers themselves
-are correct** — the encoding test (`encodesOpenAIStyleToolMessages`), the
-HTTP-error test, and the missing-API-key tests all pass.
-
-**Fix direction:** serialize the HTTP-stub provider tests so they never run
-concurrently — e.g. nest `AnthropicProviderTests` and `ZAIProviderTests` inside
-a single parent suite marked `@Suite(.serialized)`, or give each suite a fully
-private stub and confirm no shared global URL-loading state.
+- The provider test isolation bug is fixed; Anthropic and Z.ai decode tests pass
+  reliably.
+- The real fixture smoke path is green, but it is still a controlled app. The
+  first real third-party app run may surface app-specific AX quirks,
+  focus/activation issues, or model tool-choice problems.
+- `@app` natural-language targeting is not built yet; the app currently uses an
+  explicit target-app picker.
+- The notch UI views/controller are still pending and are intentionally separate
+  from the engine validation work.
 
 ---
 
@@ -222,6 +226,10 @@ private stub and confirm no shared global URL-loading state.
   Silicon.
 - **Build the package:** `swift build --package-path AutopilotKit`
 - **Test the package:** `swift test --package-path AutopilotKit`
+- **Run the real driver smoke fixture:**
+  `swift run --package-path AutopilotKit AutopilotFixtureApp`
+- **Run the real driver smoke CLI:**
+  `swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp --include-screenshot`
 - **Build the app:**
   `xcodebuild -project MacAutopilot.xcodeproj -scheme MacAutopilot -destination 'platform=macOS' build`
 - **Run it:** open `MacAutopilot.xcodeproj` in Xcode and Run. The first time the
@@ -236,12 +244,10 @@ private stub and confirm no shared global URL-loading state.
 
 ## 9. Suggested next steps (in order)
 
-1. Fix the 2 failing tests (§7) so the suite is green.
-2. **Do the first real end-to-end run** — verify the AX reading, the actuation,
-   and the LLM loop actually work on a live app before building more UI. This
-   de-risks everything.
-3. Fix whatever the first run surfaces in the real macOS automation code.
-4. Build the notch UI views + controller (§6.1) per the design in §2.1.
-5. Wire the notch UI into the app's `@main`; retire the test-harness
+1. **Do the first LLM-backed end-to-end run** against a low-risk real app task.
+2. Fix whatever the first LLM-backed run surfaces in prompt/tool choice,
+   recovery, app activation, or app-specific AX behavior.
+3. Build the notch UI views + controller (§6.1) per the design in §2.1.
+4. Wire the notch UI into the app's `@main`; retire the test-harness
    `ContentView`.
-6. Then: `@app` targeting, distribution, and (later) per-app knowledge profiles.
+5. Then: `@app` targeting, distribution, and (later) per-app knowledge profiles.
