@@ -15,7 +15,7 @@ public enum UITreeRenderer {
     ]
 
     /// Render a snapshot into indented text, e.g.:
-    /// `[e4] AXTextField "Search" value:"jazz" (focused)`
+    /// `[4] AXTextField "Search" value:"jazz" (focused)`
     public static func compactText(_ snapshot: UITreeSnapshot, maxElements: Int = 400) -> String {
         var lines: [String] = ["App: \(snapshot.appName)"]
         if let window = snapshot.windowTitle, !window.isEmpty {
@@ -58,7 +58,7 @@ public enum UITreeRenderer {
         let isInteresting = hasLabel || hasValue || interactiveRoles.contains(element.role)
         guard isInteresting else { return nil }
 
-        var parts = ["[\(element.id)]", element.role]
+        var parts = ["[\(displayID(for: element))]", element.role]
         if let subrole = element.subrole, !subrole.isEmpty {
             parts.append("subrole:\(subrole)")
         }
@@ -89,5 +89,11 @@ public enum UITreeRenderer {
 
     private static func truncate(_ string: String, to length: Int) -> String {
         string.count <= length ? string : String(string.prefix(length)) + "…"
+    }
+
+    private static func displayID(for element: UIElement) -> String {
+        guard element.id.hasPrefix("e") else { return element.id }
+        let index = element.id.dropFirst()
+        return index.isEmpty ? element.id : String(index)
     }
 }

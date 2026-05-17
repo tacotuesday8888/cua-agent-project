@@ -85,7 +85,7 @@ struct UITreeRendererTests {
         let text = UITreeRenderer.compactText(snapshot)
         #expect(text.contains("App: Music"))
         #expect(text.contains("Window: Library"))
-        #expect(text.contains("[e2]"))
+        #expect(text.contains("[2]"))
         #expect(text.contains("\"Search\""))
         #expect(text.contains("value:\"jazz\""))
         #expect(text.contains("focused"))

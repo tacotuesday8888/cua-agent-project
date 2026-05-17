@@ -33,6 +33,18 @@ public struct AccessibilityActuator: Sendable {
         throw ActuationError.actionFailed("press failed (\(failures.joined(separator: ", ")))")
     }
 
+    /// Perform a specific advertised accessibility action.
+    public func perform(action: String, on element: AXUIElement) throws {
+        let advertisedActions = actionNames(of: element)
+        guard advertisedActions.contains(action) else {
+            throw ActuationError.actionFailed("\(action) is not available on this element")
+        }
+        let status = AXUIElementPerformAction(element, action as CFString)
+        guard status == .success else {
+            throw ActuationError.actionFailed("\(action) failed (AXError \(status.rawValue))")
+        }
+    }
+
     /// Replace the text value of an element (text field / text area).
     public func setValue(_ element: AXUIElement, to value: String) throws {
         guard isAttributeSettable(kAXValueAttribute, on: element) else {
@@ -66,6 +78,34 @@ public struct AccessibilityActuator: Sendable {
         post(keyUp, pid: pid)
     }
 
+    /// Type Unicode text into the target process.
+    public func typeText(_ text: String, pid: pid_t? = nil) throws {
+        for character in text {
+            let scalars = Array(String(character).utf16)
+            guard
+                let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
+                let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
+            else {
+                throw ActuationError.actionFailed("could not create text event")
+            }
+
+            scalars.withUnsafeBufferPointer { buffer in
+                keyDown.keyboardSetUnicodeString(
+                    stringLength: buffer.count,
+                    unicodeString: buffer.baseAddress
+                )
+                keyUp.keyboardSetUnicodeString(
+                    stringLength: buffer.count,
+                    unicodeString: buffer.baseAddress
+                )
+            }
+            keyDown.flags = []
+            keyUp.flags = []
+            post(keyDown, pid: pid)
+            post(keyUp, pid: pid)
+        }
+    }
+
     /// Scroll a number of line-steps in a direction.
     public func scroll(
         direction: ScrollDirection,
@@ -96,6 +136,37 @@ public struct AccessibilityActuator: Sendable {
             event.location = point
         }
         post(event, pid: pid)
+    }
+
+    /// Drag between two screen-space points.
+    public func drag(from start: CGPoint, to end: CGPoint, pid: pid_t? = nil) throws {
+        let source = CGEventSource(stateID: .combinedSessionState)
+        guard
+            let mouseDown = CGEvent(
+                mouseEventSource: source,
+                mouseType: .leftMouseDown,
+                mouseCursorPosition: start,
+                mouseButton: .left
+            ),
+            let mouseDragged = CGEvent(
+                mouseEventSource: source,
+                mouseType: .leftMouseDragged,
+                mouseCursorPosition: end,
+                mouseButton: .left
+            ),
+            let mouseUp = CGEvent(
+                mouseEventSource: source,
+                mouseType: .leftMouseUp,
+                mouseCursorPosition: end,
+                mouseButton: .left
+            )
+        else {
+            throw ActuationError.actionFailed("could not create drag event")
+        }
+
+        post(mouseDown, pid: pid)
+        post(mouseDragged, pid: pid)
+        post(mouseUp, pid: pid)
     }
 
     private func post(_ event: CGEvent, pid: pid_t?) {

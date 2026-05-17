@@ -65,12 +65,27 @@ public actor MacComputer: ComputerControl {
         return scan.snapshot
     }
 
+    public func listApps() async throws -> [ComputerAppInfo] {
+        [
+            ComputerAppInfo(
+                name: appName,
+                bundleIdentifier: bundleIdentifier,
+                processIdentifier: pid,
+                isTarget: true
+            )
+        ]
+    }
+
     public func click(elementID: String) async throws {
         try actuator.press(element(for: elementID))
     }
 
     public func setValue(elementID: String, value: String) async throws {
         try actuator.setValue(element(for: elementID), to: value)
+    }
+
+    public func typeText(_ text: String) async throws {
+        try actuator.typeText(text, pid: pid)
     }
 
     public func scroll(
@@ -84,6 +99,16 @@ public actor MacComputer: ComputerControl {
 
     public func pressKey(_ key: KeyPress) async throws {
         try actuator.pressKey(key, pid: pid)
+    }
+
+    public func drag(fromElementID: String, toElementID: String) async throws {
+        let start = try center(of: fromElementID)
+        let end = try center(of: toElementID)
+        try actuator.drag(from: start, to: end, pid: pid)
+    }
+
+    public func performSecondaryAction(elementID: String, action: String) async throws {
+        try actuator.perform(action: action, on: element(for: elementID))
     }
 
     public func captureScreenshot() async throws -> Data {
@@ -123,6 +148,13 @@ public actor MacComputer: ComputerControl {
             throw MacComputerError.unknownElement(id)
         }
         return element
+    }
+
+    private func center(of id: String) throws -> CGPoint {
+        guard let element = latestSnapshot?.element(id: id) else {
+            throw MacComputerError.unknownElement(id)
+        }
+        return element.frame.center
     }
 
     private static func capture(window: SCWindow) async throws -> Data {

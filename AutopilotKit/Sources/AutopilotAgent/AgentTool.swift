@@ -1,13 +1,20 @@
 import AutopilotLLM
 
 /// The tools the agent can invoke during a run.
+///
+/// The computer-control surface follows the proven 9-tool shape used by
+/// Open Computer Use / Cua. `ask_user` and `done` are Mac Autopilot
+/// orchestration tools layered around that driver surface.
 public enum AgentTool: String, CaseIterable, Sendable {
-    case readTree = "read_tree"
-    case clickElement = "click_element"
-    case setValue = "set_value"
+    case listApps = "list_apps"
+    case getAppState = "get_app_state"
+    case click = "click"
     case scroll = "scroll"
-    case pressKey = "key"
-    case screenshot = "screenshot"
+    case typeText = "type_text"
+    case pressKey = "press_key"
+    case setValue = "set_value"
+    case drag = "drag"
+    case performSecondaryAction = "perform_secondary_action"
     case askUser = "ask_user"
     case done = "done"
 }
@@ -16,14 +23,24 @@ public enum AgentTool: String, CaseIterable, Sendable {
 public enum ToolCatalog {
     /// All tool definitions, in a stable order.
     public static let all: [ToolDefinition] = [
-        readTree, clickElement, setValue, scroll, pressKey, screenshot, askUser, done
+        listApps,
+        getAppState,
+        click,
+        scroll,
+        typeText,
+        pressKey,
+        setValue,
+        drag,
+        performSecondaryAction,
+        askUser,
+        done
     ]
 
-    static let readTree = ToolDefinition(
-        name: AgentTool.readTree.rawValue,
+    static let listApps = ToolDefinition(
+        name: AgentTool.listApps.rawValue,
         description: """
-        Capture the current accessibility tree of the target app. Use this to \
-        see the app's state before deciding the next action.
+        List the apps available to the computer-use driver. In Mac Autopilot's \
+        current single-app mode, this returns the selected target app.
         """,
         inputSchema: [
             "type": "object",
@@ -32,55 +49,52 @@ public enum ToolCatalog {
         ]
     )
 
-    static let clickElement = ToolDefinition(
-        name: AgentTool.clickElement.rawValue,
+    static let getAppState = ToolDefinition(
+        name: AgentTool.getAppState.rawValue,
         description: """
-        Press or activate a UI element — a button, link, menu item, row, or \
-        checkbox. Provide the element id from the accessibility tree.
+        Capture the current state of the target app. Returns the accessibility \
+        tree, and optionally a target-window screenshot when visual content is \
+        needed.
         """,
         inputSchema: [
             "type": "object",
             "properties": [
-                "element_id": [
-                    "type": "string",
-                    "description": "The id of the element to click, e.g. \"e12\"."
+                "include_screenshot": [
+                    "type": "boolean",
+                    "description": "Set true only when the accessibility tree is insufficient."
                 ]
             ],
-            "required": ["element_id"]
+            "required": []
         ]
     )
 
-    static let setValue = ToolDefinition(
-        name: AgentTool.setValue.rawValue,
+    static let click = ToolDefinition(
+        name: AgentTool.click.rawValue,
         description: """
-        Set the text value of a text field or text area. This replaces the \
-        field's current contents.
+        Press or activate a UI element, such as a button, link, row, menu item, \
+        or checkbox. Provide the element_index from get_app_state.
         """,
         inputSchema: [
             "type": "object",
             "properties": [
-                "element_id": [
-                    "type": "string",
-                    "description": "The id of the text field."
-                ],
-                "value": [
-                    "type": "string",
-                    "description": "The text to place into the field."
+                "element_index": [
+                    "type": "integer",
+                    "description": "The element index from the app state, e.g. 12."
                 ]
             ],
-            "required": ["element_id", "value"]
+            "required": ["element_index"]
         ]
     )
 
     static let scroll = ToolDefinition(
         name: AgentTool.scroll.rawValue,
-        description: "Scroll the app, optionally within a specific scrollable element.",
+        description: "Scroll the target app, optionally within a specific scrollable element.",
         inputSchema: [
             "type": "object",
             "properties": [
-                "element_id": [
-                    "type": "string",
-                    "description": "Optional id of the element to scroll within."
+                "element_index": [
+                    "type": "integer",
+                    "description": "Optional element index to scroll within."
                 ],
                 "direction": [
                     "type": "string",
@@ -89,18 +103,40 @@ public enum ToolCatalog {
                 ],
                 "amount": [
                     "type": "integer",
-                    "description": "Number of scroll steps (defaults to 3)."
+                    "description": "Number of scroll steps. Defaults to 3."
                 ]
             ],
             "required": ["direction"]
         ]
     )
 
+    static let typeText = ToolDefinition(
+        name: AgentTool.typeText.rawValue,
+        description: """
+        Type text into the target app's currently-focused editable element. If \
+        element_index is provided, the driver first activates that element.
+        """,
+        inputSchema: [
+            "type": "object",
+            "properties": [
+                "element_index": [
+                    "type": "integer",
+                    "description": "Optional editable element to focus before typing."
+                ],
+                "text": [
+                    "type": "string",
+                    "description": "The text to type."
+                ]
+            ],
+            "required": ["text"]
+        ]
+    )
+
     static let pressKey = ToolDefinition(
         name: AgentTool.pressKey.rawValue,
         description: """
-        Send a keyboard key press to the app, e.g. "return", "escape", "tab". \
-        Optionally include modifier keys.
+        Send a keyboard key press to the target app, e.g. "return", "escape", \
+        or "tab". Optionally include modifier keys.
         """,
         inputSchema: [
             "type": "object",
@@ -122,16 +158,66 @@ public enum ToolCatalog {
         ]
     )
 
-    static let screenshot = ToolDefinition(
-        name: AgentTool.screenshot.rawValue,
+    static let setValue = ToolDefinition(
+        name: AgentTool.setValue.rawValue,
         description: """
-        Capture a screenshot of the app. Use only when the accessibility tree \
-        is not enough to understand the UI, such as canvas or image content.
+        Set the text value of a text field or text area. This replaces the \
+        field's current contents.
         """,
         inputSchema: [
             "type": "object",
-            "properties": [:],
-            "required": []
+            "properties": [
+                "element_index": [
+                    "type": "integer",
+                    "description": "The editable element index from the app state."
+                ],
+                "value": [
+                    "type": "string",
+                    "description": "The text to place into the field."
+                ]
+            ],
+            "required": ["element_index", "value"]
+        ]
+    )
+
+    static let drag = ToolDefinition(
+        name: AgentTool.drag.rawValue,
+        description: "Drag from one captured element to another captured element.",
+        inputSchema: [
+            "type": "object",
+            "properties": [
+                "from_element_index": [
+                    "type": "integer",
+                    "description": "The element index where the drag starts."
+                ],
+                "to_element_index": [
+                    "type": "integer",
+                    "description": "The element index where the drag ends."
+                ]
+            ],
+            "required": ["from_element_index", "to_element_index"]
+        ]
+    )
+
+    static let performSecondaryAction = ToolDefinition(
+        name: AgentTool.performSecondaryAction.rawValue,
+        description: """
+        Perform a non-primary accessibility action exposed by an element, such \
+        as AXShowMenu or AXIncrement. Use only actions shown in get_app_state.
+        """,
+        inputSchema: [
+            "type": "object",
+            "properties": [
+                "element_index": [
+                    "type": "integer",
+                    "description": "The element index from the app state."
+                ],
+                "action": [
+                    "type": "string",
+                    "description": "The exact AX action name to perform."
+                ]
+            ],
+            "required": ["element_index", "action"]
         ]
     )
 

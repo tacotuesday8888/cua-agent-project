@@ -22,12 +22,13 @@ public struct RiskClassifier: Sendable {
         snapshot: UITreeSnapshot?
     ) -> RiskLevel {
         switch tool {
-        case .readTree, .screenshot, .askUser, .done, .scroll, .setValue, .pressKey:
+        case .listApps, .getAppState, .askUser, .done, .scroll, .setValue,
+             .typeText, .pressKey, .drag:
             // Reading, scrolling, typing, and key presses are reversible.
             return .safe
-        case .clickElement:
+        case .click, .performSecondaryAction:
             guard
-                let elementID = input["element_id"]?.stringValue,
+                let elementID = elementID(from: input),
                 let element = snapshot?.element(id: elementID)
             else {
                 return .safe
@@ -38,5 +39,18 @@ public struct RiskClassifier: Sendable {
                 .lowercased()
             return Self.riskyKeywords.contains(where: haystack.contains) ? .risky : .safe
         }
+    }
+
+    private func elementID(from input: JSONValue) -> String? {
+        if let elementID = input["element_id"]?.stringValue {
+            return elementID
+        }
+        if let index = input["element_index"]?.intValue {
+            return "e\(index)"
+        }
+        if let index = input["element_index"]?.stringValue {
+            return index.hasPrefix("e") ? index : "e\(index)"
+        }
+        return nil
     }
 }

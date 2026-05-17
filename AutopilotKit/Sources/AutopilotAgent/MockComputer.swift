@@ -19,6 +19,17 @@ public actor MockComputer: ComputerControl {
         snapshot
     }
 
+    public func listApps() async throws -> [ComputerAppInfo] {
+        [
+            ComputerAppInfo(
+                name: appName,
+                bundleIdentifier: snapshot.bundleIdentifier,
+                processIdentifier: snapshot.processIdentifier,
+                isTarget: true
+            )
+        ]
+    }
+
     public func click(elementID: String) async throws {
         guard snapshot.element(id: elementID) != nil else {
             throw AgentError.computer("no element with id \(elementID)")
@@ -39,12 +50,36 @@ public actor MockComputer: ComputerControl {
         actionLog.append("setValue:\(elementID)=\(value)")
     }
 
+    public func typeText(_ text: String) async throws {
+        actionLog.append("typeText:\(text)")
+    }
+
     public func scroll(elementID: String?, direction: ScrollDirection, amount: Int) async throws {
         actionLog.append("scroll:\(direction.rawValue):\(amount)")
     }
 
     public func pressKey(_ key: KeyPress) async throws {
         actionLog.append("key:\(key.key)")
+    }
+
+    public func drag(fromElementID: String, toElementID: String) async throws {
+        guard snapshot.element(id: fromElementID) != nil else {
+            throw AgentError.computer("no element with id \(fromElementID)")
+        }
+        guard snapshot.element(id: toElementID) != nil else {
+            throw AgentError.computer("no element with id \(toElementID)")
+        }
+        actionLog.append("drag:\(fromElementID)->\(toElementID)")
+    }
+
+    public func performSecondaryAction(elementID: String, action: String) async throws {
+        guard let element = snapshot.element(id: elementID) else {
+            throw AgentError.computer("no element with id \(elementID)")
+        }
+        guard element.actions.contains(action) else {
+            throw AgentError.computer("\(action) is not available on \(elementID)")
+        }
+        actionLog.append("secondary:\(elementID):\(action)")
     }
 
     public func captureScreenshot() async throws -> Data {

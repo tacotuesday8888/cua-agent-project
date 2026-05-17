@@ -8,16 +8,16 @@ struct LLMResponseTests {
         let response = LLMResponse(
             content: [
                 .text("Working on it."),
-                .toolUse(ToolUse(id: "t1", name: "click_element",
-                                 input: ["element_id": "e3"]))
+                .toolUse(ToolUse(id: "t1", name: "click",
+                                 input: ["element_index": 3]))
             ],
             stopReason: .toolUse,
             usage: .init(inputTokens: 10, outputTokens: 5)
         )
         #expect(response.text == "Working on it.")
         #expect(response.toolUses.count == 1)
-        #expect(response.toolUses.first?.name == "click_element")
-        #expect(response.toolUses.first?.input["element_id"]?.stringValue == "e3")
+        #expect(response.toolUses.first?.name == "click")
+        #expect(response.toolUses.first?.input["element_index"]?.intValue == 3)
     }
 
     @Test func textOnlyResponseHasNoToolUses() {

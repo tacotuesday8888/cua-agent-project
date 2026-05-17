@@ -194,20 +194,39 @@ public actor AgentSession {
     /// Perform a computer action and return the tool-result content.
     private func execute(tool: AgentTool, input: JSONValue) async throws -> [ToolResult.Content] {
         switch tool {
-        case .readTree:
-            let tree = try await observeTree()
-            return [.text(UITreeRenderer.compactText(tree))]
+        case .listApps:
+            let apps = try await computer.listApps()
+            return [.text(renderApps(apps))]
 
-        case .clickElement:
-            let id = try requireString(input, "element_id", tool: tool)
+        case .getAppState:
+            let includeScreenshot = input["include_screenshot"]?.boolValue ?? false
+            let state = try await observeState(includeScreenshot: includeScreenshot)
+            var content: [ToolResult.Content] = [
+                .text(UITreeRenderer.compactText(state.snapshot))
+            ]
+            if let screenshot = state.screenshot {
+                content.append(.image(ImageBlock(base64Data: screenshot.base64EncodedString())))
+            }
+            return content
+
+        case .click:
+            let id = try requireElementID(input, tool: tool)
             try await computer.click(elementID: id)
             return try await observedResult("Clicked \(id).")
 
         case .setValue:
-            let id = try requireString(input, "element_id", tool: tool)
+            let id = try requireElementID(input, tool: tool)
             let value = try requireString(input, "value", tool: tool)
             try await computer.setValue(elementID: id, value: value)
             return try await observedResult("Set \(id) to \"\(value)\".")
+
+        case .typeText:
+            if let id = try optionalElementID(input, primaryKey: "element_index") {
+                try await computer.click(elementID: id)
+            }
+            let text = try requireString(input, "text", tool: tool)
+            try await computer.typeText(text)
+            return try await observedResult("Typed text.")
 
         case .scroll:
             let directionRaw = try requireString(input, "direction", tool: tool)
@@ -219,7 +238,7 @@ public actor AgentSession {
             }
             let amount = input["amount"]?.intValue ?? 3
             try await computer.scroll(
-                elementID: input["element_id"]?.stringValue,
+                elementID: try optionalElementID(input, primaryKey: "element_index"),
                 direction: direction,
                 amount: amount
             )
@@ -233,12 +252,17 @@ public actor AgentSession {
             try await computer.pressKey(KeyPress(key: key, modifiers: modifiers))
             return try await observedResult("Pressed \(key).")
 
-        case .screenshot:
-            let data = try await computer.captureScreenshot()
-            return [
-                .text("Screenshot of \(computer.appName):"),
-                .image(ImageBlock(base64Data: data.base64EncodedString()))
-            ]
+        case .drag:
+            let from = try requireElementID(input, key: "from_element_index", tool: tool)
+            let to = try requireElementID(input, key: "to_element_index", tool: tool)
+            try await computer.drag(fromElementID: from, toElementID: to)
+            return try await observedResult("Dragged \(from) to \(to).")
+
+        case .performSecondaryAction:
+            let id = try requireElementID(input, tool: tool)
+            let action = try requireString(input, "action", tool: tool)
+            try await computer.performSecondaryAction(elementID: id, action: action)
+            return try await observedResult("Performed \(action) on \(id).")
 
         case .askUser, .done:
             return []  // handled in `dispatch`
@@ -248,10 +272,14 @@ public actor AgentSession {
     // MARK: - Helpers
 
     private func observeTree() async throws -> UITreeSnapshot {
-        let tree = try await computer.captureTree()
-        latestSnapshot = tree
-        emit(.observedTree(elementCount: tree.root.flattened.count))
-        return tree
+        (try await observeState(includeScreenshot: false)).snapshot
+    }
+
+    private func observeState(includeScreenshot: Bool) async throws -> ComputerAppState {
+        let state = try await computer.getAppState(includeScreenshot: includeScreenshot)
+        latestSnapshot = state.snapshot
+        emit(.observedTree(elementCount: state.snapshot.root.flattened.count))
+        return state
     }
 
     /// Pair a short message with a freshly-read tree, so the model can verify
@@ -297,24 +325,76 @@ public actor AgentSession {
         return value
     }
 
+    private func requireElementID(
+        _ input: JSONValue,
+        key: String = "element_index",
+        tool: AgentTool
+    ) throws -> String {
+        if let id = try optionalElementID(input, primaryKey: key) {
+            return id
+        }
+        throw AgentError.invalidToolInput(tool: tool.rawValue, detail: "missing \(key)")
+    }
+
+    private func optionalElementID(_ input: JSONValue, primaryKey: String) throws -> String? {
+        if let explicitID = input["element_id"]?.stringValue {
+            return explicitID
+        }
+        guard let raw = input[primaryKey] else { return nil }
+        if let index = raw.intValue {
+            return "e\(index)"
+        }
+        if let string = raw.stringValue {
+            return string.hasPrefix("e") ? string : "e\(string)"
+        }
+        throw AgentError.invalidToolInput(
+            tool: primaryKey,
+            detail: "\(primaryKey) must be an integer or string"
+        )
+    }
+
+    private func renderApps(_ apps: [ComputerAppInfo]) -> String {
+        guard !apps.isEmpty else { return "No apps available." }
+        return apps.map { app in
+            var parts = [app.name]
+            if let bundleIdentifier = app.bundleIdentifier {
+                parts.append("bundle:\(bundleIdentifier)")
+            }
+            if let processIdentifier = app.processIdentifier {
+                parts.append("pid:\(processIdentifier)")
+            }
+            if app.isTarget {
+                parts.append("target")
+            }
+            return parts.joined(separator: " ")
+        }
+        .joined(separator: "\n")
+    }
+
     private func actionSummary(tool: AgentTool, input: JSONValue) -> String {
         switch tool {
-        case .clickElement:
-            let id = input["element_id"]?.stringValue ?? "?"
+        case .click:
+            let id = (try? optionalElementID(input, primaryKey: "element_index")) ?? "?"
             if let label = latestSnapshot?.element(id: id)?.label, !label.isEmpty {
                 return "Click \"\(label)\""
             }
             return "Click \(id)"
         case .setValue:
             return "Type \"\(input["value"]?.stringValue ?? "")\""
+        case .typeText:
+            return "Type text"
         case .scroll:
             return "Scroll \(input["direction"]?.stringValue ?? "")"
         case .pressKey:
             return "Press \(input["key"]?.stringValue ?? "key")"
-        case .screenshot:
-            return "Take a screenshot"
-        case .readTree:
+        case .listApps:
+            return "List apps"
+        case .getAppState:
             return "Read the screen"
+        case .drag:
+            return "Drag"
+        case .performSecondaryAction:
+            return "Perform \(input["action"]?.stringValue ?? "secondary action")"
         case .askUser:
             return "Ask a question"
         case .done:

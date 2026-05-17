@@ -13,8 +13,8 @@ struct RiskClassifierTests {
 
     @Test func destructiveButtonIsRisky() {
         let risk = RiskClassifier().assess(
-            tool: .clickElement,
-            input: ["element_id": "e2"],
+            tool: .click,
+            input: ["element_index": 2],
             snapshot: snapshot(buttonLabel: "Delete Playlist")
         )
         #expect(risk == .risky)
@@ -22,8 +22,8 @@ struct RiskClassifierTests {
 
     @Test func ordinaryButtonIsSafe() {
         let risk = RiskClassifier().assess(
-            tool: .clickElement,
-            input: ["element_id": "e2"],
+            tool: .click,
+            input: ["element_index": 2],
             snapshot: snapshot(buttonLabel: "Play")
         )
         #expect(risk == .safe)
@@ -31,16 +31,37 @@ struct RiskClassifierTests {
 
     @Test func nonClickToolsAreSafe() {
         let classifier = RiskClassifier()
-        #expect(classifier.assess(tool: .readTree, input: [:], snapshot: nil) == .safe)
+        #expect(classifier.assess(tool: .getAppState, input: [:], snapshot: nil) == .safe)
         #expect(classifier.assess(tool: .setValue, input: [:], snapshot: nil) == .safe)
         #expect(classifier.assess(tool: .scroll, input: [:], snapshot: nil) == .safe)
+    }
+}
+
+struct ToolCatalogTests {
+    @Test func exposesComputerUseToolSurface() {
+        let names = Set(ToolCatalog.all.map(\.name))
+        #expect(names.isSuperset(of: Set([
+            "list_apps",
+            "get_app_state",
+            "click",
+            "scroll",
+            "type_text",
+            "press_key",
+            "set_value",
+            "drag",
+            "perform_secondary_action"
+        ])))
+        #expect(!names.contains("read_tree"))
+        #expect(!names.contains("click_element"))
+        #expect(!names.contains("key"))
+        #expect(!names.contains("screenshot"))
     }
 }
 
 struct AgentSessionTests {
     private func musicComputer() -> MockComputer {
         let field = UIElement(id: "e2", role: "AXTextField", label: "Search", value: "")
-        let button = UIElement(id: "e3", role: "AXButton", label: "Play")
+        let button = UIElement(id: "e3", role: "AXButton", label: "Play", actions: ["AXShowMenu"])
         let root = UIElement(id: "e1", role: "AXWindow", label: "Music",
                              children: [field, button])
         return MockComputer(appName: "Music", root: root, windowTitle: "Library")
@@ -57,8 +78,8 @@ struct AgentSessionTests {
     @Test func runsToolSequenceToCompletion() async {
         let llm = ScriptedLLMProvider([
             toolResponse(id: "t1", tool: "set_value",
-                         input: ["element_id": "e2", "value": "jazz"]),
-            toolResponse(id: "t2", tool: "click_element", input: ["element_id": "e3"]),
+                         input: ["element_index": 2, "value": "jazz"]),
+            toolResponse(id: "t2", tool: "click", input: ["element_index": 3]),
             toolResponse(id: "t3", tool: "done", input: ["summary": "Played jazz."])
         ])
         let computer = musicComputer()
@@ -77,12 +98,44 @@ struct AgentSessionTests {
         #expect(actions == ["setValue:e2=jazz", "click:e3"])
     }
 
+    @Test func runsComputerUseToolSurface() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "t1", tool: "list_apps", input: [:]),
+            toolResponse(id: "t2", tool: "get_app_state", input: [:]),
+            toolResponse(id: "t3", tool: "type_text", input: ["text": "blue note"]),
+            toolResponse(id: "t4", tool: "press_key", input: ["key": "return"]),
+            toolResponse(id: "t5", tool: "drag",
+                         input: ["from_element_index": 2, "to_element_index": 3]),
+            toolResponse(id: "t6", tool: "perform_secondary_action",
+                         input: ["element_index": 3, "action": "AXShowMenu"]),
+            toolResponse(id: "t7", tool: "done", input: ["summary": "Done."])
+        ])
+        let computer = musicComputer()
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: "test", maxSteps: 10)
+        )
+
+        let outcome = await session.run(task: "exercise tools")
+        #expect(outcome.status == .completed)
+
+        let actions = await computer.performedActions
+        #expect(actions == [
+            "typeText:blue note",
+            "key:return",
+            "drag:e2->e3",
+            "secondary:e3:AXShowMenu"
+        ])
+    }
+
     @Test func deniedRiskyActionIsNotPerformed() async {
         let deleteButton = UIElement(id: "e2", role: "AXButton", label: "Delete Playlist")
         let root = UIElement(id: "e1", role: "AXWindow", children: [deleteButton])
         let computer = MockComputer(appName: "Music", root: root)
         let llm = ScriptedLLMProvider([
-            toolResponse(id: "t1", tool: "click_element", input: ["element_id": "e2"]),
+            toolResponse(id: "t1", tool: "click", input: ["element_index": 2]),
             toolResponse(id: "t2", tool: "done", input: ["summary": "Did not delete."])
         ])
         let session = AgentSession(
