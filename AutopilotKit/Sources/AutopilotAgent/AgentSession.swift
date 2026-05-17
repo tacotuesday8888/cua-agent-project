@@ -94,6 +94,8 @@ public actor AgentSession {
             return await storeExplicitMemories(explicitMemories)
         }
 
+        await computer.prepare()
+
         let diagnostics = await computer.diagnose()
         emit(.diagnostics(diagnostics))
         guard diagnostics.isReady else {

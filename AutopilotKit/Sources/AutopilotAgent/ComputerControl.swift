@@ -149,6 +149,13 @@ public protocol ComputerControl: Sendable {
     /// The name of the app this controller operates.
     var appName: String { get }
 
+    /// Bring the target app forward and ready it for a run.
+    ///
+    /// Called once before `diagnose()`. The default is a no-op; the macOS
+    /// driver uses it to activate and unhide the target app so input and
+    /// window reads land on a frontmost window.
+    func prepare() async
+
     /// Check whether the driver can read and control the selected target app.
     func diagnose() async -> ComputerDiagnostics
 
@@ -190,6 +197,8 @@ public protocol ComputerControl: Sendable {
 }
 
 public extension ComputerControl {
+    func prepare() async {}
+
     func diagnose() async -> ComputerDiagnostics {
         ComputerDiagnostics(appName: appName, checks: [
             ComputerDiagnosticCheck(

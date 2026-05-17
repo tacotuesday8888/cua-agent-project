@@ -89,6 +89,10 @@ let package = Package(
             dependencies: ["AutopilotAgent", "AutopilotCore", "AutopilotLLM", "AutopilotMemory"]
         ),
         .testTarget(
+            name: "AutopilotMacTests",
+            dependencies: ["AutopilotMac", "AutopilotAgent"]
+        ),
+        .testTarget(
             name: "AutopilotUITests",
             dependencies: ["AutopilotUI"]
         )
