@@ -182,6 +182,83 @@ struct AnthropicProviderTests {
         }
     }
 
+    @Test func encodesAnthropicRequestWithPromptCaching() async throws {
+        StubURLProtocol.capturedRequest = nil
+        StubURLProtocol.capturedBody = nil
+        StubURLProtocol.responder = { request in
+            let http = HTTPURLResponse(url: request.url!, statusCode: 200,
+                                       httpVersion: nil, headerFields: nil)!
+            return (http, Data(Self.cannedResponse.utf8))
+        }
+        defer {
+            StubURLProtocol.responder = nil
+            StubURLProtocol.capturedRequest = nil
+            StubURLProtocol.capturedBody = nil
+        }
+
+        let tool = ToolDefinition(
+            name: "done",
+            description: "Finish the task.",
+            inputSchema: [
+                "type": "object",
+                "properties": ["summary": ["type": "string"]],
+                "required": ["summary"]
+            ]
+        )
+        _ = try await makeProvider().send(LLMRequest(
+            model: "claude-test",
+            system: "sys",
+            messages: [
+                .user("hello"),
+                LLMMessage(role: .assistant, content: [
+                    .text("I will finish."),
+                    .toolUse(ToolUse(id: "tu_1", name: "done", input: ["summary": "ok"]))
+                ]),
+                LLMMessage(role: .user, content: [
+                    .toolResult(ToolResult(toolUseID: "tu_1", text: "Done."))
+                ])
+            ],
+            tools: [tool],
+            maxTokens: 256
+        ))
+
+        let request = try #require(StubURLProtocol.capturedRequest)
+        #expect(request.value(forHTTPHeaderField: "x-api-key") == "test-key")
+        #expect(request.value(forHTTPHeaderField: "anthropic-version") == "2023-06-01")
+
+        let body = try #require(StubURLProtocol.capturedBody)
+        let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        let payload = try #require(json)
+
+        #expect(payload["model"] as? String == "claude-test")
+        #expect(payload["max_tokens"] as? Int == 256)
+
+        // The system prompt is a text-block array carrying a cache breakpoint.
+        let system = try #require(payload["system"] as? [[String: Any]])
+        #expect(system.first?["type"] as? String == "text")
+        #expect(system.first?["text"] as? String == "sys")
+        let systemCache = system.first?["cache_control"] as? [String: Any]
+        #expect(systemCache?["type"] as? String == "ephemeral")
+
+        // Messages keep Anthropic's tool_use / tool_result block shapes.
+        let messages = try #require(payload["messages"] as? [[String: Any]])
+        #expect(messages.map { $0["role"] as? String } == ["user", "assistant", "user"])
+        let assistantBlocks = try #require(messages[1]["content"] as? [[String: Any]])
+        #expect(assistantBlocks.contains {
+            $0["type"] as? String == "tool_use" && $0["id"] as? String == "tu_1"
+        })
+        let toolResultBlocks = try #require(messages[2]["content"] as? [[String: Any]])
+        #expect(toolResultBlocks.first?["type"] as? String == "tool_result")
+        #expect(toolResultBlocks.first?["tool_use_id"] as? String == "tu_1")
+
+        // The final tool definition carries the other cache breakpoint.
+        let tools = try #require(payload["tools"] as? [[String: Any]])
+        #expect(tools.first?["name"] as? String == "done")
+        #expect(tools.first?["input_schema"] != nil)
+        let toolCache = tools.last?["cache_control"] as? [String: Any]
+        #expect(toolCache?["type"] as? String == "ephemeral")
+    }
+
     private static let cannedResponse = """
     {
       "id": "msg_1",
@@ -453,14 +530,19 @@ struct ZAIProviderTests {
     }
 }
 
-/// A `URLProtocol` that returns a canned response, for offline provider tests.
+/// A `URLProtocol` that returns a canned response and captures the outbound
+/// request, for offline provider tests.
 final class StubURLProtocol: URLProtocol {
     nonisolated(unsafe) static var responder: (@Sendable (URLRequest) -> (HTTPURLResponse, Data))?
+    nonisolated(unsafe) static var capturedRequest: URLRequest?
+    nonisolated(unsafe) static var capturedBody: Data?
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
+        Self.capturedRequest = request
+        Self.capturedBody = Self.bodyData(from: request)
         guard let responder = Self.responder else {
             client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
             return
@@ -472,6 +554,27 @@ final class StubURLProtocol: URLProtocol {
     }
 
     override func stopLoading() {}
+
+    private static func bodyData(from request: URLRequest) -> Data? {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return nil }
+
+        stream.open()
+        defer { stream.close() }
+
+        var data = Data()
+        let bufferSize = 4096
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        defer { buffer.deallocate() }
+
+        while stream.hasBytesAvailable {
+            let count = stream.read(buffer, maxLength: bufferSize)
+            if count < 0 { return nil }
+            if count == 0 { break }
+            data.append(buffer, count: count)
+        }
+        return data
+    }
 }
 
 /// Separate stub so Z.ai provider tests can run independently from Anthropic tests.
