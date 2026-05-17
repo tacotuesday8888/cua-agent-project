@@ -95,6 +95,13 @@ struct MacDriverDiagnosticsTests {
         #expect(ComputerDiagnostics(appName: "TextEdit", checks: checks).isReady)
     }
 
+    @Test func failedWindowProbeFails() {
+        let checks = MacDriverDiagnostics.checks(for: inputs(window: .failed("boom")))
+        let tree = check("accessibility-tree", in: checks)
+        #expect(tree?.status == .failed)
+        #expect(tree?.detail.contains("boom") == true)
+    }
+
     @Test func windowProbeSkippedUntilTheAppIsReady() {
         #expect(!MacDriverDiagnostics.shouldProbeWindows(process: nil, accessibilityTrusted: true))
         #expect(!MacDriverDiagnostics.shouldProbeWindows(
