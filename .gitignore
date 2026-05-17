@@ -20,3 +20,6 @@
 DerivedData/
 xcuserdata/
 *.xcuserstate
+
+# Claude Code local state
+.claude/
