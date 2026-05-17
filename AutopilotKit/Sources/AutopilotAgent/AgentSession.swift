@@ -65,17 +65,13 @@ public actor AgentSession {
     private let classifier = RiskClassifier()
     private let promptParser = PromptParser()
 
-    private var messages: [LLMMessage] = []
+    /// The model conversation, which keeps its own context bounded.
+    private var transcript = Transcript()
     private var latestSnapshot: UITreeSnapshot?
     /// Per-app write trust accrued during this run.
     private var trust: TrustStore
     /// Memory recalled at the start of the run, woven into the system prompt.
     private var recalledMemory: [MemoryItem] = []
-    /// The task being run, kept so a pruned initial message can be rebuilt.
-    private var task = ""
-    /// Tool-use ids whose results embed a full UI-tree render, so the
-    /// transcript compactor can find and prune the stale ones.
-    private var observationToolUseIDs: Set<String> = []
 
     /// Cumulative provider token usage across the run's LLM calls.
     private var cumulativeUsage = LLMResponse.Usage(inputTokens: 0, outputTokens: 0)
@@ -83,12 +79,6 @@ public actor AgentSession {
     private var lastActionSignature: String?
     /// How many times in a row the same action signature has been seen.
     private var consecutiveActionRepeats = 0
-
-    /// Placeholder left where a stale UI-tree observation was pruned.
-    private static let prunedObservationNote = """
-    [Earlier app state omitted to keep context small. Call get_app_state to \
-    re-read the current screen.]
-    """
 
     /// Note appended after a guarded action repeats its predecessor once.
     private static let repeatedActionNote = """
@@ -127,7 +117,6 @@ public actor AgentSession {
 
     /// Run `task` to completion and return the outcome.
     public func run(task: String) async -> AgentOutcome {
-        self.task = task
         emit(.started(task: task))
 
         // A "remember:" prompt is a storage instruction, not an app task.
@@ -159,21 +148,17 @@ public actor AgentSession {
             emit(.memoryRecalled(recalledMemory))
         }
 
-        messages = [
-            LLMMessage(role: .user, content: [
-                .text("""
-                Task: \(task)
-
-                Current state of \(computer.appName):
-                \(UITreeRenderer.compactText(initialTree))
-                """)
-            ])
-        ]
+        transcript.begin(
+            task: task,
+            appName: computer.appName,
+            initialTreeText: UITreeRenderer.compactText(initialTree),
+            liveObservationWindow: configuration.liveObservationWindow
+        )
 
         for stepIndex in 0..<configuration.maxSteps {
             if Task.isCancelled { return stop() }
             emit(.thinking)
-            compactTranscript()
+            transcript.compact()
 
             let response: LLMResponse
             do {
@@ -182,7 +167,7 @@ public actor AgentSession {
                 return fail("LLM error: \(error.localizedDescription)")
             }
             recordUsage(response.usage)
-            messages.append(LLMMessage(role: .assistant, content: response.content))
+            transcript.appendAssistant(response.content)
 
             let assistantText = response.text
             if !assistantText.isEmpty { emit(.message(assistantText)) }
@@ -205,7 +190,7 @@ public actor AgentSession {
                 stepsRemaining: configuration.maxSteps - stepIndex - 1,
                 to: &results
             )
-            messages.append(LLMMessage(role: .user, content: results))
+            transcript.appendToolResults(results)
         }
 
         return fail(
@@ -432,9 +417,9 @@ public actor AgentSession {
             let content = try await execute(tool: tool, input: use.input)
             emit(.performed(tool: tool, summary: target.description))
             // Every tool but `list_apps` returns the freshly-read tree, so its
-            // result is an observation the transcript compactor can prune.
+            // result is an observation the transcript can later prune.
             if tool != .listApps {
-                observationToolUseIDs.insert(use.id)
+                transcript.recordObservation(toolUseID: use.id)
             }
             results.append(.toolResult(ToolResult(toolUseID: use.id, content: content)))
         } catch {
@@ -442,7 +427,7 @@ public actor AgentSession {
             emit(.actionFailed(tool: tool, reason: reason))
             let failure = await failureText(reason: reason)
             if failure.embeddedTree {
-                observationToolUseIDs.insert(use.id)
+                transcript.recordObservation(toolUseID: use.id)
             }
             results.append(.toolResult(ToolResult(
                 toolUseID: use.id,
@@ -639,59 +624,11 @@ public actor AgentSession {
         """)]
     }
 
-    /// Replace all but the most recent few UI-tree observations with a short
-    /// placeholder, so a long run's context stays bounded instead of carrying
-    /// every screen it has ever read. Tool-use/tool-result pairing is kept
-    /// intact — only the stale result *content* is shrunk.
-    private func compactTranscript() {
-        let window = configuration.liveObservationWindow
-
-        // Observation carriers, oldest first: the initial task message (which
-        // embeds the first tree), then every tool result that embedded a tree.
-        var carriers: [(message: Int, block: Int?)] = [(0, nil)]
-        for (messageIndex, message) in messages.enumerated() {
-            for (blockIndex, block) in message.content.enumerated() {
-                guard case .toolResult(let result) = block,
-                      observationToolUseIDs.contains(result.toolUseID) else {
-                    continue
-                }
-                carriers.append((messageIndex, blockIndex))
-            }
-        }
-        guard carriers.count > window else { return }
-
-        for carrier in carriers.dropLast(window) {
-            guard let blockIndex = carrier.block else {
-                messages[0] = LLMMessage(role: .user, content: [
-                    .text("Task: \(task)\n\n\(Self.prunedObservationNote)")
-                ])
-                continue
-            }
-            messages[carrier.message] = stubbingObservation(
-                at: blockIndex,
-                in: messages[carrier.message]
-            )
-        }
-    }
-
-    /// Return a copy of `message` with the tool-result block at `index` shrunk
-    /// to the prune placeholder, preserving its tool-use id and error flag.
-    private func stubbingObservation(at index: Int, in message: LLMMessage) -> LLMMessage {
-        var content = message.content
-        guard case .toolResult(let result) = content[index] else { return message }
-        content[index] = .toolResult(ToolResult(
-            toolUseID: result.toolUseID,
-            content: [.text(Self.prunedObservationNote)],
-            isError: result.isError
-        ))
-        return LLMMessage(role: message.role, content: content)
-    }
-
     private func buildRequest() -> LLMRequest {
         LLMRequest(
             model: configuration.model,
             system: SystemPrompt.build(appName: computer.appName, memories: recalledMemory),
-            messages: messages,
+            messages: transcript.messages,
             tools: ToolCatalog.all,
             maxTokens: configuration.maxTokens
         )
