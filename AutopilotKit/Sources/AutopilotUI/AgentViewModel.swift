@@ -52,6 +52,13 @@ public final class AgentViewModel: UserInteraction {
         public let scopeLabel: String
     }
 
+    /// A clarifying question from the agent, awaiting a user answer.
+    public struct PendingQuestion: Sendable, Identifiable {
+        public let id = UUID()
+        /// The question the model asked before it can continue.
+        public let text: String
+    }
+
     /// Supported LLM backends for the test harness.
     public enum Provider: String, CaseIterable, Identifiable, Sendable {
         case zai
@@ -104,6 +111,10 @@ public final class AgentViewModel: UserInteraction {
     public var pendingApproval: PendingApproval?
     /// A proposed memory awaiting approval, or `nil`.
     public var pendingMemory: PendingMemory?
+    /// A clarifying question awaiting an answer, or `nil`.
+    public var pendingQuestion: PendingQuestion?
+    /// Draft answer for a pending clarification question.
+    public var questionAnswerText: String = ""
     /// Whether the notch is expanded to its full panel.
     public var isExpanded: Bool = false
     /// Apps the user trusts permanently for write actions; persisted.
@@ -139,6 +150,7 @@ public final class AgentViewModel: UserInteraction {
     private var runTask: Task<Void, Never>?
     private var approvalContinuation: CheckedContinuation<Bool, Never>?
     private var memoryContinuation: CheckedContinuation<Bool, Never>?
+    private var questionContinuation: CheckedContinuation<String, Never>?
 
     public init() {
         let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
@@ -190,6 +202,10 @@ public final class AgentViewModel: UserInteraction {
         }
 
         feed = []
+        pendingApproval = nil
+        pendingMemory = nil
+        pendingQuestion = nil
+        questionAnswerText = ""
         phase = .running
 
         let session = AgentSession(
@@ -227,6 +243,12 @@ public final class AgentViewModel: UserInteraction {
             pendingMemory = nil
             continuation.resume(returning: false)
         }
+        if let continuation = questionContinuation {
+            questionContinuation = nil
+            pendingQuestion = nil
+            questionAnswerText = ""
+            continuation.resume(returning: "")
+        }
     }
 
     /// Answer a pending action approval.
@@ -243,6 +265,15 @@ public final class AgentViewModel: UserInteraction {
         memoryContinuation = nil
         pendingMemory = nil
         continuation.resume(returning: save)
+    }
+
+    /// Answer a pending clarification question.
+    public func resolveQuestion(_ answer: String) {
+        guard let continuation = questionContinuation else { return }
+        questionContinuation = nil
+        pendingQuestion = nil
+        questionAnswerText = ""
+        continuation.resume(returning: answer.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     /// Toggle between the compact and expanded notch.
@@ -281,8 +312,11 @@ public final class AgentViewModel: UserInteraction {
     }
 
     public func askQuestion(_ question: String) async -> String {
-        // v1 surfaces questions in the feed; a richer Q&A UI comes later.
-        ""
+        await withCheckedContinuation { continuation in
+            self.pendingQuestion = PendingQuestion(text: question)
+            self.questionAnswerText = ""
+            self.questionContinuation = continuation
+        }
     }
 
     public func confirmMemory(_ proposal: MemoryProposal) async -> Bool {

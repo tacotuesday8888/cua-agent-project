@@ -50,6 +50,10 @@ struct ContentView: View {
                 memoryRow(memory)
             }
 
+            if let question = model.pendingQuestion {
+                questionRow(question)
+            }
+
             phaseLine
 
             if !model.feed.isEmpty {
@@ -130,6 +134,25 @@ struct ContentView: View {
         }
         .padding(8)
         .background(.purple.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func questionRow(_ question: AgentViewModel.PendingQuestion) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(question.text, systemImage: "questionmark.bubble.fill")
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.blue)
+            HStack {
+                TextField("Answer", text: $model.questionAnswerText)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { model.resolveQuestion(model.questionAnswerText) }
+                Button("Skip") { model.resolveQuestion("") }
+                Button("Send") { model.resolveQuestion(model.questionAnswerText) }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.questionAnswerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(8)
+        .background(.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
     }
 
     @ViewBuilder

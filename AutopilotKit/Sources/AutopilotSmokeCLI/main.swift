@@ -516,8 +516,8 @@ private func formatAgentEvent(_ event: AgentEvent) -> String? {
         return "- confirmation_denied: \(summary)"
     case .performed(let tool, let summary):
         return "- performed: \(tool.rawValue) - \(summary)"
-    case .askedUser(let question, let answer):
-        return "- asked_user: \(question) -> \(answer)"
+    case .askedUser(let question, _):
+        return "- asked_user: \(question) -> answered"
     case .memoryProposed(let proposal):
         return "- memory_proposed: \(proposal.text)"
     case .memoryStored(let item):
