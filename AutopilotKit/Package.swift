@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "MacAutopilot",
+    name: "AutopilotKit",
     platforms: [
         .macOS(.v14)
     ],
