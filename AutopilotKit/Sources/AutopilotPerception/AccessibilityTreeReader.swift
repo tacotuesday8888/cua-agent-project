@@ -147,9 +147,23 @@ public struct AccessibilityTreeReader: Sendable {
     /// production path on public APIs while still enabling targeted screenshots
     /// for the common single-window case.
     private static func windowIdentifier(pid: pid_t, title: String?) -> UInt32? {
+        for attempt in 0..<3 {
+            if let identifier = windowIdentifierOnce(pid: pid, title: title) {
+                return identifier
+            }
+            // Newly-launched windows can be visible to AX just before they show
+            // up in the CoreGraphics window list.
+            if attempt < 2 {
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+        }
+        return nil
+    }
+
+    private static func windowIdentifierOnce(pid: pid_t, title: String?) -> UInt32? {
         guard
             let rawWindows = CGWindowListCopyWindowInfo(
-                [.optionOnScreenOnly, .excludeDesktopElements],
+                [.excludeDesktopElements],
                 kCGNullWindowID
             ) as? [[String: Any]]
         else {
@@ -160,7 +174,8 @@ public struct AccessibilityTreeReader: Sendable {
             guard let ownerPID = int32Value(info[kCGWindowOwnerPID as String]) else {
                 return false
             }
-            return ownerPID == pid
+            let layer = int32Value(info[kCGWindowLayer as String]) ?? 0
+            return ownerPID == pid && layer == 0
         }
 
         if
@@ -170,6 +185,15 @@ public struct AccessibilityTreeReader: Sendable {
                 ($0[kCGWindowName as String] as? String) == title
             }),
             let number = uint32Value(exact[kCGWindowNumber as String])
+        {
+            return number
+        }
+
+        if
+            let named = candidates.first(where: {
+                !(($0[kCGWindowName as String] as? String) ?? "").isEmpty
+            }),
+            let number = uint32Value(named[kCGWindowNumber as String])
         {
             return number
         }

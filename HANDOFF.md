@@ -169,7 +169,9 @@ prompt field, live feed) — NOT the notch UI.
   production `MacComputer` path on a real Mac without an LLM:
   Accessibility-tree read, target-window match, optional screenshot bytes,
   click, scroll, direct set value, focused typing, key press, drag, and explicit
-  AX action. Latest live run passed all 9 steps with `--include-screenshot`.
+  AX action. The CLI also has `--agent-loop`, which runs those same tool calls
+  through `AgentSession` with a scripted provider. Latest live runs passed both
+  direct driver smoke and scripted agent-loop smoke with `--include-screenshot`.
 - API keys entered in the app harness are stored in Keychain, with migration
   from the old `UserDefaults` keys.
 - All current engine changes are committed on `main`; do not push without the
@@ -230,6 +232,8 @@ still needs an interactive run.
   `swift run --package-path AutopilotKit AutopilotFixtureApp`
 - **Run the real driver smoke CLI:**
   `swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp --include-screenshot`
+- **Run the scripted real-driver agent-loop smoke CLI:**
+  `swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp --include-screenshot --agent-loop`
 - **Build the app:**
   `xcodebuild -project MacAutopilot.xcodeproj -scheme MacAutopilot -destination 'platform=macOS' build`
 - **Run it:** open `MacAutopilot.xcodeproj` in Xcode and Run. The first time the

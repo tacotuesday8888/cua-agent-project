@@ -61,6 +61,7 @@ let package = Package(
             dependencies: [
                 "AutopilotAgent",
                 "AutopilotCore",
+                "AutopilotLLM",
                 "AutopilotMac"
             ]
         ),
