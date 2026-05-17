@@ -4,6 +4,7 @@ import AutopilotLLM
 import AutopilotMac
 import Darwin
 import Foundation
+import Security
 
 @main
 struct AutopilotSmokeCLI {
@@ -83,13 +84,17 @@ struct AutopilotSmokeCLI {
     ) async -> Bool {
         let apiKeyEnvironment = value(after: "--api-key-env", in: arguments)
             ?? provider.defaultAPIKeyEnvironment
-        guard
-            let apiKey = ProcessInfo.processInfo.environment[apiKeyEnvironment],
-            !apiKey.isEmpty
-        else {
+        let apiKey = loadAPIKey(
+            environment: apiKeyEnvironment,
+            keychainAccount: provider.keychainAccount
+        )
+        guard !apiKey.isEmpty else {
             fflush(stdout)
             fputs(
-                "Missing API key. Set \(apiKeyEnvironment), or pass --api-key-env NAME.\n",
+                """
+                Missing API key. Set \(apiKeyEnvironment), pass --api-key-env NAME, or save a key in MacAutopilot first.
+
+                """,
                 stderr
             )
             return false
@@ -103,7 +108,7 @@ struct AutopilotSmokeCLI {
         print("")
         print("Running live \(provider.displayName) AgentSession smoke loop...")
         print("- model: \(model)")
-        print("- api key env: \(apiKeyEnvironment)")
+        print("- api key source: \(apiKeySourceDescription(environment: apiKeyEnvironment, provider: provider))")
         print("- task: \(task)")
 
         let recorder = AgentSmokeEventRecorder()
@@ -343,6 +348,27 @@ struct AutopilotSmokeCLI {
         return provider
     }
 
+    private static func loadAPIKey(
+        environment: String,
+        keychainAccount: String
+    ) -> String {
+        if let value = ProcessInfo.processInfo.environment[environment],
+           !value.isEmpty {
+            return value
+        }
+        return (try? SmokeAPIKeyStore.load(account: keychainAccount)) ?? ""
+    }
+
+    private static func apiKeySourceDescription(
+        environment: String,
+        provider: LiveProvider
+    ) -> String {
+        if ProcessInfo.processInfo.environment[environment]?.isEmpty == false {
+            return "environment \(environment)"
+        }
+        return "Keychain account \(provider.keychainAccount)"
+    }
+
     private static func printDiagnostics(_ diagnostics: ComputerDiagnostics) {
         print(diagnostics.summary)
         for check in diagnostics.checks {
@@ -363,6 +389,8 @@ struct AutopilotSmokeCLI {
 
         The fixture app must be running and the smoke runner process must have
         Accessibility permission in System Settings > Privacy & Security.
+        Live provider mode reads the API key from the selected environment
+        variable first, then falls back to MacAutopilot's Keychain entry.
         """)
     }
 
@@ -393,6 +421,13 @@ private enum LiveProvider: String {
         }
     }
 
+    var keychainAccount: String {
+        switch self {
+        case .zai: "AutopilotZAIAPIKey"
+        case .anthropic: "AutopilotAnthropicAPIKey"
+        }
+    }
+
     func makeProvider(apiKey: String) -> any LLMProvider {
         switch self {
         case .zai:
@@ -400,6 +435,26 @@ private enum LiveProvider: String {
         case .anthropic:
             AnthropicProvider(apiKey: apiKey)
         }
+    }
+}
+
+private enum SmokeAPIKeyStore {
+    private static let service = "com.langqi.MacAutopilot.llm-api-keys"
+
+    static func load(account: String) throws -> String {
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        if status == errSecItemNotFound { return "" }
+        guard status == errSecSuccess, let data = item as? Data else { return "" }
+        return String(data: data, encoding: .utf8) ?? ""
     }
 }
 

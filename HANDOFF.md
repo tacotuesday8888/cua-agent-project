@@ -172,10 +172,11 @@ prompt field, live feed) — NOT the notch UI.
   AX action. The CLI also has `--agent-loop`, which runs those same tool calls
   through `AgentSession` with a scripted provider. Latest live runs passed both
   direct driver smoke and scripted agent-loop smoke with `--include-screenshot`.
-- `AutopilotSmokeCLI` also has a live-provider smoke mode for Z.ai or Anthropic
-  using API keys from environment variables. This is ready for the first
-  provider-backed fixture run, but has not been run yet because it needs a real
-  API key and outbound network access.
+- `AutopilotSmokeCLI` also has a live-provider smoke mode for Z.ai or Anthropic.
+  It reads API keys from environment variables first, then falls back to the
+  same Keychain entries used by the MacAutopilot app. This is ready for the
+  first provider-backed fixture run, but has not been run yet because it needs a
+  real API key and outbound network access.
 - API keys entered in the app harness are stored in Keychain, with migration
   from the old `UserDefaults` keys.
 - All current engine changes are committed on `main`; do not push without the
@@ -239,7 +240,7 @@ still needs an interactive run.
 - **Run the scripted real-driver agent-loop smoke CLI:**
   `swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp --include-screenshot --agent-loop`
 - **Run the live-provider fixture smoke CLI:** set `ZAI_API_KEY` in the
-  environment, then run
+  environment or save the key in MacAutopilot first, then run
   `swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp --live-provider zai`
 - **Build the app:**
   `xcodebuild -project MacAutopilot.xcodeproj -scheme MacAutopilot -destination 'platform=macOS' build`
