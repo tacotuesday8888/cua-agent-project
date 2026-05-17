@@ -60,6 +60,23 @@ public struct AccessibilityActuator: Sendable {
         }
     }
 
+    /// Move keyboard focus to a focusable element before synthesized typing.
+    public func focus(_ element: AXUIElement) throws {
+        if isAttributeSettable(kAXFocusedAttribute, on: element) {
+            let status = AXUIElementSetAttributeValue(
+                element,
+                kAXFocusedAttribute as CFString,
+                kCFBooleanTrue
+            )
+            if status == .success { return }
+        }
+
+        let status = AXUIElementPerformAction(element, kAXPressAction as CFString)
+        guard status == .success else {
+            throw ActuationError.actionFailed("focus failed (AXError \(status.rawValue))")
+        }
+    }
+
     /// Send a key press (with optional modifiers) as a synthesized event.
     public func pressKey(_ key: KeyPress, pid: pid_t? = nil) throws {
         guard let keyCode = KeyCodes.code(for: key.key) else {

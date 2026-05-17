@@ -227,11 +227,9 @@ public actor AgentSession {
             return try await observedResult("Set \(id) to \"\(value)\".")
 
         case .typeText:
-            if let id = try optionalElementID(input, primaryKey: "element_index") {
-                try await computer.click(elementID: id)
-            }
+            let id = try optionalElementID(input, primaryKey: "element_index")
             let text = try requireString(input, "text", tool: tool)
-            try await computer.typeText(text)
+            try await computer.typeText(text, into: id)
             return try await observedResult("Typed text.")
 
         case .scroll:

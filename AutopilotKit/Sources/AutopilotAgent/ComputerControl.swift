@@ -170,6 +170,9 @@ public protocol ComputerControl: Sendable {
     /// Type text into the app's currently-focused editable element.
     func typeText(_ text: String) async throws
 
+    /// Focus an editable element, when provided, then type text into the app.
+    func typeText(_ text: String, into elementID: String?) async throws
+
     /// Scroll, optionally within a specific scrollable element.
     func scroll(elementID: String?, direction: ScrollDirection, amount: Int) async throws
 
@@ -217,6 +220,13 @@ public extension ComputerControl {
 
     func typeText(_ text: String) async throws {
         throw ComputerControlError.unsupportedTool("type_text")
+    }
+
+    func typeText(_ text: String, into elementID: String?) async throws {
+        if let elementID {
+            try await click(elementID: elementID)
+        }
+        try await typeText(text)
     }
 
     func drag(fromElementID: String, toElementID: String) async throws {

@@ -225,6 +225,30 @@ struct AgentSessionTests {
         #expect(events.contains { if case .started = $0 { true } else { false } })
         #expect(events.contains { if case .finished = $0 { true } else { false } })
     }
+
+    @Test func typeTextWithElementIndexUsesFocusedTypingPath() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(
+                id: "t1",
+                tool: "type_text",
+                input: ["element_index": 2, "text": "focused text"]
+            ),
+            toolResponse(id: "t2", tool: "done", input: ["summary": "Done."])
+        ])
+        let computer = musicComputer()
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: "test", maxSteps: 5)
+        )
+
+        let outcome = await session.run(task: "type into search")
+        #expect(outcome.status == .completed)
+
+        let actions = await computer.performedActions
+        #expect(actions == ["typeText:e2:focused text"])
+    }
 }
 
 struct ComputerUseSmokeRunnerTests {
@@ -293,7 +317,7 @@ struct ComputerUseSmokeRunnerTests {
             "click:e3",
             "scroll:down:2",
             "setValue:e2=direct value",
-            "typeText:typed value",
+            "typeText:e2:typed value",
             "key:return",
             "drag:e2->e3",
             "secondary:e3:AXShowMenu"

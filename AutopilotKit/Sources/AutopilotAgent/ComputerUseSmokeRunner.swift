@@ -326,7 +326,10 @@ public struct ComputerUseSmokeRunner: Sendable {
         }
 
         step = await record("type_text", {
-            try await computer.typeText(activePlan.typeText)
+            try await computer.typeText(
+                activePlan.typeText,
+                into: activePlan.elementID(activePlan.textElementIndex)
+            )
             return "Typed \(activePlan.typeText.count) character(s)."
         })
         steps.append(step)

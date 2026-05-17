@@ -135,6 +135,13 @@ public actor MacComputer: ComputerControl {
         try actuator.typeText(text, pid: pid)
     }
 
+    public func typeText(_ text: String, into elementID: String?) async throws {
+        if let elementID {
+            try actuator.focus(element(for: elementID))
+        }
+        try actuator.typeText(text, pid: pid)
+    }
+
     public func scroll(
         elementID: String?,
         direction: ScrollDirection,

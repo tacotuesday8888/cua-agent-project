@@ -54,6 +54,17 @@ public actor MockComputer: ComputerControl {
         actionLog.append("typeText:\(text)")
     }
 
+    public func typeText(_ text: String, into elementID: String?) async throws {
+        if let elementID {
+            guard snapshot.element(id: elementID) != nil else {
+                throw invalidElement(elementID)
+            }
+            actionLog.append("typeText:\(elementID):\(text)")
+        } else {
+            actionLog.append("typeText:\(text)")
+        }
+    }
+
     public func scroll(elementID: String?, direction: ScrollDirection, amount: Int) async throws {
         if let elementID, snapshot.element(id: elementID) == nil {
             throw invalidElement(elementID)
