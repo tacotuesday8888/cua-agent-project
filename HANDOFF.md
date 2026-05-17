@@ -179,8 +179,7 @@ prompt field, live feed) — NOT the notch UI.
   real API key and outbound network access.
 - API keys entered in the app harness are stored in Keychain, with migration
   from the old `UserDefaults` keys.
-- All current engine changes are committed on `main`; do not push without the
-  owner's go-ahead.
+- Routine verified changes should be committed and pushed when safe.
 
 **Remaining critical caveat:** the LLM-backed app loop has still not completed
 a real user task against a normal third-party app. The low-level AX/action path
