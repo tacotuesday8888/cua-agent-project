@@ -106,7 +106,7 @@ cua agent project/                  ← git repo (remote: tacotuesday8888/cua-ag
       AutopilotPerception/           reads the macOS accessibility tree
       AutopilotAction/               performs AX actions + synthesized input
       AutopilotMac/                  MacComputer (production ComputerControl) + AppLocator
-      AutopilotUI/                   the notch UI layer (PARTIAL — see §6)
+      AutopilotUI/                   notch UI shell + shared UI model (PARTIAL — see §6)
     Tests/                           34 tests (Core, LLM, Agent)
   MacAutopilot.xcodeproj             the macOS app project
   MacAutopilot/                      app target sources (App entry, ContentView, entitlements)
@@ -144,17 +144,20 @@ cua agent project/                  ← git repo (remote: tacotuesday8888/cua-ag
 - **AutopilotUI** — `AgentViewModel` (`@MainActor @Observable` — assembles and
   runs an `AgentSession`, streams events into a display feed, bridges
   confirmations to the UI; has a `Provider` enum for Z.ai-GLM vs Anthropic;
-  stores API keys in Keychain), `NotchGeometry` (notch detection + window frames), `NotchWindow` (the
-  borderless, non-activating transparent panel). **The notch VIEWS and
-  controller are not yet built — see §6.**
+  stores API keys in Keychain), `NotchGeometry` (notch detection + window frames),
+  `NotchWindow` (the borderless, non-activating transparent panel),
+  `NotchAssistantView` (simple placeholder collapsed/expanded surface), and
+  `NotchController` (panel lifecycle + screen placement). Final designer UI,
+  hover behavior, hotkey polish, and the `@app` picker are still pending.
 
 ### 4.3 The app target
 
 `MacAutopilot.xcodeproj` builds the `MacAutopilot.app`. Bundle id
 `com.langqi.MacAutopilot`, deployment target macOS 14.0, App Sandbox OFF, links
-the `AutopilotUI` package product. `MacAutopilot/ContentView.swift` is currently
-a **minimal test harness** (provider picker, API-key field, target-app picker,
-prompt field, live feed) — NOT the notch UI.
+the `AutopilotUI` package product. The app now starts as a menu-bar app and
+creates the placeholder notch panel at launch. `MacAutopilot/ContentView.swift`
+remains a **minimal test harness** available from Settings for debugging
+(provider picker, API-key field, target-app picker, prompt field, live feed).
 
 ---
 
@@ -194,15 +197,13 @@ or model tool-choice recovery work.
 
 ## 6. What is NOT done / what's left
 
-1. **The notch UI views & controller** — only `AgentViewModel`, `NotchGeometry`,
-   and `NotchWindow` exist. Still to build:
-   - The SwiftUI views: the collapsed notch (with the playful hover — shake +
-     glow + dwell cue), the expanded prompt panel, the `@app` picker, the live
-     status feed, the inline Approve/Skip row.
-   - The controller: global hotkey, menu-bar item, click-the-notch, and the
-     show / expand / collapse orchestration with the `NotchWindow`.
-   - Wiring the notch UI into the app's `@main` (the app currently shows the
-     test-harness `ContentView` in a normal window).
+1. **Final notch UI** — a simple placeholder notch panel is wired into app
+   launch. Still to build:
+   - Designer-owned visual treatment: hover shake/glow/dwell cue, final
+     collapsed and expanded dimensions, motion, typography, and polish.
+   - The real `@app` picker with app icons/chips.
+   - Global hotkey and click-the-notch affordance polish.
+   - Highlight overlay placement/animation for the target action.
 2. **First LLM-backed real-app run** — run the app, pick a normal target app,
    give the agent a low-risk task, and verify the full perceive → decide → act
    → verify loop outside the controlled fixture. The real AX/action layer and
@@ -225,8 +226,9 @@ or model tool-choice recovery work.
   focus/activation issues, or model tool-choice problems.
 - `@app` natural-language targeting is not built yet; the app currently uses an
   explicit target-app picker.
-- The notch UI views/controller are still pending and are intentionally separate
-  from the engine validation work.
+- The placeholder notch shell is intentionally simple. It proves lifecycle,
+  state, approvals, and menu-bar invocation, but not the final notch interaction
+  design.
 
 ---
 
@@ -262,7 +264,9 @@ or model tool-choice recovery work.
 1. **Do the first LLM-backed real-app run** against a low-risk real app task.
 2. Fix whatever the first real-app run surfaces in prompt/tool choice,
    recovery, app activation, or app-specific AX behavior.
-3. Build the notch UI views + controller (§6.1) per the design in §2.1.
-4. Wire the notch UI into the app's `@main`; retire the test-harness
-   `ContentView`.
-5. Then: `@app` targeting, distribution, and (later) per-app knowledge profiles.
+3. Replace the placeholder notch surface with the designer-owned UI once the
+   interaction spec is ready.
+4. Add the real `@app` targeting picker, global hotkey, and action highlight
+   overlay.
+5. Then: distribution, optional backend entitlements, and (later) per-app
+   knowledge profiles.

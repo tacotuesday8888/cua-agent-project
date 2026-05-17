@@ -26,7 +26,9 @@ That UX implies a few hard technical seams:
   tree reads, AX actions, synthesized input, and screenshot fallback.
 - `AutopilotLLM` keeps provider calls behind `LLMProvider`.
 - `AutopilotUI.AgentViewModel` bridges agent events and user interactions for
-  both the temporary harness and the future notch UI.
+  both the temporary harness and the notch surface.
+- `AutopilotUI.NotchController` owns the floating panel lifecycle and keeps the
+  placeholder notch surface aligned to the top-center screen geometry.
 - API keys are local-only and stored in Keychain under
   `com.langqi.MacAutopilot.llm-api-keys`.
 - Durable memory is local-only under Application Support and must not store
@@ -109,6 +111,8 @@ rather than making the agent loop depend on a server.
 - Better prompt/tool-choice recovery for stale or missing AX elements.
 - More robust driver diagnostics for permission and target-window failures.
 - Target-app selection logic for the future `@app` picker.
+- Redesigning `NotchAssistantView` behind the existing `AgentViewModel` and
+  `NotchController` contracts.
 - Redacted local session-history primitives.
 - More safety tests around destructive labels, overwrites, and app trust.
 
