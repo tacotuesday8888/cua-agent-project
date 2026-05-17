@@ -16,6 +16,7 @@ public enum AgentTool: String, CaseIterable, Sendable {
     case drag = "drag"
     case performSecondaryAction = "perform_secondary_action"
     case askUser = "ask_user"
+    case proposeMemory = "propose_memory"
     case done = "done"
 }
 
@@ -33,6 +34,7 @@ public enum ToolCatalog {
         drag,
         performSecondaryAction,
         askUser,
+        proposeMemory,
         done
     ]
 
@@ -236,6 +238,35 @@ public enum ToolCatalog {
                 ]
             ],
             "required": ["question"]
+        ]
+    )
+
+    static let proposeMemory = ToolDefinition(
+        name: AgentTool.proposeMemory.rawValue,
+        description: """
+        Propose a durable fact or preference about the user that would help on \
+        future tasks. The user approves or skips it; if approved it is saved to \
+        local memory. Only propose stable, reusable preferences — never \
+        task-specific details, passwords, or anything sensitive.
+        """,
+        inputSchema: [
+            "type": "object",
+            "properties": [
+                "text": [
+                    "type": "string",
+                    "description": "The fact or preference, as a short statement."
+                ],
+                "scope": [
+                    "type": "string",
+                    "enum": ["global", "app", "contact"],
+                    "description": "global: always relevant. app: one app. contact: one person."
+                ],
+                "scope_value": [
+                    "type": "string",
+                    "description": "The app or contact name. Required when scope is app or contact."
+                ]
+            ],
+            "required": ["text", "scope"]
         ]
     )
 

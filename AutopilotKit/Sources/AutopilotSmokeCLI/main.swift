@@ -2,6 +2,7 @@ import AutopilotAgent
 import AutopilotCore
 import AutopilotLLM
 import AutopilotMac
+import AutopilotMemory
 import Darwin
 import Foundation
 import Security
@@ -116,7 +117,8 @@ struct AutopilotSmokeCLI {
             llm: provider.makeProvider(apiKey: apiKey),
             computer: computer,
             interaction: AutomaticApproval(),
-            configuration: AgentConfiguration(model: model, maxSteps: maxSteps),
+            configuration: AgentConfiguration(model: model, maxSteps: maxSteps, highlightDwell: .zero),
+            memory: smokeMemoryStore(),
             eventHandler: { event in
                 recorder.append(event)
                 if let line = formatAgentEvent(event) {
@@ -181,7 +183,12 @@ struct AutopilotSmokeCLI {
             llm: llm,
             computer: computer,
             interaction: AutomaticApproval(),
-            configuration: AgentConfiguration(model: "scripted-smoke", maxSteps: 12),
+            configuration: AgentConfiguration(
+                model: "scripted-smoke",
+                maxSteps: 12,
+                highlightDwell: .zero
+            ),
+            memory: smokeMemoryStore(),
             eventHandler: { event in
                 recorder.append(event)
                 if let line = formatAgentEvent(event) {
@@ -325,6 +332,13 @@ struct AutopilotSmokeCLI {
         } catch {
             return false
         }
+    }
+
+    /// A throwaway memory store in a temp directory, so smoke runs never touch
+    /// the real Application Support memory file.
+    private static func smokeMemoryStore() -> MemoryStore {
+        MemoryStore(directory: FileManager.default.temporaryDirectory
+            .appendingPathComponent("autopilot-smoke-\(UUID().uuidString)", isDirectory: true))
     }
 
     private static func value(after flag: String, in arguments: [String]) -> String? {
@@ -492,16 +506,22 @@ private func formatAgentEvent(_ event: AgentEvent) -> String? {
         return "- observed_tree: \(elementCount) element(s)"
     case .message(let message):
         return "- message: \(message)"
-    case .willPerform(let tool, let summary, let risk):
-        return "- will_perform: \(tool.rawValue) - \(summary) (\(risk.rawValue))"
-    case .awaitingConfirmation(let summary):
-        return "- awaiting_confirmation: \(summary)"
+    case .memoryRecalled(let items):
+        return "- memory_recalled: \(items.count) item(s)"
+    case .willPerform(let tool, let target, let tier):
+        return "- will_perform: \(tool.rawValue) - \(target.description) (\(tier.rawValue))"
+    case .awaitingConfirmation(let request):
+        return "- awaiting_confirmation: \(request.summary) (\(request.tier.rawValue))"
     case .confirmationDenied(let summary):
         return "- confirmation_denied: \(summary)"
     case .performed(let tool, let summary):
         return "- performed: \(tool.rawValue) - \(summary)"
     case .askedUser(let question, let answer):
         return "- asked_user: \(question) -> \(answer)"
+    case .memoryProposed(let proposal):
+        return "- memory_proposed: \(proposal.text)"
+    case .memoryStored(let item):
+        return "- memory_stored: \(item.text)"
     case .finished(let summary):
         return "- finished: \(summary)"
     case .failed(let reason):

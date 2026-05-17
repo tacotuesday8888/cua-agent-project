@@ -1,5 +1,6 @@
 import AutopilotCore
 import AutopilotLLM
+import AutopilotMemory
 import Foundation
 
 /// Configuration for an agent run.
@@ -10,11 +11,20 @@ public struct AgentConfiguration: Sendable {
     public var maxSteps: Int
     /// Maximum tokens generated per LLM call.
     public var maxTokens: Int
+    /// How long the agent surfaces an action's target before an un-gated action
+    /// runs, so the UI can highlight it. Tests use `.zero`.
+    public var highlightDwell: Duration
 
-    public init(model: String, maxSteps: Int = 25, maxTokens: Int = 4096) {
+    public init(
+        model: String,
+        maxSteps: Int = 25,
+        maxTokens: Int = 4096,
+        highlightDwell: Duration = .milliseconds(400)
+    ) {
         self.model = model
         self.maxSteps = maxSteps
         self.maxTokens = maxTokens
+        self.highlightDwell = highlightDwell
     }
 }
 
@@ -44,29 +54,45 @@ public actor AgentSession {
     private let computer: any ComputerControl
     private let interaction: any UserInteraction
     private let configuration: AgentConfiguration
+    private let memory: MemoryStore
     private let emit: @Sendable (AgentEvent) -> Void
     private let classifier = RiskClassifier()
+    private let promptParser = PromptParser()
 
     private var messages: [LLMMessage] = []
     private var latestSnapshot: UITreeSnapshot?
+    /// Per-app write trust accrued during this run.
+    private var trust: TrustStore
+    /// Memory recalled at the start of the run, woven into the system prompt.
+    private var recalledMemory: [MemoryItem] = []
 
     public init(
         llm: any LLMProvider,
         computer: any ComputerControl,
         interaction: any UserInteraction,
         configuration: AgentConfiguration,
+        memory: MemoryStore,
+        permanentlyTrustedApps: Set<String> = [],
         eventHandler: @escaping @Sendable (AgentEvent) -> Void = { _ in }
     ) {
         self.llm = llm
         self.computer = computer
         self.interaction = interaction
         self.configuration = configuration
+        self.memory = memory
+        self.trust = TrustStore(permanentlyTrusted: permanentlyTrustedApps)
         self.emit = eventHandler
     }
 
     /// Run `task` to completion and return the outcome.
     public func run(task: String) async -> AgentOutcome {
         emit(.started(task: task))
+
+        // A "remember:" prompt is a storage instruction, not an app task.
+        let explicitMemories = promptParser.explicitMemories(in: task)
+        if !explicitMemories.isEmpty {
+            return await storeExplicitMemories(explicitMemories)
+        }
 
         let diagnostics = await computer.diagnose()
         emit(.diagnostics(diagnostics))
@@ -79,6 +105,11 @@ public actor AgentSession {
             initialTree = try await observeTree()
         } catch {
             return fail("Could not read \(computer.appName): \(error.localizedDescription)")
+        }
+
+        recalledMemory = await memory.relevant(appName: computer.appName)
+        if !recalledMemory.isEmpty {
+            emit(.memoryRecalled(recalledMemory))
         }
 
         messages = [
@@ -127,6 +158,21 @@ public actor AgentSession {
         return fail("Reached the \(configuration.maxSteps)-step limit.")
     }
 
+    // MARK: - Memory
+
+    /// Store the memories from a "remember:" prompt, then finish — there is no
+    /// app task to run.
+    private func storeExplicitMemories(_ memories: [MemoryItem]) async -> AgentOutcome {
+        var stored = 0
+        for item in memories where await memory.add(item) {
+            emit(.memoryStored(item))
+            stored += 1
+        }
+        let summary = stored == 0 ? "Already in memory." : "Saved to memory."
+        emit(.finished(summary: summary))
+        return AgentOutcome(status: .completed, summary: summary)
+    }
+
     // MARK: - Step handling
 
     /// Handle one tool call. Returns a non-nil outcome when the run should end.
@@ -156,9 +202,63 @@ public actor AgentSession {
             results.append(.toolResult(ToolResult(toolUseID: use.id, text: answer)))
             return nil
 
+        case .proposeMemory:
+            await handleProposeMemory(use, into: &results)
+            return nil
+
         default:
             await performAction(tool: tool, use: use, into: &results)
             return nil
+        }
+    }
+
+    /// Handle a `propose_memory` call: surface the proposal, and store it if
+    /// the user approves.
+    private func handleProposeMemory(
+        _ use: ToolUse,
+        into results: inout [LLMContentBlock]
+    ) async {
+        let text = (use.input["text"]?.stringValue ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            results.append(.toolResult(ToolResult(
+                toolUseID: use.id,
+                text: "propose_memory needs non-empty text.",
+                isError: true
+            )))
+            return
+        }
+
+        let proposal = MemoryProposal(text: text, scope: memoryScope(from: use.input))
+        emit(.memoryProposed(proposal))
+
+        if await interaction.confirmMemory(proposal) {
+            let item = MemoryItem(text: text, scope: proposal.scope, source: .proposed)
+            await memory.add(item)
+            emit(.memoryStored(item))
+            results.append(.toolResult(ToolResult(
+                toolUseID: use.id,
+                text: "Saved to memory."
+            )))
+        } else {
+            results.append(.toolResult(ToolResult(
+                toolUseID: use.id,
+                text: "The user chose not to save that. Continue with the task."
+            )))
+        }
+    }
+
+    /// Resolve the `scope` / `scope_value` inputs of a `propose_memory` call.
+    private func memoryScope(from input: JSONValue) -> MemoryScope {
+        switch input["scope"]?.stringValue {
+        case "app":
+            return .app(input["scope_value"]?.stringValue ?? computer.appName)
+        case "contact":
+            let contact = (input["scope_value"]?.stringValue ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return contact.isEmpty ? .global : .contact(contact)
+        default:
+            return .global
         }
     }
 
@@ -167,26 +267,31 @@ public actor AgentSession {
         use: ToolUse,
         into results: inout [LLMContentBlock]
     ) async {
-        let summary = actionSummary(tool: tool, input: use.input)
-        let risk = classifier.assess(tool: tool, input: use.input, snapshot: latestSnapshot)
-        emit(.willPerform(tool: tool, summary: summary, risk: risk))
+        let target = makeActionTarget(tool: tool, input: use.input)
+        let tier = classifier.assess(tool: tool, input: use.input, snapshot: latestSnapshot)
+        emit(.willPerform(tool: tool, target: target, tier: tier))
 
-        if risk == .risky {
-            emit(.awaitingConfirmation(summary: summary))
-            let approved = await interaction.confirmRiskyAction(summary: summary)
-            if !approved {
-                emit(.confirmationDenied(summary: summary))
-                results.append(.toolResult(ToolResult(
-                    toolUseID: use.id,
-                    text: "The user declined this action. Do not retry it; choose an alternative or finish."
-                )))
-                return
-            }
+        guard await gate(tier: tier, target: target) else {
+            emit(.confirmationDenied(summary: target.description))
+            results.append(.toolResult(ToolResult(
+                toolUseID: use.id,
+                text: "The user declined this action. Do not retry it; choose an alternative or finish."
+            )))
+            return
+        }
+
+        // The highlight dwell is cancellable; if the user hit Stop, do not act.
+        guard !Task.isCancelled else {
+            results.append(.toolResult(ToolResult(
+                toolUseID: use.id,
+                text: "Stopped by the user before this action ran."
+            )))
+            return
         }
 
         do {
             let content = try await execute(tool: tool, input: use.input)
-            emit(.performed(tool: tool, summary: summary))
+            emit(.performed(tool: tool, summary: target.description))
             results.append(.toolResult(ToolResult(toolUseID: use.id, content: content)))
         } catch {
             results.append(.toolResult(ToolResult(
@@ -195,6 +300,71 @@ public actor AgentSession {
                 isError: true
             )))
         }
+    }
+
+    /// Apply the approval gate. Returns whether the action may run.
+    ///
+    /// - `safe`: runs after a brief highlight dwell.
+    /// - `write`: runs freely once the app is trusted; otherwise the user is
+    ///   asked, and the app becomes trusted for the session on approval.
+    /// - `destructive`: always asks; trust is never consulted or granted.
+    private func gate(tier: RiskLevel, target: ActionTarget) async -> Bool {
+        switch tier {
+        case .safe:
+            await dwell()
+            return true
+
+        case .write:
+            if trust.isTrusted(app: computer.appName) {
+                await dwell()
+                return true
+            }
+            let approved = await requestApproval(tier: tier, target: target)
+            if approved {
+                trust.recordSessionTrust(app: computer.appName)
+            }
+            return approved
+
+        case .destructive:
+            return await requestApproval(tier: tier, target: target)
+        }
+    }
+
+    private func requestApproval(tier: RiskLevel, target: ActionTarget) async -> Bool {
+        let request = ApprovalRequest(
+            appName: computer.appName,
+            tier: tier,
+            target: target,
+            summary: target.description
+        )
+        emit(.awaitingConfirmation(request))
+        return await interaction.requestApproval(request)
+    }
+
+    /// Hold briefly so the UI can highlight the target before an un-gated
+    /// action fires. Cancellation ends the wait immediately.
+    private func dwell() async {
+        guard configuration.highlightDwell > .zero else { return }
+        try? await Task.sleep(for: configuration.highlightDwell)
+    }
+
+    /// Describe what an action will interact with, for the highlight overlay
+    /// and the approval prompt.
+    private func makeActionTarget(tool: AgentTool, input: JSONValue) -> ActionTarget {
+        let description = actionSummary(tool: tool, input: input)
+        let primaryKey = tool == .drag ? "from_element_index" : "element_index"
+        let elementID = try? optionalElementID(input, primaryKey: primaryKey)
+        if let elementID, let element = latestSnapshot?.element(id: elementID) {
+            return ActionTarget(
+                appName: computer.appName,
+                elementID: elementID,
+                role: element.role,
+                label: element.label,
+                description: description,
+                frame: element.frame
+            )
+        }
+        return ActionTarget(appName: computer.appName, description: description)
     }
 
     /// Perform a computer action and return the tool-result content.
@@ -268,7 +438,7 @@ public actor AgentSession {
             try await computer.performSecondaryAction(elementID: id, action: action)
             return try await observedResult("Performed \(action) on \(id).")
 
-        case .askUser, .done:
+        case .askUser, .proposeMemory, .done:
             return []  // handled in `dispatch`
         }
     }
@@ -301,7 +471,7 @@ public actor AgentSession {
     private func buildRequest() -> LLMRequest {
         LLMRequest(
             model: configuration.model,
-            system: SystemPrompt.build(appName: computer.appName),
+            system: SystemPrompt.build(appName: computer.appName, memories: recalledMemory),
             messages: messages,
             tools: ToolCatalog.all,
             maxTokens: configuration.maxTokens
@@ -410,6 +580,8 @@ public actor AgentSession {
             return "Perform \(input["action"]?.stringValue ?? "secondary action")"
         case .askUser:
             return "Ask a question"
+        case .proposeMemory:
+            return "Propose a memory"
         case .done:
             return "Finish"
         }

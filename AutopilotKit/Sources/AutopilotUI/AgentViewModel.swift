@@ -2,6 +2,7 @@ import AutopilotAgent
 import AutopilotCore
 import AutopilotLLM
 import AutopilotMac
+import AutopilotMemory
 import Foundation
 import Observation
 import Security
@@ -9,8 +10,8 @@ import Security
 /// The state and logic behind the notch UI.
 ///
 /// `AgentViewModel` assembles and runs an `AgentSession`, streams its events
-/// into a display feed, and bridges the agent's confirmation requests to the
-/// UI by conforming to `UserInteraction`.
+/// into a display feed, and bridges the agent's approval and memory requests
+/// to the UI by conforming to `UserInteraction`.
 @MainActor
 @Observable
 public final class AgentViewModel: UserInteraction {
@@ -29,9 +30,26 @@ public final class AgentViewModel: UserInteraction {
         public let isError: Bool
     }
 
-    /// A risky action awaiting the user's approval.
-    public struct PendingApproval: Sendable {
+    /// A gated action awaiting the user's approval.
+    public struct PendingApproval: Sendable, Identifiable {
+        public let id = UUID()
+        /// One-line description of the action and its target.
         public let summary: String
+        /// The risk tier — "write" or "destructive".
+        public let tier: String
+        /// True for destructive actions (send, delete, pay, overwrite).
+        public let isDestructive: Bool
+        /// The app the action operates.
+        public let appName: String
+    }
+
+    /// A memory the agent proposed, awaiting the user's approval.
+    public struct PendingMemory: Sendable, Identifiable {
+        public let id = UUID()
+        /// The fact the agent proposes remembering.
+        public let text: String
+        /// A human label for where it applies, e.g. "Global".
+        public let scopeLabel: String
     }
 
     /// Supported LLM backends for the test harness.
@@ -82,10 +100,18 @@ public final class AgentViewModel: UserInteraction {
     public var phase: Phase = .idle
     /// The live status feed shown in the expanded notch.
     public var feed: [FeedItem] = []
-    /// A risky action awaiting approval, or `nil`.
+    /// A gated action awaiting approval, or `nil`.
     public var pendingApproval: PendingApproval?
+    /// A proposed memory awaiting approval, or `nil`.
+    public var pendingMemory: PendingMemory?
     /// Whether the notch is expanded to its full panel.
     public var isExpanded: Bool = false
+    /// Apps the user trusts permanently for write actions; persisted.
+    public var permanentlyTrustedApps: [String] {
+        didSet {
+            UserDefaults.standard.set(permanentlyTrustedApps, forKey: Self.trustedAppsDefaultsKey)
+        }
+    }
     /// The selected LLM backend for this run.
     public var selectedProvider: Provider {
         didSet {
@@ -103,16 +129,24 @@ public final class AgentViewModel: UserInteraction {
     // MARK: - Private
 
     private static let providerDefaultsKey = "AutopilotLLMProvider"
+    private static let trustedAppsDefaultsKey = "AutopilotPermanentlyTrustedApps"
 
     private let locator = AppLocator()
+    /// The local, persistent memory store, shared with the agent and the
+    /// (future) memory-management UI.
+    private let memory = MemoryStore()
+    private let promptParser = PromptParser()
     private var runTask: Task<Void, Never>?
     private var approvalContinuation: CheckedContinuation<Bool, Never>?
+    private var memoryContinuation: CheckedContinuation<Bool, Never>?
 
     public init() {
         let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
             .flatMap(Provider.init(rawValue:)) ?? .zai
         self.selectedProvider = savedProvider
         self.apiKey = Self.savedAPIKey(for: savedProvider)
+        self.permanentlyTrustedApps = UserDefaults.standard
+            .stringArray(forKey: Self.trustedAppsDefaultsKey) ?? []
     }
 
     // MARK: - Actions
@@ -129,6 +163,14 @@ public final class AgentViewModel: UserInteraction {
     public func submit() {
         let task = promptText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !task.isEmpty, phase != .running else { return }
+
+        // A "remember:" prompt only stores memory — no app or API key needed.
+        let explicitMemories = promptParser.explicitMemories(in: task)
+        if !explicitMemories.isEmpty {
+            captureExplicitMemories(explicitMemories)
+            return
+        }
+
         guard !apiKey.isEmpty else {
             phase = .failed("Add your \(selectedProvider.displayName) API key to get started.")
             return
@@ -159,6 +201,8 @@ public final class AgentViewModel: UserInteraction {
             ),
             interaction: self,
             configuration: AgentConfiguration(model: provider.model),
+            memory: memory,
+            permanentlyTrustedApps: Set(permanentlyTrustedApps),
             eventHandler: { [weak self] event in
                 Task { @MainActor in self?.ingest(event) }
             }
@@ -178,9 +222,14 @@ public final class AgentViewModel: UserInteraction {
             pendingApproval = nil
             continuation.resume(returning: false)
         }
+        if let continuation = memoryContinuation {
+            memoryContinuation = nil
+            pendingMemory = nil
+            continuation.resume(returning: false)
+        }
     }
 
-    /// Answer a pending risky-action confirmation.
+    /// Answer a pending action approval.
     public func resolveApproval(_ approved: Bool) {
         guard let continuation = approvalContinuation else { return }
         approvalContinuation = nil
@@ -188,16 +237,45 @@ public final class AgentViewModel: UserInteraction {
         continuation.resume(returning: approved)
     }
 
+    /// Answer a pending memory proposal.
+    public func resolveMemory(_ save: Bool) {
+        guard let continuation = memoryContinuation else { return }
+        memoryContinuation = nil
+        pendingMemory = nil
+        continuation.resume(returning: save)
+    }
+
     /// Toggle between the compact and expanded notch.
     public func toggleExpanded() {
         isExpanded.toggle()
     }
 
+    /// Trust `app` for write actions permanently, across sessions.
+    public func grantPermanentTrust(app: String) {
+        guard !isPermanentlyTrusted(app) else { return }
+        permanentlyTrustedApps.append(app)
+    }
+
+    /// Revoke permanent write trust for `app`.
+    public func revokePermanentTrust(app: String) {
+        permanentlyTrustedApps.removeAll { $0.caseInsensitiveCompare(app) == .orderedSame }
+    }
+
+    /// Whether `app` is on the permanent-trust list.
+    public func isPermanentlyTrusted(_ app: String) -> Bool {
+        permanentlyTrustedApps.contains { $0.caseInsensitiveCompare(app) == .orderedSame }
+    }
+
     // MARK: - UserInteraction
 
-    public func confirmRiskyAction(summary: String) async -> Bool {
+    public func requestApproval(_ request: ApprovalRequest) async -> Bool {
         await withCheckedContinuation { continuation in
-            self.pendingApproval = PendingApproval(summary: summary)
+            self.pendingApproval = PendingApproval(
+                summary: request.summary,
+                tier: request.tier.rawValue,
+                isDestructive: request.tier == .destructive,
+                appName: request.appName
+            )
             self.approvalContinuation = continuation
         }
     }
@@ -205,6 +283,34 @@ public final class AgentViewModel: UserInteraction {
     public func askQuestion(_ question: String) async -> String {
         // v1 surfaces questions in the feed; a richer Q&A UI comes later.
         ""
+    }
+
+    public func confirmMemory(_ proposal: MemoryProposal) async -> Bool {
+        await withCheckedContinuation { continuation in
+            self.pendingMemory = PendingMemory(
+                text: proposal.text,
+                scopeLabel: proposal.scope.displayName
+            )
+            self.memoryContinuation = continuation
+        }
+    }
+
+    // MARK: - Memory
+
+    /// Store the memories from a "remember:" prompt and report it in the feed.
+    private func captureExplicitMemories(_ memories: [MemoryItem]) {
+        promptText = ""
+        feed = []
+        phase = .running
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            var stored = 0
+            for item in memories where await self.memory.add(item) {
+                self.append("Saved to memory: \(item.text)")
+                stored += 1
+            }
+            self.phase = .finished(stored == 0 ? "Already in memory." : "Saved to memory.")
+        }
     }
 
     // MARK: - Agent events
@@ -224,16 +330,22 @@ public final class AgentViewModel: UserInteraction {
             append("Read the screen (\(count) elements)")
         case .message(let text):
             append(text)
-        case .willPerform(_, let summary, _):
-            append(summary)
-        case .awaitingConfirmation(let summary):
-            append("Needs approval: \(summary)")
+        case .memoryRecalled(let items):
+            append("Memory in use — \(items.map(\.text).joined(separator: "; "))")
+        case .willPerform(_, let target, let tier):
+            append(tier == .safe ? target.description : "\(target.description) [\(tier.rawValue)]")
+        case .awaitingConfirmation(let request):
+            append("Needs approval: \(request.summary)")
         case .confirmationDenied(let summary):
             append("Skipped: \(summary)", isError: true)
         case .performed(_, let summary):
             append("Done: \(summary)")
         case .askedUser(let question, _):
             append("Asked: \(question)")
+        case .memoryProposed(let proposal):
+            append("Proposing to remember: \(proposal.text)")
+        case .memoryStored(let item):
+            append("Saved to memory: \(item.text)")
         case .finished(let summary):
             append("Finished — \(summary)")
         case .failed(let reason):

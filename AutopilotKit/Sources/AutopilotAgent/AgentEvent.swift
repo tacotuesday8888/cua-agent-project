@@ -1,4 +1,5 @@
 import AutopilotCore
+import AutopilotMemory
 
 /// An observable event emitted during an agent run, for the live status feed.
 public enum AgentEvent: Sendable {
@@ -12,16 +13,23 @@ public enum AgentEvent: Sendable {
     case observedTree(elementCount: Int)
     /// The model produced a text message.
     case message(String)
-    /// The agent is about to perform an action.
-    case willPerform(tool: AgentTool, summary: String, risk: RiskLevel)
-    /// A risky action is waiting for user approval.
-    case awaitingConfirmation(summary: String)
-    /// The user declined a risky action.
+    /// Memory relevant to this task was recalled into the agent's context.
+    case memoryRecalled([MemoryItem])
+    /// The agent is about to act — surfaces the target before the click or
+    /// keystroke fires, so the UI can highlight the real element.
+    case willPerform(tool: AgentTool, target: ActionTarget, tier: RiskLevel)
+    /// A gated action is waiting for the user's approval.
+    case awaitingConfirmation(ApprovalRequest)
+    /// The user declined a gated action.
     case confirmationDenied(summary: String)
     /// An action completed.
     case performed(tool: AgentTool, summary: String)
     /// The agent asked the user a question and received an answer.
     case askedUser(question: String, answer: String)
+    /// The agent proposed saving a memory.
+    case memoryProposed(MemoryProposal)
+    /// A memory was saved to the local store.
+    case memoryStored(MemoryItem)
     /// The run finished successfully.
     case finished(summary: String)
     /// The run failed.

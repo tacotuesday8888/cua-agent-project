@@ -131,3 +131,28 @@ struct UITreeRendererTests {
         #expect(text.contains("truncated"))
     }
 }
+
+struct ActionTargetTests {
+    @Test func codableRoundTrip() throws {
+        let target = ActionTarget(
+            appName: "Music",
+            elementID: "e3",
+            role: "AXButton",
+            label: "Play",
+            description: "Click \"Play\"",
+            frame: ElementFrame(x: 10, y: 20, width: 80, height: 24)
+        )
+        let decoded = try JSONDecoder().decode(
+            ActionTarget.self,
+            from: JSONEncoder().encode(target)
+        )
+        #expect(decoded == target)
+    }
+
+    @Test func toleratesNoElement() {
+        let target = ActionTarget(appName: "Notes", description: "Press return")
+        #expect(target.elementID == nil)
+        #expect(target.frame == nil)
+        #expect(target.description == "Press return")
+    }
+}

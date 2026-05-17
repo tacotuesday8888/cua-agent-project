@@ -36,7 +36,7 @@ struct ContentView: View {
             }
 
             HStack {
-                TextField("What should I do?", text: $model.promptText)
+                TextField("What should I do?  (or \"remember: …\")", text: $model.promptText)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { model.submit() }
                 runButton
@@ -46,17 +46,23 @@ struct ContentView: View {
                 approvalRow(approval)
             }
 
+            if let memory = model.pendingMemory {
+                memoryRow(memory)
+            }
+
             phaseLine
 
             if !model.feed.isEmpty {
                 feedView
             }
 
+            trustView
+
             Spacer(minLength: 0)
         }
         .padding()
         .frame(width: 480)
-        .frame(minHeight: 380, alignment: .top)
+        .frame(minHeight: 440, alignment: .top)
         .onAppear { model.refreshApps() }
     }
 
@@ -70,18 +76,60 @@ struct ContentView: View {
     }
 
     private func approvalRow(_ approval: AgentViewModel.PendingApproval) -> some View {
-        HStack {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-            Text(approval.summary)
-                .font(.callout)
-            Spacer()
-            Button("Skip") { model.resolveApproval(false) }
-            Button("Approve") { model.resolveApproval(true) }
-                .buttonStyle(.borderedProminent)
+        let accent: Color = approval.isDestructive ? .red : .orange
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Image(systemName: approval.isDestructive
+                    ? "exclamationmark.octagon.fill"
+                    : "exclamationmark.triangle.fill")
+                    .foregroundStyle(accent)
+                Text(approval.summary)
+                    .font(.callout.weight(.medium))
+                Spacer()
+                Text(approval.tier.uppercased())
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(accent)
+            }
+            Text(approval.isDestructive
+                ? "Destructive — this always needs your approval."
+                : "First write to \(approval.appName) this session.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Skip") { model.resolveApproval(false) }
+                Button("Approve") { model.resolveApproval(true) }
+                    .buttonStyle(.borderedProminent)
+            }
         }
         .padding(8)
-        .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .background(accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func memoryRow(_ memory: AgentViewModel.PendingMemory) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Image(systemName: "brain")
+                    .foregroundStyle(.purple)
+                Text("Remember this?")
+                    .font(.callout.weight(.medium))
+                Spacer()
+                Text(memory.scopeLabel)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.purple)
+            }
+            Text(memory.text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Skip") { model.resolveMemory(false) }
+                Button("Remember") { model.resolveMemory(true) }
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(8)
+        .background(.purple.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
     }
 
     @ViewBuilder
@@ -117,6 +165,36 @@ struct ContentView: View {
         }
         .frame(maxHeight: 220)
         .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var trustView: some View {
+        DisclosureGroup("Trusted apps (\(model.permanentlyTrustedApps.count))") {
+            VStack(alignment: .leading, spacing: 4) {
+                if model.permanentlyTrustedApps.isEmpty {
+                    Text("No apps trusted permanently. Writes ask once per session.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(model.permanentlyTrustedApps, id: \.self) { app in
+                    HStack {
+                        Text(app).font(.caption)
+                        Spacer()
+                        Button("Revoke") { model.revokePermanentTrust(app: app) }
+                            .controlSize(.small)
+                    }
+                }
+                if !model.selectedAppName.isEmpty,
+                   !model.isPermanentlyTrusted(model.selectedAppName) {
+                    Button("Trust \(model.selectedAppName) permanently") {
+                        model.grantPermanentTrust(app: model.selectedAppName)
+                    }
+                    .controlSize(.small)
+                }
+            }
+            .padding(.top, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .font(.caption)
     }
 }
 

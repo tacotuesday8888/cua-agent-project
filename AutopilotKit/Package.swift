@@ -8,6 +8,7 @@ let package = Package(
     ],
     products: [
         .library(name: "AutopilotCore", targets: ["AutopilotCore"]),
+        .library(name: "AutopilotMemory", targets: ["AutopilotMemory"]),
         .library(name: "AutopilotLLM", targets: ["AutopilotLLM"]),
         .library(name: "AutopilotAgent", targets: ["AutopilotAgent"]),
         .library(name: "AutopilotPerception", targets: ["AutopilotPerception"]),
@@ -20,12 +21,16 @@ let package = Package(
     targets: [
         .target(name: "AutopilotCore"),
         .target(
+            name: "AutopilotMemory",
+            dependencies: ["AutopilotCore"]
+        ),
+        .target(
             name: "AutopilotLLM",
             dependencies: ["AutopilotCore"]
         ),
         .target(
             name: "AutopilotAgent",
-            dependencies: ["AutopilotCore", "AutopilotLLM"]
+            dependencies: ["AutopilotCore", "AutopilotLLM", "AutopilotMemory"]
         ),
         .target(
             name: "AutopilotPerception",
@@ -48,6 +53,7 @@ let package = Package(
             name: "AutopilotUI",
             dependencies: [
                 "AutopilotCore",
+                "AutopilotMemory",
                 "AutopilotLLM",
                 "AutopilotAgent",
                 "AutopilotMac"
@@ -61,6 +67,7 @@ let package = Package(
             dependencies: [
                 "AutopilotAgent",
                 "AutopilotCore",
+                "AutopilotMemory",
                 "AutopilotLLM",
                 "AutopilotMac"
             ]
@@ -70,12 +77,16 @@ let package = Package(
             dependencies: ["AutopilotCore"]
         ),
         .testTarget(
+            name: "AutopilotMemoryTests",
+            dependencies: ["AutopilotMemory"]
+        ),
+        .testTarget(
             name: "AutopilotLLMTests",
             dependencies: ["AutopilotLLM", "AutopilotCore"]
         ),
         .testTarget(
             name: "AutopilotAgentTests",
-            dependencies: ["AutopilotAgent", "AutopilotCore", "AutopilotLLM"]
+            dependencies: ["AutopilotAgent", "AutopilotCore", "AutopilotLLM", "AutopilotMemory"]
         )
     ]
 )

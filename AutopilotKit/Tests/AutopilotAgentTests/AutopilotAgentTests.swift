@@ -1,39 +1,100 @@
 import AutopilotCore
 import AutopilotLLM
+import AutopilotMemory
 import Foundation
 import Testing
 @testable import AutopilotAgent
 
 struct RiskClassifierTests {
-    private func snapshot(buttonLabel: String) -> UITreeSnapshot {
-        let button = UIElement(id: "e2", role: "AXButton", label: buttonLabel)
+    private func buttonSnapshot(label: String) -> UITreeSnapshot {
+        let button = UIElement(id: "e2", role: "AXButton", label: label)
         let root = UIElement(id: "e1", role: "AXWindow", children: [button])
         return UITreeSnapshot(appName: "App", root: root)
     }
 
-    @Test func destructiveButtonIsRisky() {
-        let risk = RiskClassifier().assess(
-            tool: .click,
-            input: ["element_index": 2],
-            snapshot: snapshot(buttonLabel: "Delete Playlist")
-        )
-        #expect(risk == .risky)
+    private func fieldSnapshot(value: String) -> UITreeSnapshot {
+        let field = UIElement(id: "e2", role: "AXTextField", label: "Note", value: value)
+        let root = UIElement(id: "e1", role: "AXWindow", children: [field])
+        return UITreeSnapshot(appName: "App", root: root)
     }
 
-    @Test func ordinaryButtonIsSafe() {
-        let risk = RiskClassifier().assess(
-            tool: .click,
-            input: ["element_index": 2],
-            snapshot: snapshot(buttonLabel: "Play")
-        )
-        #expect(risk == .safe)
-    }
-
-    @Test func nonClickToolsAreSafe() {
+    @Test func readingAndScrollingAreSafe() {
         let classifier = RiskClassifier()
         #expect(classifier.assess(tool: .getAppState, input: [:], snapshot: nil) == .safe)
-        #expect(classifier.assess(tool: .setValue, input: [:], snapshot: nil) == .safe)
-        #expect(classifier.assess(tool: .scroll, input: [:], snapshot: nil) == .safe)
+        #expect(classifier.assess(tool: .listApps, input: [:], snapshot: nil) == .safe)
+        #expect(classifier.assess(
+            tool: .scroll,
+            input: ["direction": "down"],
+            snapshot: nil
+        ) == .safe)
+    }
+
+    @Test func ordinaryClickIsWrite() {
+        let risk = RiskClassifier().assess(
+            tool: .click,
+            input: ["element_index": 2],
+            snapshot: buttonSnapshot(label: "Play")
+        )
+        #expect(risk == .write)
+    }
+
+    @Test func destructiveButtonIsDestructive() {
+        let risk = RiskClassifier().assess(
+            tool: .click,
+            input: ["element_index": 2],
+            snapshot: buttonSnapshot(label: "Delete Playlist")
+        )
+        #expect(risk == .destructive)
+    }
+
+    @Test func typingAndDraggingAreWrite() {
+        let classifier = RiskClassifier()
+        #expect(classifier.assess(
+            tool: .typeText,
+            input: ["text": "hello"],
+            snapshot: nil
+        ) == .write)
+        #expect(classifier.assess(
+            tool: .drag,
+            input: ["from_element_index": 2, "to_element_index": 3],
+            snapshot: nil
+        ) == .write)
+    }
+
+    @Test func setValueOntoEmptyFieldIsWrite() {
+        let risk = RiskClassifier().assess(
+            tool: .setValue,
+            input: ["element_index": 2, "value": "jazz"],
+            snapshot: fieldSnapshot(value: "")
+        )
+        #expect(risk == .write)
+    }
+
+    @Test func setValueOntoFilledFieldIsDestructive() {
+        let risk = RiskClassifier().assess(
+            tool: .setValue,
+            input: ["element_index": 2, "value": "jazz"],
+            snapshot: fieldSnapshot(value: "existing draft")
+        )
+        #expect(risk == .destructive)
+    }
+
+    @Test func commandDeleteKeyPressIsDestructive() {
+        let risk = RiskClassifier().assess(
+            tool: .pressKey,
+            input: ["key": "delete", "modifiers": ["command"]],
+            snapshot: nil
+        )
+        #expect(risk == .destructive)
+    }
+
+    @Test func plainKeyPressIsWrite() {
+        let risk = RiskClassifier().assess(
+            tool: .pressKey,
+            input: ["key": "return"],
+            snapshot: nil
+        )
+        #expect(risk == .write)
     }
 }
 
@@ -55,6 +116,10 @@ struct ToolCatalogTests {
         #expect(!names.contains("click_element"))
         #expect(!names.contains("key"))
         #expect(!names.contains("screenshot"))
+    }
+
+    @Test func includesProposeMemoryTool() {
+        #expect(ToolCatalog.all.contains { $0.name == "propose_memory" })
     }
 }
 
@@ -87,7 +152,8 @@ struct AgentSessionTests {
             llm: llm,
             computer: computer,
             interaction: AutomaticApproval(),
-            configuration: AgentConfiguration(model: "test", maxSteps: 10)
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory()
         )
 
         let outcome = await session.run(task: "Play some jazz")
@@ -115,7 +181,8 @@ struct AgentSessionTests {
             llm: llm,
             computer: computer,
             interaction: AutomaticApproval(),
-            configuration: AgentConfiguration(model: "test", maxSteps: 10)
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory()
         )
 
         let outcome = await session.run(task: "exercise tools")
@@ -140,7 +207,8 @@ struct AgentSessionTests {
             llm: llm,
             computer: computer,
             interaction: AutomaticApproval(),
-            configuration: AgentConfiguration(model: "test", maxSteps: 10)
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory()
         )
 
         _ = await session.run(task: "click missing")
@@ -173,7 +241,8 @@ struct AgentSessionTests {
             llm: llm,
             computer: computer,
             interaction: AutomaticApproval(),
-            configuration: AgentConfiguration(model: "test")
+            configuration: AgentConfiguration(model: "test", highlightDwell: .zero),
+            memory: makeTestMemory()
         )
 
         let outcome = await session.run(task: "do something")
@@ -197,7 +266,8 @@ struct AgentSessionTests {
             llm: llm,
             computer: computer,
             interaction: DenyingInteraction(),
-            configuration: AgentConfiguration(model: "test")
+            configuration: AgentConfiguration(model: "test", highlightDwell: .zero),
+            memory: makeTestMemory()
         )
 
         let outcome = await session.run(task: "delete the playlist")
@@ -215,7 +285,8 @@ struct AgentSessionTests {
             llm: llm,
             computer: musicComputer(),
             interaction: AutomaticApproval(),
-            configuration: AgentConfiguration(model: "test"),
+            configuration: AgentConfiguration(model: "test", highlightDwell: .zero),
+            memory: makeTestMemory(),
             eventHandler: { collector.append($0) }
         )
 
@@ -240,7 +311,8 @@ struct AgentSessionTests {
             llm: llm,
             computer: computer,
             interaction: AutomaticApproval(),
-            configuration: AgentConfiguration(model: "test", maxSteps: 5)
+            configuration: AgentConfiguration(model: "test", maxSteps: 5, highlightDwell: .zero),
+            memory: makeTestMemory()
         )
 
         let outcome = await session.run(task: "type into search")
@@ -436,10 +508,44 @@ struct ComputerUseSmokeRunnerTests {
     }
 }
 
-/// A `UserInteraction` that declines every risky action, for tests.
+/// A `MemoryStore` backed by a unique temporary directory, for tests.
+func makeTestMemory() -> MemoryStore {
+    MemoryStore(directory: URL.temporaryDirectory.appending(path: UUID().uuidString))
+}
+
+/// A `UserInteraction` that declines every approval and memory prompt.
 struct DenyingInteraction: UserInteraction {
-    func confirmRiskyAction(summary: String) async -> Bool { false }
+    func requestApproval(_ request: ApprovalRequest) async -> Bool { false }
     func askQuestion(_ question: String) async -> String { "" }
+    func confirmMemory(_ proposal: MemoryProposal) async -> Bool { false }
+}
+
+/// A `UserInteraction` that approves every action and saves every proposed
+/// memory, for tests of the accept paths.
+struct AcceptingMemoryInteraction: UserInteraction {
+    func requestApproval(_ request: ApprovalRequest) async -> Bool { true }
+    func askQuestion(_ question: String) async -> String { "" }
+    func confirmMemory(_ proposal: MemoryProposal) async -> Bool { true }
+}
+
+/// A `UserInteraction` that approves every action and counts how many times it
+/// was asked, for tests of the per-app trust gate.
+final class CountingInteraction: UserInteraction, @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    func requestApproval(_ request: ApprovalRequest) async -> Bool {
+        lock.withLock { count += 1 }
+        return true
+    }
+
+    func askQuestion(_ question: String) async -> String { "" }
+    func confirmMemory(_ proposal: MemoryProposal) async -> Bool { false }
+
+    /// How many approval requests have been made so far.
+    var approvalsRequested: Int {
+        lock.withLock { count }
+    }
 }
 
 /// A thread-safe sink that records emitted `AgentEvent`s for assertions.
