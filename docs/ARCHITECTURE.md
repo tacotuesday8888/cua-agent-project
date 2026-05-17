@@ -5,11 +5,15 @@ before the final notch UI exists.
 
 ## Product Shape
 
-Mac Autopilot is a notch-resident macOS assistant that controls one target app
-at a time. The final UI should feel like the notch expands into an assistant,
-then collapses back to a compact status surface while work is running.
+Mac Autopilot is literally based in the MacBook notch. The notch is the app's
+home and primary surface — not a metaphor, not a menu-bar popover, and not an
+ordinary floating window. The assistant originates from the physical notch,
+expands out of it to take a task, and collapses back into it while work runs.
+It controls one target app at a time. On Macs without a notch, a top-center
+fallback stands in for the notch, but the notch-resident architecture is the
+same.
 
-That UX implies a few hard technical seams:
+That product shape implies a few hard technical seams:
 
 - The agent run must be independent of the visible panel state.
 - Approvals, questions, memory proposals, and stop requests must be resumable
@@ -27,8 +31,9 @@ That UX implies a few hard technical seams:
 - `AutopilotLLM` keeps provider calls behind `LLMProvider`.
 - `AutopilotUI.AgentViewModel` bridges agent events and user interactions for
   both the temporary harness and the notch surface.
-- `AutopilotUI.NotchController` owns the floating panel lifecycle and keeps the
-  placeholder notch surface aligned to the top-center screen geometry.
+- `AutopilotUI.NotchController` owns the notch panel lifecycle and keeps the
+  placeholder notch surface aligned to the physical notch (or a top-center
+  fallback on non-notch Macs).
 - API keys are local-only and stored in Keychain under
   `com.langqi.MacAutopilot.llm-api-keys`.
 - Durable memory is local-only under Application Support and must not store
