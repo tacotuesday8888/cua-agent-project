@@ -96,6 +96,40 @@ struct RiskClassifierTests {
         )
         #expect(risk == .write)
     }
+
+    private func iconButtonSnapshot(identifier: String) -> UITreeSnapshot {
+        let button = UIElement(id: "e2", role: "AXButton", identifier: identifier)
+        let root = UIElement(id: "e1", role: "AXWindow", children: [button])
+        return UITreeSnapshot(appName: "App", root: root)
+    }
+
+    @Test func destructiveIdentifierIsDestructive() {
+        // An icon-only button with no label, recognized by its AX identifier.
+        let risk = RiskClassifier().assess(
+            tool: .click,
+            input: ["element_index": 2],
+            snapshot: iconButtonSnapshot(identifier: "deleteAccountButton")
+        )
+        #expect(risk == .destructive)
+    }
+
+    @Test func neutralIdentifierStaysWrite() {
+        let risk = RiskClassifier().assess(
+            tool: .click,
+            input: ["element_index": 2],
+            snapshot: iconButtonSnapshot(identifier: "playButton")
+        )
+        #expect(risk == .write)
+    }
+
+    @Test func secondaryActionOnDestructiveIdentifierIsDestructive() {
+        let risk = RiskClassifier().assess(
+            tool: .performSecondaryAction,
+            input: ["element_index": 2, "action": "AXPress"],
+            snapshot: iconButtonSnapshot(identifier: "sendMessageButton")
+        )
+        #expect(risk == .destructive)
+    }
 }
 
 struct ToolCatalogTests {

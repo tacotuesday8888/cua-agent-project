@@ -8,8 +8,9 @@ import Foundation
 public struct RiskClassifier: Sendable {
     public init() {}
 
-    /// Substrings that, in a clicked element's label or value, mark the action
-    /// as destructive — consequential and hard to reverse.
+    /// Substrings that, in a clicked element's label, value, or accessibility
+    /// identifier, mark the action as destructive — consequential and hard to
+    /// reverse.
     private static let destructiveKeywords: [String] = [
         "delete", "remove", "trash", "discard", "erase",
         "send", "submit", "post", "publish", "share",
@@ -47,7 +48,13 @@ public struct RiskClassifier: Sendable {
         }
     }
 
-    /// Whether the clicked element's label or value carries a destructive word.
+    /// Whether the clicked element's label, value, or accessibility identifier
+    /// carries a destructive word.
+    ///
+    /// The identifier is included so an icon-only button with no visible label
+    /// — but an identifier like `sendButton` — is still recognized. Matching
+    /// stays substring-based: it errs toward asking, which is the safe
+    /// direction for an approval gate.
     private func targetsDestructiveElement(
         _ input: JSONValue,
         _ snapshot: UITreeSnapshot?
@@ -58,7 +65,7 @@ public struct RiskClassifier: Sendable {
         else {
             return false
         }
-        let haystack = [element.label, element.value]
+        let haystack = [element.label, element.value, element.identifier]
             .compactMap { $0 }
             .joined(separator: " ")
             .lowercased()
