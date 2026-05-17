@@ -232,6 +232,40 @@ struct AgentSessionTests {
         #expect(actions.isEmpty)
     }
 
+    @Test func failedActionResultCarriesFreshAppState() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "t1", tool: "click", input: ["element_index": 99]),
+            toolResponse(id: "t2", tool: "done", input: ["summary": "Stopped."])
+        ])
+        let computer = musicComputer()
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory()
+        )
+
+        _ = await session.run(task: "click missing")
+
+        let requests = await llm.requests
+        let toolResult = requests.last?.messages.last?.content.compactMap { block -> ToolResult? in
+            if case .toolResult(let result) = block { return result }
+            return nil
+        }.first
+        let text = toolResult?.content.compactMap { content -> String? in
+            if case .text(let text) = content { return text }
+            return nil
+        }.joined(separator: "\n") ?? ""
+
+        #expect(toolResult?.isError == true)
+        #expect(text.contains("No element e99"))
+        // A failed action re-reads the app so the model recovers at once,
+        // rather than spending a turn calling get_app_state itself.
+        #expect(text.contains("Current state of Music"))
+        #expect(text.contains("\"Play\""))
+    }
+
     @Test func failedDiagnosticsStopsBeforeLLMCall() async {
         let llm = ScriptedLLMProvider([
             toolResponse(id: "t1", tool: "done", input: ["summary": "Should not run."])
