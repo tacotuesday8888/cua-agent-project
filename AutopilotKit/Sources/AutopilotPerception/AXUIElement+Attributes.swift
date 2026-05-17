@@ -41,4 +41,19 @@ extension AXUIElement {
         guard AXValueGetValue(axValue, .cgSize, &size) else { return nil }
         return size
     }
+
+    /// Accessibility action names advertised by this element.
+    func actionNames() -> [String] {
+        var raw: CFArray?
+        let status = AXUIElementCopyActionNames(self, &raw)
+        guard status == .success, let raw else { return [] }
+        return (raw as? [String]) ?? []
+    }
+
+    /// Whether an accessibility attribute can be set directly.
+    func isAttributeSettable(_ attribute: String) -> Bool {
+        var settable = DarwinBoolean(false)
+        let status = AXUIElementIsAttributeSettable(self, attribute as CFString, &settable)
+        return status == .success && settable.boolValue
+    }
 }

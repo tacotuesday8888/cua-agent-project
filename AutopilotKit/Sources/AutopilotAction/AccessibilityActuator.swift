@@ -11,6 +11,7 @@ public struct AccessibilityActuator: Sendable {
     /// Why an actuation failed.
     public enum ActuationError: Error, Sendable {
         case actionFailed(String)
+        case attributeNotSettable(String)
         case unknownKey(String)
     }
 
@@ -18,15 +19,25 @@ public struct AccessibilityActuator: Sendable {
 
     /// Press / activate an element (button, link, menu item, checkbox, …).
     public func press(_ element: AXUIElement) throws {
-        // `kAXPressAction` is a C global; its stable value is "AXPress".
-        let status = AXUIElementPerformAction(element, "AXPress" as CFString)
-        guard status == .success else {
-            throw ActuationError.actionFailed("press failed (AXError \(status.rawValue))")
+        let advertisedActions = actionNames(of: element)
+        let preferredActions = ["AXPress", "AXConfirm", "AXOpen"]
+        let candidates = preferredActions.filter { advertisedActions.contains($0) }
+            + preferredActions.filter { !advertisedActions.contains($0) }
+
+        var failures: [String] = []
+        for action in candidates {
+            let status = AXUIElementPerformAction(element, action as CFString)
+            if status == .success { return }
+            failures.append("\(action): AXError \(status.rawValue)")
         }
+        throw ActuationError.actionFailed("press failed (\(failures.joined(separator: ", ")))")
     }
 
     /// Replace the text value of an element (text field / text area).
     public func setValue(_ element: AXUIElement, to value: String) throws {
+        guard isAttributeSettable(kAXValueAttribute, on: element) else {
+            throw ActuationError.attributeNotSettable(kAXValueAttribute)
+        }
         let status = AXUIElementSetAttributeValue(
             element,
             kAXValueAttribute as CFString,
@@ -38,7 +49,7 @@ public struct AccessibilityActuator: Sendable {
     }
 
     /// Send a key press (with optional modifiers) as a synthesized event.
-    public func pressKey(_ key: KeyPress) throws {
+    public func pressKey(_ key: KeyPress, pid: pid_t? = nil) throws {
         guard let keyCode = KeyCodes.code(for: key.key) else {
             throw ActuationError.unknownKey(key.key)
         }
@@ -51,12 +62,17 @@ public struct AccessibilityActuator: Sendable {
         }
         keyDown.flags = flags
         keyUp.flags = flags
-        keyDown.post(tap: .cghidEventTap)
-        keyUp.post(tap: .cghidEventTap)
+        post(keyDown, pid: pid)
+        post(keyUp, pid: pid)
     }
 
     /// Scroll a number of line-steps in a direction.
-    public func scroll(direction: ScrollDirection, amount: Int) throws {
+    public func scroll(
+        direction: ScrollDirection,
+        amount: Int,
+        at point: CGPoint? = nil,
+        pid: pid_t? = nil
+    ) throws {
         let steps = Int32(max(1, amount))
         let vertical: Int32
         let horizontal: Int32
@@ -76,6 +92,30 @@ public struct AccessibilityActuator: Sendable {
         ) else {
             throw ActuationError.actionFailed("could not create scroll event")
         }
-        event.post(tap: .cghidEventTap)
+        if let point {
+            event.location = point
+        }
+        post(event, pid: pid)
+    }
+
+    private func post(_ event: CGEvent, pid: pid_t?) {
+        if let pid {
+            event.postToPid(pid)
+        } else {
+            event.post(tap: .cghidEventTap)
+        }
+    }
+
+    private func actionNames(of element: AXUIElement) -> [String] {
+        var raw: CFArray?
+        let status = AXUIElementCopyActionNames(element, &raw)
+        guard status == .success, let raw else { return [] }
+        return (raw as? [String]) ?? []
+    }
+
+    private func isAttributeSettable(_ attribute: String, on element: AXUIElement) -> Bool {
+        var settable = DarwinBoolean(false)
+        let status = AXUIElementIsAttributeSettable(element, attribute as CFString, &settable)
+        return status == .success && settable.boolValue
     }
 }

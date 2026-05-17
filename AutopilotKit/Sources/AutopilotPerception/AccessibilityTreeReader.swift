@@ -47,12 +47,15 @@ public struct AccessibilityTreeReader: Sendable {
     public func readWindow(
         pid: pid_t,
         appName: String,
-        bundleIdentifier: String? = nil
+        bundleIdentifier: String? = nil,
+        turnIdentifier: Int? = nil
     ) throws -> WindowScan {
         guard AXIsProcessTrusted() else { throw ReadError.notTrusted }
 
         let app = AXUIElementCreateApplication(pid)
         guard let window = focusedWindow(of: app) else { throw ReadError.noWindow }
+        let windowTitle = window.stringAttribute(kAXTitleAttribute)
+        let windowIdentifier = Self.windowIdentifier(pid: pid, title: windowTitle)
 
         var counter = 0
         var elements: [String: AXUIElement] = [:]
@@ -60,7 +63,10 @@ public struct AccessibilityTreeReader: Sendable {
         let snapshot = UITreeSnapshot(
             appName: appName,
             bundleIdentifier: bundleIdentifier,
-            windowTitle: window.stringAttribute(kAXTitleAttribute),
+            processIdentifier: pid,
+            windowTitle: windowTitle,
+            windowIdentifier: windowIdentifier,
+            turnIdentifier: turnIdentifier,
             root: root
         )
         return WindowScan(snapshot: snapshot, elements: elements)
@@ -90,11 +96,15 @@ public struct AccessibilityTreeReader: Sendable {
         elements[id] = element
 
         let role = element.stringAttribute(kAXRoleAttribute) ?? "AXUnknown"
+        let subrole = element.stringAttribute(kAXSubroleAttribute)
+        let identifier = element.stringAttribute(kAXIdentifierAttribute)
         let label = element.stringAttribute(kAXTitleAttribute)
             ?? element.stringAttribute(kAXDescriptionAttribute)
         let value = element.stringAttribute(kAXValueAttribute)
         let isEnabled = element.attributeValue(kAXEnabledAttribute, as: Bool.self) ?? true
         let isFocused = element.boolAttribute(kAXFocusedAttribute)
+        let isValueSettable = element.isAttributeSettable(kAXValueAttribute)
+        let actions = element.actionNames().sorted()
 
         let position = element.pointAttribute(kAXPositionAttribute) ?? .zero
         let size = element.sizeAttribute(kAXSizeAttribute) ?? .zero
@@ -117,12 +127,81 @@ public struct AccessibilityTreeReader: Sendable {
         return UIElement(
             id: id,
             role: role,
+            subrole: subrole,
+            identifier: identifier,
             label: label,
             value: value,
             isEnabled: isEnabled,
             isFocused: isFocused,
+            isValueSettable: isValueSettable,
+            actions: actions,
             frame: frame,
             children: children
         )
+    }
+
+    /// Best-effort public-API lookup of the matching CoreGraphics window id.
+    ///
+    /// The Accessibility APIs do not expose CGWindowID directly. Reference
+    /// projects use private SPI for an exact mapping; this heuristic keeps the
+    /// production path on public APIs while still enabling targeted screenshots
+    /// for the common single-window case.
+    private static func windowIdentifier(pid: pid_t, title: String?) -> UInt32? {
+        guard
+            let rawWindows = CGWindowListCopyWindowInfo(
+                [.optionOnScreenOnly, .excludeDesktopElements],
+                kCGNullWindowID
+            ) as? [[String: Any]]
+        else {
+            return nil
+        }
+
+        let candidates = rawWindows.filter { info in
+            guard let ownerPID = int32Value(info[kCGWindowOwnerPID as String]) else {
+                return false
+            }
+            return ownerPID == pid
+        }
+
+        if
+            let title,
+            !title.isEmpty,
+            let exact = candidates.first(where: {
+                ($0[kCGWindowName as String] as? String) == title
+            }),
+            let number = uint32Value(exact[kCGWindowNumber as String])
+        {
+            return number
+        }
+
+        return candidates.compactMap { uint32Value($0[kCGWindowNumber as String]) }.first
+    }
+
+    private static func int32Value(_ value: Any?) -> Int32? {
+        switch value {
+        case let value as Int32:
+            return value
+        case let value as Int:
+            return Int32(value)
+        case let value as NSNumber:
+            return value.int32Value
+        default:
+            return nil
+        }
+    }
+
+    private static func uint32Value(_ value: Any?) -> UInt32? {
+        switch value {
+        case let value as UInt32:
+            return value
+        case let value as UInt:
+            return UInt32(value)
+        case let value as Int where value >= 0:
+            return UInt32(value)
+        case let value as NSNumber:
+            return value.uint32Value
+        default:
+            return nil
+        }
     }
 }

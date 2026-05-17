@@ -24,6 +24,10 @@ public struct UIElement: Sendable, Hashable, Codable, Identifiable {
     public let id: String
     /// Accessibility role, e.g. "AXButton", "AXTextField".
     public let role: String
+    /// Accessibility subrole, when the app exposes one.
+    public let subrole: String?
+    /// App-provided accessibility identifier, when available.
+    public let identifier: String?
     /// Human-readable label (AXTitle / AXDescription).
     public let label: String?
     /// Current value, e.g. a text field's contents.
@@ -32,6 +36,10 @@ public struct UIElement: Sendable, Hashable, Codable, Identifiable {
     public let isEnabled: Bool
     /// Whether the element currently holds keyboard focus.
     public let isFocused: Bool
+    /// Whether AXValue can be set directly on this element.
+    public let isValueSettable: Bool
+    /// Accessibility actions exposed by this element, e.g. AXPress or AXOpen.
+    public let actions: [String]
     /// Screen-space frame, used for screenshot disambiguation.
     public let frame: ElementFrame
     /// Child elements.
@@ -40,19 +48,27 @@ public struct UIElement: Sendable, Hashable, Codable, Identifiable {
     public init(
         id: String,
         role: String,
+        subrole: String? = nil,
+        identifier: String? = nil,
         label: String? = nil,
         value: String? = nil,
         isEnabled: Bool = true,
         isFocused: Bool = false,
+        isValueSettable: Bool = false,
+        actions: [String] = [],
         frame: ElementFrame = .zero,
         children: [UIElement] = []
     ) {
         self.id = id
         self.role = role
+        self.subrole = subrole
+        self.identifier = identifier
         self.label = label
         self.value = value
         self.isEnabled = isEnabled
         self.isFocused = isFocused
+        self.isValueSettable = isValueSettable
+        self.actions = actions
         self.frame = frame
         self.children = children
     }
@@ -78,10 +94,14 @@ public extension UIElement {
         UIElement(
             id: self.id,
             role: role,
+            subrole: subrole,
+            identifier: identifier,
             label: label,
             value: self.id == id ? newValue : value,
             isEnabled: isEnabled,
             isFocused: isFocused,
+            isValueSettable: isValueSettable,
+            actions: actions,
             frame: frame,
             children: children.map { $0.settingValue(newValue, forID: id) }
         )
@@ -92,20 +112,29 @@ public extension UIElement {
 public struct UITreeSnapshot: Sendable, Codable {
     public let appName: String
     public let bundleIdentifier: String?
+    public let processIdentifier: Int32?
     public let windowTitle: String?
+    public let windowIdentifier: UInt32?
+    public let turnIdentifier: Int?
     public let root: UIElement
     public let capturedAt: Date
 
     public init(
         appName: String,
         bundleIdentifier: String? = nil,
+        processIdentifier: Int32? = nil,
         windowTitle: String? = nil,
+        windowIdentifier: UInt32? = nil,
+        turnIdentifier: Int? = nil,
         root: UIElement,
         capturedAt: Date = Date()
     ) {
         self.appName = appName
         self.bundleIdentifier = bundleIdentifier
+        self.processIdentifier = processIdentifier
         self.windowTitle = windowTitle
+        self.windowIdentifier = windowIdentifier
+        self.turnIdentifier = turnIdentifier
         self.root = root
         self.capturedAt = capturedAt
     }

@@ -55,9 +55,23 @@ struct UITreeTests {
     }
 
     @Test func settingValueReplacesOnlyTheTarget() {
-        let updated = sampleTree().root.settingValue("jazz", forID: "e2")
-        #expect(updated.firstDescendant(id: "e2")?.value == "jazz")
-        #expect(updated.firstDescendant(id: "e3")?.value == nil)
+        let original = UIElement(
+            id: "e2",
+            role: "AXTextField",
+            subrole: "AXSearchField",
+            identifier: "search-field",
+            label: "Search",
+            value: "",
+            isValueSettable: true,
+            actions: ["AXPress"]
+        )
+        let updated = original.settingValue("jazz", forID: "e2")
+
+        #expect(updated.value == "jazz")
+        #expect(updated.subrole == "AXSearchField")
+        #expect(updated.identifier == "search-field")
+        #expect(updated.isValueSettable)
+        #expect(updated.actions == ["AXPress"])
     }
 }
 
@@ -75,6 +89,35 @@ struct UITreeRendererTests {
         #expect(text.contains("\"Search\""))
         #expect(text.contains("value:\"jazz\""))
         #expect(text.contains("focused"))
+    }
+
+    @Test func compactTextShowsSnapshotAndElementMetadata() {
+        let popup = UIElement(
+            id: "e2",
+            role: "AXPopUpButton",
+            subrole: "AXUnknown",
+            identifier: "account-picker",
+            label: "Account",
+            isValueSettable: true,
+            actions: ["AXPress", "AXShowMenu"]
+        )
+        let root = UIElement(id: "e1", role: "AXWindow", children: [popup])
+        let snapshot = UITreeSnapshot(
+            appName: "Mail",
+            processIdentifier: 123,
+            windowTitle: "Inbox",
+            windowIdentifier: 456,
+            turnIdentifier: 7,
+            root: root
+        )
+
+        let text = UITreeRenderer.compactText(snapshot)
+        #expect(text.contains("Window ID: 456"))
+        #expect(text.contains("Turn: 7"))
+        #expect(text.contains("subrole:AXUnknown"))
+        #expect(text.contains("identifier:account-picker"))
+        #expect(text.contains("settable"))
+        #expect(text.contains("actions:AXShowMenu"))
     }
 
     @Test func compactTextRespectsElementLimit() {

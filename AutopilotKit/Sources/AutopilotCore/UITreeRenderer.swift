@@ -21,6 +21,12 @@ public enum UITreeRenderer {
         if let window = snapshot.windowTitle, !window.isEmpty {
             lines.append("Window: \(window)")
         }
+        if let windowID = snapshot.windowIdentifier {
+            lines.append("Window ID: \(windowID)")
+        }
+        if let turnID = snapshot.turnIdentifier {
+            lines.append("Turn: \(turnID)")
+        }
 
         var rendered = 0
         var truncated = false
@@ -53,17 +59,28 @@ public enum UITreeRenderer {
         guard isInteresting else { return nil }
 
         var parts = ["[\(element.id)]", element.role]
+        if let subrole = element.subrole, !subrole.isEmpty {
+            parts.append("subrole:\(subrole)")
+        }
         if let label = element.label, !label.isEmpty {
             parts.append("\"\(label)\"")
         }
         if let value = element.value, !value.isEmpty {
             parts.append("value:\"\(truncate(value, to: 80))\"")
         }
+        if let identifier = element.identifier, !identifier.isEmpty {
+            parts.append("identifier:\(identifier)")
+        }
         var flags: [String] = []
         if !element.isEnabled { flags.append("disabled") }
         if element.isFocused { flags.append("focused") }
+        if element.isValueSettable { flags.append("settable") }
         if !flags.isEmpty {
             parts.append("(\(flags.joined(separator: ", ")))")
+        }
+        let interestingActions = element.actions.filter { $0 != "AXPress" }
+        if !interestingActions.isEmpty {
+            parts.append("actions:\(interestingActions.joined(separator: ","))")
         }
 
         let indent = String(repeating: "  ", count: depth)

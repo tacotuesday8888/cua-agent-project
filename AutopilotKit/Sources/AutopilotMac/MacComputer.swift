@@ -32,6 +32,10 @@ public actor MacComputer: ComputerControl {
 
     /// Live AX elements from the most recent `captureTree`, keyed by element id.
     private var latestElements: [String: AXUIElement] = [:]
+    /// Sendable metadata from the most recent capture.
+    private var latestSnapshot: UITreeSnapshot?
+    /// Monotonic snapshot counter used to detect stale model context.
+    private var nextTurnIdentifier = 1
 
     public init(
         pid: pid_t,
@@ -48,12 +52,16 @@ public actor MacComputer: ComputerControl {
     }
 
     public func captureTree() async throws -> UITreeSnapshot {
+        let turnIdentifier = nextTurnIdentifier
+        nextTurnIdentifier += 1
         let scan = try reader.readWindow(
             pid: pid,
             appName: appName,
-            bundleIdentifier: bundleIdentifier
+            bundleIdentifier: bundleIdentifier,
+            turnIdentifier: turnIdentifier
         )
         latestElements = scan.elements
+        latestSnapshot = scan.snapshot
         return scan.snapshot
     }
 
@@ -70,17 +78,27 @@ public actor MacComputer: ComputerControl {
         direction: ScrollDirection,
         amount: Int
     ) async throws {
-        // v1 scrolls the frontmost scrollable area; element-targeted scrolling
-        // is a later refinement.
-        try actuator.scroll(direction: direction, amount: amount)
+        let point = elementID.flatMap { latestSnapshot?.element(id: $0)?.frame.center }
+        try actuator.scroll(direction: direction, amount: amount, at: point, pid: pid)
     }
 
     public func pressKey(_ key: KeyPress) async throws {
-        try actuator.pressKey(key)
+        try actuator.pressKey(key, pid: pid)
     }
 
-    public nonisolated func captureScreenshot() async throws -> Data {
+    public func captureScreenshot() async throws -> Data {
+        try await Self.captureScreenshot(windowIdentifier: latestSnapshot?.windowIdentifier)
+    }
+
+    private static func captureScreenshot(windowIdentifier: UInt32?) async throws -> Data {
         let content = try await SCShareableContent.current
+        if
+            let windowIdentifier,
+            let window = content.windows.first(where: { $0.windowID == windowIdentifier })
+        {
+            return try await capture(window: window)
+        }
+
         guard let display = content.displays.first else {
             throw MacComputerError.screenshotUnavailable
         }
@@ -105,5 +123,27 @@ public actor MacComputer: ComputerControl {
             throw MacComputerError.unknownElement(id)
         }
         return element
+    }
+
+    private static func capture(window: SCWindow) async throws -> Data {
+        let filter = SCContentFilter(desktopIndependentWindow: window)
+        let configuration = SCStreamConfiguration()
+        configuration.width = max(1, Int(window.frame.width))
+        configuration.height = max(1, Int(window.frame.height))
+        let image = try await SCScreenshotManager.captureImage(
+            contentFilter: filter,
+            configuration: configuration
+        )
+        guard let png = NSBitmapImageRep(cgImage: image)
+            .representation(using: .png, properties: [:]) else {
+            throw MacComputerError.screenshotUnavailable
+        }
+        return png
+    }
+}
+
+private extension ElementFrame {
+    var center: CGPoint {
+        CGPoint(x: x + width / 2, y: y + height / 2)
     }
 }
