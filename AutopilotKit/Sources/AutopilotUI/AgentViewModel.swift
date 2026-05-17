@@ -53,6 +53,18 @@ public final class AgentViewModel: UserInteraction {
         public let scopeLabel: String
     }
 
+    /// A stored memory shown in the management list.
+    public struct StoredMemory: Sendable, Identifiable {
+        /// The underlying `MemoryItem` id, used to delete it.
+        public let id: UUID
+        /// The remembered fact.
+        public let text: String
+        /// A human label for where it applies, e.g. "Global".
+        public let scopeLabel: String
+        /// How it was captured — "explicit" or "proposed".
+        public let source: String
+    }
+
     /// A clarifying question from the agent, awaiting a user answer.
     public struct PendingQuestion: Sendable, Identifiable {
         public let id = UUID()
@@ -124,6 +136,8 @@ public final class AgentViewModel: UserInteraction {
     public var isExpanded: Bool = false
     /// Recent finished runs, newest first, from the local history store.
     public private(set) var recentRuns: [RunRecord] = []
+    /// Everything the agent currently remembers about the user, newest first.
+    public private(set) var storedMemories: [StoredMemory] = []
     /// Apps the user trusts permanently for write actions; persisted.
     public var permanentlyTrustedApps: [String] {
         didSet {
@@ -193,7 +207,10 @@ public final class AgentViewModel: UserInteraction {
         self.apiKey = Self.savedAPIKey(for: savedProvider)
         self.permanentlyTrustedApps = UserDefaults.standard
             .stringArray(forKey: Self.trustedAppsDefaultsKey) ?? []
-        Task { [weak self] in await self?.loadRecentRuns() }
+        Task { [weak self] in
+            await self?.loadRecentRuns()
+            await self?.loadMemories()
+        }
     }
 
     // MARK: - Actions
@@ -375,6 +392,26 @@ public final class AgentViewModel: UserInteraction {
 
     // MARK: - Memory
 
+    /// Refresh the stored-memory list from the local memory store.
+    public func loadMemories() async {
+        storedMemories = await memory.all().map { item in
+            StoredMemory(
+                id: item.id,
+                text: item.text,
+                scopeLabel: item.scope.displayName,
+                source: item.source.rawValue
+            )
+        }
+    }
+
+    /// Forget a stored memory, then refresh the list.
+    public func deleteMemory(id: UUID) {
+        Task { [weak self] in
+            await self?.memory.delete(id: id)
+            await self?.loadMemories()
+        }
+    }
+
     /// Store the memories from a "remember:" prompt and report it in the feed.
     private func captureExplicitMemories(_ memories: [MemoryItem]) {
         promptText = ""
@@ -387,6 +424,7 @@ public final class AgentViewModel: UserInteraction {
                 self.append("Saved to memory: \(item.text)")
                 stored += 1
             }
+            await self.loadMemories()
             self.phase = .finished(stored == 0 ? "Already in memory." : "Saved to memory.")
         }
     }
@@ -432,6 +470,7 @@ public final class AgentViewModel: UserInteraction {
             append("Proposing to remember: \(proposal.text)")
         case .memoryStored(let item):
             append("Saved to memory: \(item.text)")
+            Task { [weak self] in await self?.loadMemories() }
         case .finished(let summary):
             append("Finished — \(summary)")
         case .failed(let reason):

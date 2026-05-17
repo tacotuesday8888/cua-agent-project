@@ -68,6 +68,8 @@ struct ContentView: View {
 
             trustView
 
+            memoryView
+
             Spacer(minLength: 0)
         }
         .padding()
@@ -195,6 +197,35 @@ struct ContentView: View {
         }
         .frame(maxHeight: 220)
         .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var memoryView: some View {
+        DisclosureGroup("Memory (\(model.storedMemories.count))") {
+            VStack(alignment: .leading, spacing: 6) {
+                if model.storedMemories.isEmpty {
+                    Text("Nothing remembered yet. Say \"remember: …\" or approve a suggestion.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(model.storedMemories) { item in
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(item.text)
+                                .font(.caption)
+                            Text("\(item.scopeLabel) · \(item.source)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Forget") { model.deleteMemory(id: item.id) }
+                            .controlSize(.small)
+                    }
+                }
+            }
+            .padding(.top, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .font(.caption)
     }
 
     private var trustView: some View {
