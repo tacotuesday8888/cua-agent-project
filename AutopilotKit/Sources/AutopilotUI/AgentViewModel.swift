@@ -180,6 +180,10 @@ public final class AgentViewModel: UserInteraction {
     private static let trustedAppsDefaultsKey = "AutopilotPermanentlyTrustedApps"
     /// How many recent runs to keep loaded for display.
     private static let recentRunDisplayLimit = 20
+    /// The most live-feed items to retain; older items are dropped so a long
+    /// run's feed does not grow without bound. The expanded notch only shows
+    /// the most recent few, so trimming the rest is invisible to the user.
+    private static let maxFeedItems = 200
 
     private let locator = AppLocator()
     /// The local, persistent memory store, shared with the agent and the
@@ -582,6 +586,9 @@ public final class AgentViewModel: UserInteraction {
 
     private func append(_ text: String, isError: Bool = false) {
         feed.append(FeedItem(text: text, isError: isError))
+        if feed.count > Self.maxFeedItems {
+            feed.removeFirst(feed.count - Self.maxFeedItems)
+        }
     }
 
     private static func savedAPIKey(for provider: Provider) -> String {
