@@ -13,33 +13,47 @@ public struct AnthropicProvider: LLMProvider {
     private let endpoint: URL
     private let apiVersion: String
     private let urlSession: URLSession
+    private let retryPolicy: RetryPolicy
+    /// Per-attempt request timeout, in seconds.
+    private let requestTimeout: Double
 
     public init(
         apiKey: String,
         endpoint: URL = URL(string: "https://api.anthropic.com/v1/messages")!,
         apiVersion: String = "2023-06-01",
-        urlSession: URLSession = .shared
+        urlSession: URLSession = .shared,
+        retryPolicy: RetryPolicy = .standard,
+        requestTimeout: Double = 60
     ) {
         self.apiKey = apiKey
         self.endpoint = endpoint
         self.apiVersion = apiVersion
         self.urlSession = urlSession
+        self.retryPolicy = retryPolicy
+        self.requestTimeout = max(1, requestTimeout)
     }
 
     public func send(_ request: LLMRequest) async throws -> LLMResponse {
         guard !apiKey.isEmpty else { throw LLMError.missingAPIKey }
 
-        var urlRequest = URLRequest(url: endpoint)
-        urlRequest.httpMethod = "POST"
-        urlRequest.setValue("application/json", forHTTPHeaderField: "content-type")
-        urlRequest.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-        urlRequest.setValue(apiVersion, forHTTPHeaderField: "anthropic-version")
-
+        let body: Data
         do {
-            urlRequest.httpBody = try JSONEncoder().encode(WireRequest(request))
+            body = try JSONEncoder().encode(WireRequest(request))
         } catch {
             throw LLMError.decodingFailed("request encoding failed: \(error)")
         }
+
+        return try await retryPolicy.run { try await sendOnce(body: body) }
+    }
+
+    private func sendOnce(body: Data) async throws -> LLMResponse {
+        var urlRequest = URLRequest(url: endpoint)
+        urlRequest.httpMethod = "POST"
+        urlRequest.timeoutInterval = requestTimeout
+        urlRequest.setValue("application/json", forHTTPHeaderField: "content-type")
+        urlRequest.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        urlRequest.setValue(apiVersion, forHTTPHeaderField: "anthropic-version")
+        urlRequest.httpBody = body
 
         let data: Data
         let response: URLResponse

@@ -117,11 +117,88 @@ struct AnthropicProviderTests {
         }
     }
 
-    private func makeProvider() -> AnthropicProvider {
+    @Test func retriesTransientServerError() async throws {
+        let counter = LockedCounter()
+        StubURLProtocol.responder = { request in
+            if counter.increment() == 1 {
+                let http = HTTPURLResponse(url: request.url!, statusCode: 503,
+                                           httpVersion: nil, headerFields: nil)!
+                return (http, Data(#"{"error":"unavailable"}"#.utf8))
+            }
+            let http = HTTPURLResponse(url: request.url!, statusCode: 200,
+                                       httpVersion: nil, headerFields: nil)!
+            return (http, Data(Self.cannedResponse.utf8))
+        }
+        defer { StubURLProtocol.responder = nil }
+
+        let response = try await makeProvider(
+            retryPolicy: RetryPolicy(maxRetries: 1, baseDelaySeconds: 0)
+        ).send(LLMRequest(model: "claude-test", messages: [.user("hello")]))
+
+        #expect(response.text == "Hi")
+        #expect(counter.value == 2)
+    }
+
+    @Test func stopsRetryingAfterLimit() async {
+        let counter = LockedCounter()
+        StubURLProtocol.responder = { request in
+            counter.increment()
+            let http = HTTPURLResponse(url: request.url!, statusCode: 500,
+                                       httpVersion: nil, headerFields: nil)!
+            return (http, Data(#"{"error":"boom"}"#.utf8))
+        }
+        defer { StubURLProtocol.responder = nil }
+
+        do {
+            _ = try await makeProvider(
+                retryPolicy: RetryPolicy(maxRetries: 1, baseDelaySeconds: 0)
+            ).send(LLMRequest(model: "claude-test", messages: [.user("hello")]))
+            Issue.record("expected an HTTP error after retry exhaustion")
+        } catch {
+            #expect(error is LLMError)
+            #expect(counter.value == 2)
+        }
+    }
+
+    @Test func doesNotRetryClientError() async {
+        let counter = LockedCounter()
+        StubURLProtocol.responder = { request in
+            counter.increment()
+            let http = HTTPURLResponse(url: request.url!, statusCode: 400,
+                                       httpVersion: nil, headerFields: nil)!
+            return (http, Data(#"{"error":"bad request"}"#.utf8))
+        }
+        defer { StubURLProtocol.responder = nil }
+
+        do {
+            _ = try await makeProvider(
+                retryPolicy: RetryPolicy(maxRetries: 2, baseDelaySeconds: 0)
+            ).send(LLMRequest(model: "claude-test", messages: [.user("hello")]))
+            Issue.record("expected a client error to be thrown")
+        } catch {
+            #expect(error is LLMError)
+            // A 4xx is not transient — it must not be retried.
+            #expect(counter.value == 1)
+        }
+    }
+
+    private static let cannedResponse = """
+    {
+      "id": "msg_1",
+      "type": "message",
+      "role": "assistant",
+      "content": [{"type": "text", "text": "Hi"}],
+      "stop_reason": "end_turn",
+      "usage": {"input_tokens": 1, "output_tokens": 1}
+    }
+    """
+
+    private func makeProvider(retryPolicy: RetryPolicy = .standard) -> AnthropicProvider {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [StubURLProtocol.self]
         return AnthropicProvider(apiKey: "test-key",
-                                 urlSession: URLSession(configuration: config))
+                                 urlSession: URLSession(configuration: config),
+                                 retryPolicy: retryPolicy)
     }
 }
 
@@ -285,7 +362,7 @@ struct ZAIProviderTests {
         defer { ZAIStubURLProtocol.responder = nil }
 
         let response = try await makeProvider(
-            retryPolicy: ZAIRetryPolicy(maxRetries: 1, baseDelaySeconds: 0)
+            retryPolicy: RetryPolicy(maxRetries: 1, baseDelaySeconds: 0)
         ).send(LLMRequest(model: "glm-4.7-flash", messages: [.user("hello")]))
 
         #expect(response.text == "Hi")
@@ -307,7 +384,7 @@ struct ZAIProviderTests {
         defer { ZAIStubURLProtocol.responder = nil }
 
         let response = try await makeProvider(
-            retryPolicy: ZAIRetryPolicy(maxRetries: 1, baseDelaySeconds: 0)
+            retryPolicy: RetryPolicy(maxRetries: 1, baseDelaySeconds: 0)
         ).send(LLMRequest(model: "glm-4.7-flash", messages: [.user("hello")]))
 
         #expect(response.text == "Hi")
@@ -326,7 +403,7 @@ struct ZAIProviderTests {
 
         do {
             _ = try await makeProvider(
-                retryPolicy: ZAIRetryPolicy(maxRetries: 1, baseDelaySeconds: 0)
+                retryPolicy: RetryPolicy(maxRetries: 1, baseDelaySeconds: 0)
             ).send(LLMRequest(model: "glm-4.7-flash", messages: [.user("hello")]))
             Issue.record("expected a rate-limit error after retry exhaustion")
         } catch {
@@ -366,7 +443,7 @@ struct ZAIProviderTests {
     }
     """
 
-    private func makeProvider(retryPolicy: ZAIRetryPolicy = .standard) -> ZAIProvider {
+    private func makeProvider(retryPolicy: RetryPolicy = .standard) -> ZAIProvider {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [ZAIStubURLProtocol.self]
         return ZAIProvider(apiKey: "test-key",

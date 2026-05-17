@@ -1,37 +1,6 @@
 import AutopilotCore
 import Foundation
 
-/// Retry behavior for transient Z.ai API failures.
-public struct ZAIRetryPolicy: Sendable, Equatable {
-    /// Number of retries after the first attempt.
-    public let maxRetries: Int
-    /// First retry delay, in seconds, before exponential backoff is applied.
-    public let baseDelaySeconds: Double
-    /// Maximum retry delay, in seconds.
-    public let maxDelaySeconds: Double
-    /// Per-attempt request timeout, in seconds.
-    public let requestTimeoutSeconds: Double
-
-    public static let standard = ZAIRetryPolicy()
-    public static let disabled = ZAIRetryPolicy(
-        maxRetries: 0,
-        baseDelaySeconds: 0,
-        maxDelaySeconds: 0
-    )
-
-    public init(
-        maxRetries: Int = 2,
-        baseDelaySeconds: Double = 1,
-        maxDelaySeconds: Double = 5,
-        requestTimeoutSeconds: Double = 60
-    ) {
-        self.maxRetries = max(0, maxRetries)
-        self.baseDelaySeconds = max(0, baseDelaySeconds)
-        self.maxDelaySeconds = max(0, maxDelaySeconds)
-        self.requestTimeoutSeconds = max(1, requestTimeoutSeconds)
-    }
-}
-
 /// An `LLMProvider` backed by Z.ai's OpenAI-compatible Chat Completions API.
 public struct ZAIProvider: LLMProvider {
     public let identifier = "zai"
@@ -39,18 +8,22 @@ public struct ZAIProvider: LLMProvider {
     private let apiKey: String
     private let endpoint: URL
     private let urlSession: URLSession
-    private let retryPolicy: ZAIRetryPolicy
+    private let retryPolicy: RetryPolicy
+    /// Per-attempt request timeout, in seconds.
+    private let requestTimeout: Double
 
     public init(
         apiKey: String,
         endpoint: URL = URL(string: "https://api.z.ai/api/paas/v4/chat/completions")!,
         urlSession: URLSession = .shared,
-        retryPolicy: ZAIRetryPolicy = .standard
+        retryPolicy: RetryPolicy = .standard,
+        requestTimeout: Double = 60
     ) {
         self.apiKey = apiKey
         self.endpoint = endpoint
         self.urlSession = urlSession
         self.retryPolicy = retryPolicy
+        self.requestTimeout = max(1, requestTimeout)
     }
 
     public func send(_ request: LLMRequest) async throws -> LLMResponse {
@@ -63,25 +36,13 @@ public struct ZAIProvider: LLMProvider {
             throw LLMError.decodingFailed("request encoding failed: \(error)")
         }
 
-        var attempt = 0
-        while true {
-            try Task.checkCancellation()
-            do {
-                return try await sendOnce(body: body)
-            } catch let error as LLMError where shouldRetry(error, attempt: attempt) {
-                let delay = retryDelaySeconds(for: error, attempt: attempt)
-                attempt += 1
-                if delay > 0 {
-                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                }
-            }
-        }
+        return try await retryPolicy.run { try await sendOnce(body: body) }
     }
 
     private func sendOnce(body: Data) async throws -> LLMResponse {
         var urlRequest = URLRequest(url: endpoint)
         urlRequest.httpMethod = "POST"
-        urlRequest.timeoutInterval = retryPolicy.requestTimeoutSeconds
+        urlRequest.timeoutInterval = requestTimeout
         urlRequest.setValue("application/json", forHTTPHeaderField: "content-type")
         urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "authorization")
         urlRequest.httpBody = body
@@ -113,27 +74,6 @@ public struct ZAIProvider: LLMProvider {
         } catch {
             throw LLMError.decodingFailed("response decoding failed: \(error)")
         }
-    }
-
-    private func shouldRetry(_ error: LLMError, attempt: Int) -> Bool {
-        guard attempt < retryPolicy.maxRetries else { return false }
-        switch error {
-        case .network, .rateLimited:
-            return true
-        case .http(let status, _):
-            return [500, 502, 503, 504].contains(status)
-        case .missingAPIKey, .decodingFailed, .invalidResponse:
-            return false
-        }
-    }
-
-    private func retryDelaySeconds(for error: LLMError, attempt: Int) -> Double {
-        if case .rateLimited(let retryAfter) = error, let retryAfter, retryAfter > 0 {
-            return min(retryAfter, retryPolicy.maxDelaySeconds)
-        }
-        guard retryPolicy.baseDelaySeconds > 0 else { return 0 }
-        let exponential = retryPolicy.baseDelaySeconds * pow(2, Double(attempt))
-        return min(exponential, retryPolicy.maxDelaySeconds)
     }
 }
 
