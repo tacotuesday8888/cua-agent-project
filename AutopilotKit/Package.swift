@@ -9,6 +9,7 @@ let package = Package(
     products: [
         .library(name: "AutopilotCore", targets: ["AutopilotCore"]),
         .library(name: "AutopilotMemory", targets: ["AutopilotMemory"]),
+        .library(name: "AutopilotHistory", targets: ["AutopilotHistory"]),
         .library(name: "AutopilotLLM", targets: ["AutopilotLLM"]),
         .library(name: "AutopilotAgent", targets: ["AutopilotAgent"]),
         .library(name: "AutopilotPerception", targets: ["AutopilotPerception"]),
@@ -24,6 +25,7 @@ let package = Package(
             name: "AutopilotMemory",
             dependencies: ["AutopilotCore"]
         ),
+        .target(name: "AutopilotHistory"),
         .target(
             name: "AutopilotLLM",
             dependencies: ["AutopilotCore"]
@@ -54,6 +56,7 @@ let package = Package(
             dependencies: [
                 "AutopilotCore",
                 "AutopilotMemory",
+                "AutopilotHistory",
                 "AutopilotLLM",
                 "AutopilotAgent",
                 "AutopilotMac"
@@ -79,6 +82,10 @@ let package = Package(
         .testTarget(
             name: "AutopilotMemoryTests",
             dependencies: ["AutopilotMemory"]
+        ),
+        .testTarget(
+            name: "AutopilotHistoryTests",
+            dependencies: ["AutopilotHistory"]
         ),
         .testTarget(
             name: "AutopilotLLMTests",

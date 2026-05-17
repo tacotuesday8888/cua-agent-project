@@ -25,7 +25,9 @@ That product shape implies a few hard technical seams:
 
 ## Current Local-First Stack
 
-- `AutopilotAgent` owns the perceive -> decide -> act -> verify loop.
+- `AutopilotAgent` owns the perceive -> decide -> act -> verify loop. It keeps
+  only the most recent UI-tree observations verbatim in the LLM context and
+  prunes older ones, so a long run's token cost stays bounded.
 - `AutopilotMac` implements the real macOS `ComputerControl` driver with AX
   tree reads, AX actions, synthesized input, and screenshot fallback.
 - `AutopilotLLM` keeps provider calls behind `LLMProvider`.
@@ -38,6 +40,8 @@ That product shape implies a few hard technical seams:
   `com.langqi.MacAutopilot.llm-api-keys`.
 - Durable memory is local-only under Application Support and must not store
   secrets.
+- `AutopilotHistory` persists a redacted log of finished runs (`RunRecord`)
+  under Application Support, capped to the most recent entries.
 
 ## GLM 4.7 Flash
 
@@ -84,10 +88,10 @@ The agent should treat a run as a durable state machine:
 - `finished`: completed with a summary.
 - `failed`: stopped, permission-blocked, provider-blocked, or errored.
 
-Today this state is in `AgentViewModel` and the event stream. A future local
-history store should persist redacted run metadata only: timestamps, target app,
-status, high-level actions, and final summary. Full AX trees, screenshots,
-prompts, answers, and provider responses should stay off by default because
+Live run state is in `AgentViewModel` and the event stream. `AutopilotHistory`
+persists the redacted record of each finished run: the task, target app, model,
+status, summary, ordered tool names, and timestamps. Full AX trees, screenshots,
+prompts, clarifying-question answers, and provider responses are never stored —
 they can contain private user data.
 
 ## Backend And Accounts
@@ -118,7 +122,6 @@ rather than making the agent loop depend on a server.
 - Target-app selection logic for the future `@app` picker.
 - Redesigning `NotchAssistantView` behind the existing `AgentViewModel` and
   `NotchController` contracts.
-- Redacted local session-history primitives.
 - More safety tests around destructive labels, overwrites, and app trust.
 
 ## Work That Should Wait For Notch UI Decisions

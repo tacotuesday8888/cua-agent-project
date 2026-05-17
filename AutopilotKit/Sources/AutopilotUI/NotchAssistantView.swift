@@ -1,3 +1,4 @@
+import AutopilotHistory
 import SwiftUI
 
 /// Placeholder notch-resident assistant surface.
@@ -7,7 +8,7 @@ import SwiftUI
 /// and interaction contracts stay in place.
 public struct NotchAssistantView: View {
     public static let expandedWidth: CGFloat = 460
-    public static let expandedHeight: CGFloat = 430
+    public static let expandedHeight: CGFloat = 488
 
     @Bindable private var model: AgentViewModel
     private let onExpansionChange: @MainActor (Bool) -> Void
@@ -87,6 +88,7 @@ public struct NotchAssistantView: View {
             pendingInteraction
             phaseLine
             feed
+            recentRunsSection
         }
         .padding(.horizontal, 14)
         .padding(.bottom, 14)
@@ -269,6 +271,64 @@ public struct NotchAssistantView: View {
         }
         .frame(maxHeight: 138)
         .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    /// The last few finished runs. Tapping one reloads its task and target so
+    /// the user can re-run or tweak a previous request.
+    @ViewBuilder
+    private var recentRunsSection: some View {
+        if !model.recentRuns.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("RECENT")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.4))
+                ForEach(model.recentRuns.prefix(3)) { run in
+                    runRow(run)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func runRow(_ run: RunRecord) -> some View {
+        Button {
+            model.promptText = run.task
+            model.selectedAppName = run.appName
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: Self.runGlyph(run.status))
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(Self.runColor(run.status))
+                Text(run.task)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.82))
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text("\(run.appName) · \(run.actionCount)")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .lineLimit(1)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Reuse this task")
+    }
+
+    private static func runGlyph(_ status: RunStatus) -> String {
+        switch status {
+        case .completed: "checkmark.circle.fill"
+        case .stopped: "stop.circle.fill"
+        case .failed: "exclamationmark.triangle.fill"
+        }
+    }
+
+    private static func runColor(_ status: RunStatus) -> Color {
+        switch status {
+        case .completed: .green
+        case .stopped: .yellow
+        case .failed: .red
+        }
     }
 
     private var statusGlyph: some View {

@@ -1,5 +1,6 @@
 import AutopilotAgent
 import AutopilotCore
+import AutopilotHistory
 import AutopilotLLM
 import AutopilotMac
 import AutopilotMemory
@@ -117,6 +118,8 @@ public final class AgentViewModel: UserInteraction {
     public var questionAnswerText: String = ""
     /// Whether the notch is expanded to its full panel.
     public var isExpanded: Bool = false
+    /// Recent finished runs, newest first, from the local history store.
+    public private(set) var recentRuns: [RunRecord] = []
     /// Apps the user trusts permanently for write actions; persisted.
     public var permanentlyTrustedApps: [String] {
         didSet {
@@ -141,16 +144,31 @@ public final class AgentViewModel: UserInteraction {
 
     private static let providerDefaultsKey = "AutopilotLLMProvider"
     private static let trustedAppsDefaultsKey = "AutopilotPermanentlyTrustedApps"
+    /// How many recent runs to keep loaded for display.
+    private static let recentRunDisplayLimit = 20
 
     private let locator = AppLocator()
     /// The local, persistent memory store, shared with the agent and the
     /// (future) memory-management UI.
     private let memory = MemoryStore()
+    /// The local, persistent log of finished runs.
+    private let history = RunHistoryStore()
     private let promptParser = PromptParser()
     private var runTask: Task<Void, Never>?
+    /// Metadata accumulated for the in-flight run, finalized on completion.
+    private var pendingRun: PendingRun?
     private var approvalContinuation: CheckedContinuation<Bool, Never>?
     private var memoryContinuation: CheckedContinuation<Bool, Never>?
     private var questionContinuation: CheckedContinuation<String, Never>?
+
+    /// In-flight run metadata, redacted into a `RunRecord` once the run ends.
+    private struct PendingRun {
+        let task: String
+        let appName: String
+        let model: String
+        let startedAt: Date
+        var performedTools: [String] = []
+    }
 
     public init() {
         let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
@@ -159,6 +177,7 @@ public final class AgentViewModel: UserInteraction {
         self.apiKey = Self.savedAPIKey(for: savedProvider)
         self.permanentlyTrustedApps = UserDefaults.standard
             .stringArray(forKey: Self.trustedAppsDefaultsKey) ?? []
+        Task { [weak self] in await self?.loadRecentRuns() }
     }
 
     // MARK: - Actions
@@ -208,6 +227,12 @@ public final class AgentViewModel: UserInteraction {
         pendingQuestion = nil
         questionAnswerText = ""
         phase = .running
+        pendingRun = PendingRun(
+            task: task,
+            appName: target.name,
+            model: provider.model,
+            startedAt: Date()
+        )
 
         let session = AgentSession(
             llm: Self.makeLLMProvider(provider: provider, apiKey: apiKey),
@@ -375,7 +400,8 @@ public final class AgentViewModel: UserInteraction {
             append("Needs approval: \(request.summary)")
         case .confirmationDenied(let summary):
             append("Skipped: \(summary)", isError: true)
-        case .performed(_, let summary):
+        case .performed(let tool, let summary):
+            pendingRun?.performedTools.append(tool.rawValue)
             append("Done: \(summary)")
         case .actionFailed(let tool, let reason):
             append("\(tool.rawValue) failed — \(reason)", isError: true)
@@ -401,6 +427,50 @@ public final class AgentViewModel: UserInteraction {
         case .failed: phase = .failed(outcome.summary)
         }
         runTask = nil
+        recordHistory(for: outcome)
+    }
+
+    // MARK: - Run history
+
+    /// Refresh the recent-runs list from the local history store.
+    public func loadRecentRuns() async {
+        recentRuns = await history.recent(Self.recentRunDisplayLimit)
+    }
+
+    /// Erase the local run history.
+    public func clearHistory() {
+        Task { [weak self] in
+            await self?.history.clear()
+            await self?.loadRecentRuns()
+        }
+    }
+
+    /// Persist a redacted record of the finished run, then refresh the list.
+    private func recordHistory(for outcome: AgentOutcome) {
+        guard let pending = pendingRun else { return }
+        pendingRun = nil
+        let record = RunRecord(
+            task: pending.task,
+            appName: pending.appName,
+            model: pending.model,
+            status: Self.runStatus(for: outcome.status),
+            summary: outcome.summary,
+            actions: pending.performedTools,
+            startedAt: pending.startedAt,
+            finishedAt: Date()
+        )
+        Task { [weak self] in
+            await self?.history.record(record)
+            await self?.loadRecentRuns()
+        }
+    }
+
+    private static func runStatus(for status: AgentOutcome.Status) -> RunStatus {
+        switch status {
+        case .completed: .completed
+        case .stopped: .stopped
+        case .failed: .failed
+        }
     }
 
     private func append(_ text: String, isError: Bool = false) {
