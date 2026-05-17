@@ -186,6 +186,31 @@ public struct AccessibilityActuator: Sendable {
         post(mouseUp, pid: pid)
     }
 
+    /// Click a screen-space point. Used as a fallback for focus-only elements
+    /// that do not expose a reliable AX focus action.
+    public func click(at point: CGPoint, pid: pid_t? = nil) throws {
+        let source = CGEventSource(stateID: .combinedSessionState)
+        guard
+            let mouseDown = CGEvent(
+                mouseEventSource: source,
+                mouseType: .leftMouseDown,
+                mouseCursorPosition: point,
+                mouseButton: .left
+            ),
+            let mouseUp = CGEvent(
+                mouseEventSource: source,
+                mouseType: .leftMouseUp,
+                mouseCursorPosition: point,
+                mouseButton: .left
+            )
+        else {
+            throw ActuationError.actionFailed("could not create click event")
+        }
+
+        post(mouseDown, pid: pid)
+        post(mouseUp, pid: pid)
+    }
+
     private func post(_ event: CGEvent, pid: pid_t?) {
         if let pid {
             event.postToPid(pid)
@@ -205,5 +230,21 @@ public struct AccessibilityActuator: Sendable {
         var settable = DarwinBoolean(false)
         let status = AXUIElementIsAttributeSettable(element, attribute as CFString, &settable)
         return status == .success && settable.boolValue
+    }
+}
+
+extension AccessibilityActuator.ActuationError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .actionFailed(let detail):
+            return detail
+        case .attributeNotSettable(let attribute):
+            return """
+            \(attribute) is not settable on this element. Call get_app_state and \
+            choose an editable element marked settable.
+            """
+        case .unknownKey(let key):
+            return "Unknown key '\(key)'. Use a supported key name such as return, escape, tab, or a single character."
+        }
     }
 }

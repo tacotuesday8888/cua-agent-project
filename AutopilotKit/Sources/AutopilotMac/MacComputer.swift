@@ -137,7 +137,12 @@ public actor MacComputer: ComputerControl {
 
     public func typeText(_ text: String, into elementID: String?) async throws {
         if let elementID {
-            try actuator.focus(element(for: elementID))
+            let element = try element(for: elementID)
+            do {
+                try actuator.focus(element)
+            } catch {
+                try actuator.click(at: center(of: elementID), pid: pid)
+            }
         }
         try actuator.typeText(text, pid: pid)
     }
@@ -208,7 +213,24 @@ public actor MacComputer: ComputerControl {
                 turnIdentifier: latestSnapshot?.turnIdentifier
             )
         }
+        try validateLiveElement(element, id: id)
         return element
+    }
+
+    private func validateLiveElement(_ element: AXUIElement, id: String) throws {
+        var raw: CFTypeRef?
+        let status = AXUIElementCopyAttributeValue(
+            element,
+            kAXRoleAttribute as CFString,
+            &raw
+        )
+        guard status == .success else {
+            throw ComputerControlError.invalidElement(
+                elementID: id,
+                appName: appName,
+                turnIdentifier: latestSnapshot?.turnIdentifier
+            )
+        }
     }
 
     private func center(of id: String) throws -> CGPoint {
