@@ -162,7 +162,7 @@ prompt field, live feed) — NOT the notch UI.
 
 - The entire `AutopilotKit` package compiles; the `MacAutopilot` app builds
   (`xcodebuild` BUILD SUCCEEDED).
-- `swift test --package-path AutopilotKit` is green: 34 tests pass.
+- `swift test --package-path AutopilotKit` is green: 78 tests pass.
 - The Open Computer Use / Cua-style 9-tool driver surface is implemented and
   covered by mocks.
 - A real AppKit fixture app plus `AutopilotSmokeCLI` now validates the
@@ -174,17 +174,21 @@ prompt field, live feed) — NOT the notch UI.
   direct driver smoke and scripted agent-loop smoke with `--include-screenshot`.
 - `AutopilotSmokeCLI` also has a live-provider smoke mode for Z.ai or Anthropic.
   It reads API keys from environment variables first, then falls back to the
-  same Keychain entries used by the MacAutopilot app. This is ready for the
-  first provider-backed fixture run, but has not been run yet because it needs a
-  real API key and outbound network access.
+  same Keychain entries used by the MacAutopilot app. Z.ai GLM-4.7-Flash is
+  configured in Keychain and the live-provider fixture smoke passed end to end:
+  the model set the fixture input to "live smoke value", clicked Run, and the
+  final app state contained the expected text.
+- `ZAIProvider` retries transient network failures, HTTP 429 rate limits, and
+  5xx provider errors with bounded exponential backoff, because Z.ai can
+  occasionally return temporary overloads.
 - API keys entered in the app harness are stored in Keychain, with migration
   from the old `UserDefaults` keys.
 - Routine verified changes should be committed and pushed when safe.
 
-**Remaining critical caveat:** the LLM-backed app loop has still not completed
-a real user task against a normal third-party app. The low-level AX/action path
-is now smoke-tested, but the perceive → decide → act loop with a live provider
-still needs an interactive run.
+**Remaining critical caveat:** the LLM-backed app loop has passed against the
+controlled fixture app, but not yet against a normal third-party app. Expect the
+first real app run to surface app-specific AX quirks, focus/activation issues,
+or model tool-choice recovery work.
 
 ---
 
@@ -199,12 +203,11 @@ still needs an interactive run.
      show / expand / collapse orchestration with the `NotchWindow`.
    - Wiring the notch UI into the app's `@main` (the app currently shows the
      test-harness `ContentView` in a normal window).
-2. **First LLM-backed end-to-end run** — run the app, grant Accessibility +
-   Screen Recording permissions, enter a provider API key, pick a real target
-   app, give the agent a low-risk task, and verify the full perceive → decide
-   → act → verify loop. The real AX/action layer has fixture smoke coverage now;
-   expect remaining bugs in LLM tool choice, recovery, and app-specific UI
-   interpretation.
+2. **First LLM-backed real-app run** — run the app, pick a normal target app,
+   give the agent a low-risk task, and verify the full perceive → decide → act
+   → verify loop outside the controlled fixture. The real AX/action layer and
+   live GLM fixture path are smoke-tested now; expect remaining bugs in
+   app-specific UI interpretation.
 3. **`@app` targeting in the agent** — v1 uses an explicit target-app picker;
    the "agent guesses the app, asks to open it" flow is not built.
 4. **Per-app knowledge profiles** — deferred (future moat).
@@ -216,8 +219,9 @@ still needs an interactive run.
 
 - The provider test isolation bug is fixed; Anthropic and Z.ai decode tests pass
   reliably.
-- The real fixture smoke path is green, but it is still a controlled app. The
-  first real third-party app run may surface app-specific AX quirks,
+- The real fixture smoke path and live GLM fixture path are green, but the
+  fixture is still a controlled app. The first real third-party app run may
+  surface app-specific AX quirks,
   focus/activation issues, or model tool-choice problems.
 - `@app` natural-language targeting is not built yet; the app currently uses an
   explicit target-app picker.
@@ -255,8 +259,8 @@ still needs an interactive run.
 
 ## 9. Suggested next steps (in order)
 
-1. **Do the first LLM-backed end-to-end run** against a low-risk real app task.
-2. Fix whatever the first LLM-backed run surfaces in prompt/tool choice,
+1. **Do the first LLM-backed real-app run** against a low-risk real app task.
+2. Fix whatever the first real-app run surfaces in prompt/tool choice,
    recovery, app activation, or app-specific AX behavior.
 3. Build the notch UI views + controller (§6.1) per the design in §2.1.
 4. Wire the notch UI into the app's `@main`; retire the test-harness

@@ -266,6 +266,75 @@ struct ZAIProviderTests {
         #expect(toolFunction["name"] as? String == "done")
     }
 
+    @Test func retriesRateLimitedResponse() async throws {
+        let counter = LockedCounter()
+        ZAIStubURLProtocol.responder = { request in
+            if counter.increment() == 1 {
+                let http = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 429,
+                    httpVersion: nil,
+                    headerFields: ["retry-after": "0"]
+                )!
+                return (http, Data(#"{"error":{"message":"busy"}}"#.utf8))
+            }
+            let http = HTTPURLResponse(url: request.url!, statusCode: 200,
+                                       httpVersion: nil, headerFields: nil)!
+            return (http, Data(Self.cannedZAIResponse.utf8))
+        }
+        defer { ZAIStubURLProtocol.responder = nil }
+
+        let response = try await makeProvider(
+            retryPolicy: ZAIRetryPolicy(maxRetries: 1, baseDelaySeconds: 0)
+        ).send(LLMRequest(model: "glm-4.7-flash", messages: [.user("hello")]))
+
+        #expect(response.text == "Hi")
+        #expect(counter.value == 2)
+    }
+
+    @Test func retriesTransientServerError() async throws {
+        let counter = LockedCounter()
+        ZAIStubURLProtocol.responder = { request in
+            if counter.increment() == 1 {
+                let http = HTTPURLResponse(url: request.url!, statusCode: 503,
+                                           httpVersion: nil, headerFields: nil)!
+                return (http, Data(#"{"error":"unavailable"}"#.utf8))
+            }
+            let http = HTTPURLResponse(url: request.url!, statusCode: 200,
+                                       httpVersion: nil, headerFields: nil)!
+            return (http, Data(Self.cannedZAIResponse.utf8))
+        }
+        defer { ZAIStubURLProtocol.responder = nil }
+
+        let response = try await makeProvider(
+            retryPolicy: ZAIRetryPolicy(maxRetries: 1, baseDelaySeconds: 0)
+        ).send(LLMRequest(model: "glm-4.7-flash", messages: [.user("hello")]))
+
+        #expect(response.text == "Hi")
+        #expect(counter.value == 2)
+    }
+
+    @Test func stopsRetryingAfterLimit() async {
+        let counter = LockedCounter()
+        ZAIStubURLProtocol.responder = { request in
+            counter.increment()
+            let http = HTTPURLResponse(url: request.url!, statusCode: 429,
+                                       httpVersion: nil, headerFields: nil)!
+            return (http, Data(#"{"error":{"message":"busy"}}"#.utf8))
+        }
+        defer { ZAIStubURLProtocol.responder = nil }
+
+        do {
+            _ = try await makeProvider(
+                retryPolicy: ZAIRetryPolicy(maxRetries: 1, baseDelaySeconds: 0)
+            ).send(LLMRequest(model: "glm-4.7-flash", messages: [.user("hello")]))
+            Issue.record("expected a rate-limit error after retry exhaustion")
+        } catch {
+            #expect(error is LLMError)
+            #expect(counter.value == 2)
+        }
+    }
+
     @Test func missingAPIKeyThrows() async {
         do {
             _ = try await ZAIProvider(apiKey: "")
@@ -276,12 +345,34 @@ struct ZAIProviderTests {
         }
     }
 
-    private func makeProvider() -> ZAIProvider {
+    private static let cannedZAIResponse = """
+    {
+      "id": "chatcmpl-1",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "Hi"
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 1,
+        "completion_tokens": 1,
+        "total_tokens": 2
+      }
+    }
+    """
+
+    private func makeProvider(retryPolicy: ZAIRetryPolicy = .standard) -> ZAIProvider {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [ZAIStubURLProtocol.self]
         return ZAIProvider(apiKey: "test-key",
                            endpoint: URL(string: "https://unit.test/chat")!,
-                           urlSession: URLSession(configuration: config))
+                           urlSession: URLSession(configuration: config),
+                           retryPolicy: retryPolicy)
     }
 }
 
@@ -349,5 +440,24 @@ final class ZAIStubURLProtocol: URLProtocol {
             data.append(buffer, count: count)
         }
         return data
+    }
+}
+
+final class LockedCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    @discardableResult
+    func increment() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        count += 1
+        return count
+    }
+
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
     }
 }

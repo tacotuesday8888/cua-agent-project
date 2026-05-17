@@ -105,7 +105,7 @@ rather than making the agent loop depend on a server.
 
 ## Work That Can Continue Before Final UI
 
-- Live GLM fixture smoke run once a Z.AI key and network are available.
+- First low-risk live GLM run against a normal third-party app.
 - Better prompt/tool-choice recovery for stale or missing AX elements.
 - More robust driver diagnostics for permission and target-window failures.
 - Target-app selection logic for the future `@app` picker.
