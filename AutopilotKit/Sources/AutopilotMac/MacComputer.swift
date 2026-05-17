@@ -27,6 +27,7 @@ public actor MacComputer: ComputerControl {
     private let bundleIdentifier: String?
     private let reader: AccessibilityTreeReader
     private let actuator: AccessibilityActuator
+    private let environment: MacComputerEnvironment
 
     /// Live AX elements from the most recent `captureTree`, keyed by element id.
     private var latestElements: [String: AXUIElement] = [:]
@@ -40,13 +41,15 @@ public actor MacComputer: ComputerControl {
         appName: String,
         bundleIdentifier: String? = nil,
         reader: AccessibilityTreeReader = AccessibilityTreeReader(),
-        actuator: AccessibilityActuator = AccessibilityActuator()
+        actuator: AccessibilityActuator = AccessibilityActuator(),
+        environment: MacComputerEnvironment = .live
     ) {
         self.pid = pid
         self.appName = appName
         self.bundleIdentifier = bundleIdentifier
         self.reader = reader
         self.actuator = actuator
+        self.environment = environment
     }
 
     public func captureTree() async throws -> UITreeSnapshot {
@@ -74,53 +77,63 @@ public actor MacComputer: ComputerControl {
         ]
     }
 
-    public func diagnose() async -> ComputerDiagnostics {
-        var checks: [ComputerDiagnosticCheck] = []
-
-        let runningApp = NSRunningApplication(processIdentifier: pid)
-        checks.append(ComputerDiagnosticCheck(
-            id: "target-app",
-            status: runningApp == nil || runningApp?.isTerminated == true ? .failed : .passed,
-            title: "Target app",
-            detail: runningApp == nil || runningApp?.isTerminated == true
-                ? "\(appName) is not running."
-                : "\(appName) is running with pid \(pid).",
-            recovery: runningApp == nil || runningApp?.isTerminated == true
-                ? "Open the app, select it again, then start the task."
-                : nil
-        ))
-
-        let accessibilityTrusted = AccessibilityPermission.isTrusted
-        checks.append(ComputerDiagnosticCheck(
-            id: "accessibility",
-            status: accessibilityTrusted ? .passed : .failed,
-            title: "Accessibility permission",
-            detail: accessibilityTrusted
-                ? "Mac Autopilot can read and control other app UIs."
-                : "Mac Autopilot does not have Accessibility permission.",
-            recovery: accessibilityTrusted
-                ? nil
-                : "Grant Accessibility in System Settings > Privacy & Security > Accessibility."
-        ))
-
-        let screenRecordingTrusted = CGPreflightScreenCaptureAccess()
-        checks.append(ComputerDiagnosticCheck(
-            id: "screen-recording",
-            status: screenRecordingTrusted ? .passed : .warning,
-            title: "Screen Recording permission",
-            detail: screenRecordingTrusted
-                ? "Target-window screenshots are available."
-                : "Screen Recording is not granted, so screenshot fallback may fail.",
-            recovery: screenRecordingTrusted
-                ? nil
-                : "Grant Screen Recording in System Settings > Privacy & Security > Screen Recording."
-        ))
-
-        if accessibilityTrusted, runningApp != nil, runningApp?.isTerminated == false {
-            checks.append(contentsOf: windowDiagnostics())
+    /// Bring the target app forward so input and window reads land on a
+    /// frontmost window, and report what was done.
+    public func prepare() async -> String {
+        let result = await environment.activateTarget(pid)
+        guard result.appFound else {
+            return "\(appName) is not running, so it could not be brought forward."
         }
+        return result.wasHidden
+            ? "Unhid and activated \(appName)."
+            : "Activated \(appName)."
+    }
 
-        return ComputerDiagnostics(appName: appName, checks: checks)
+    public func diagnose() async -> ComputerDiagnostics {
+        let process = environment.targetProcess(pid)
+        let accessibilityTrusted = environment.isAccessibilityTrusted()
+        let screenRecordingTrusted = environment.isScreenRecordingTrusted()
+
+        var inputs = MacDriverDiagnostics.Inputs(
+            appName: appName,
+            process: process,
+            accessibilityTrusted: accessibilityTrusted,
+            screenRecordingTrusted: screenRecordingTrusted,
+            window: nil
+        )
+        if MacDriverDiagnostics.shouldProbeWindows(
+            process: process,
+            accessibilityTrusted: accessibilityTrusted
+        ) {
+            inputs.window = probeWindow()
+        }
+        return ComputerDiagnostics(
+            appName: appName,
+            checks: MacDriverDiagnostics.checks(for: inputs)
+        )
+    }
+
+    /// Read the target window once to classify its availability for the
+    /// readiness checks.
+    private func probeWindow() -> MacDriverDiagnostics.WindowProbe {
+        do {
+            let scan = try reader.readWindow(
+                pid: pid,
+                appName: appName,
+                bundleIdentifier: bundleIdentifier
+            )
+            if scan.isWindowMinimized {
+                return .minimized
+            }
+            return .readable(
+                elementCount: scan.snapshot.root.flattened.count,
+                windowMatched: scan.snapshot.windowIdentifier != nil
+            )
+        } catch AccessibilityTreeReader.ReadError.noWindow {
+            return .noWindow
+        } catch {
+            return .failed(String(describing: error))
+        }
     }
 
     public func click(elementID: String) async throws {
@@ -263,56 +276,6 @@ public actor MacComputer: ComputerControl {
         return png
     }
 
-    private func windowDiagnostics() -> [ComputerDiagnosticCheck] {
-        do {
-            let scan = try reader.readWindow(
-                pid: pid,
-                appName: appName,
-                bundleIdentifier: bundleIdentifier
-            )
-            let count = scan.snapshot.root.flattened.count
-            var checks = [
-                ComputerDiagnosticCheck(
-                    id: "accessibility-tree",
-                    status: .passed,
-                    title: "Accessibility tree",
-                    detail: "Read \(count) accessibility element(s) from the target window."
-                )
-            ]
-            checks.append(ComputerDiagnosticCheck(
-                id: "window-match",
-                status: scan.snapshot.windowIdentifier == nil ? .warning : .passed,
-                title: "Target window match",
-                detail: scan.snapshot.windowIdentifier == nil
-                    ? "Could not match the AX window to a CoreGraphics window id."
-                    : "Matched target window id \(scan.snapshot.windowIdentifier ?? 0).",
-                recovery: scan.snapshot.windowIdentifier == nil
-                    ? "The driver can still use AX, but screenshot fallback may capture the display instead of the window."
-                    : nil
-            ))
-            return checks
-        } catch AccessibilityTreeReader.ReadError.noWindow {
-            return [
-                ComputerDiagnosticCheck(
-                    id: "accessibility-tree",
-                    status: .failed,
-                    title: "Accessibility tree",
-                    detail: "\(appName) exposes no readable window.",
-                    recovery: "Make sure the target app has a visible, unminimized window."
-                )
-            ]
-        } catch {
-            return [
-                ComputerDiagnosticCheck(
-                    id: "accessibility-tree",
-                    status: .failed,
-                    title: "Accessibility tree",
-                    detail: "Could not read \(appName)'s accessibility tree: \(error).",
-                    recovery: "Call get_app_state after confirming the app is visible and permissions are granted."
-                )
-            ]
-        }
-    }
 }
 
 private extension ElementFrame {

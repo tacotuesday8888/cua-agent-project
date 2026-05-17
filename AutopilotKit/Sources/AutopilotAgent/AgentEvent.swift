@@ -5,6 +5,8 @@ import AutopilotMemory
 public enum AgentEvent: Sendable {
     /// The run started for the given task.
     case started(task: String)
+    /// The driver brought the target app forward before the run.
+    case prepared(summary: String)
     /// The driver completed its readiness checks.
     case diagnostics(ComputerDiagnostics)
     /// The agent is waiting on the model.
@@ -24,6 +26,8 @@ public enum AgentEvent: Sendable {
     case confirmationDenied(summary: String)
     /// An action completed.
     case performed(tool: AgentTool, summary: String)
+    /// An action failed; carries the failed tool and a recovery-oriented reason.
+    case actionFailed(tool: AgentTool, reason: String)
     /// The agent asked the user a question and received an answer.
     case askedUser(question: String, answer: String)
     /// The agent proposed saving a memory.

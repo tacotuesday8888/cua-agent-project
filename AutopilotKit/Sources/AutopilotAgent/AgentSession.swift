@@ -94,6 +94,11 @@ public actor AgentSession {
             return await storeExplicitMemories(explicitMemories)
         }
 
+        let preparation = await computer.prepare()
+        if !preparation.isEmpty {
+            emit(.prepared(summary: preparation))
+        }
+
         let diagnostics = await computer.diagnose()
         emit(.diagnostics(diagnostics))
         guard diagnostics.isReady else {
@@ -294,12 +299,33 @@ public actor AgentSession {
             emit(.performed(tool: tool, summary: target.description))
             results.append(.toolResult(ToolResult(toolUseID: use.id, content: content)))
         } catch {
+            let reason = describe(error)
+            emit(.actionFailed(tool: tool, reason: reason))
             results.append(.toolResult(ToolResult(
                 toolUseID: use.id,
-                text: "Action failed: \(describe(error))",
+                text: await failureText(reason: reason),
                 isError: true
             )))
         }
+    }
+
+    /// Build the tool-result text for a failed action.
+    ///
+    /// When the app is still readable, the current state is re-read and
+    /// appended so the model can recover on its next step instead of acting on
+    /// stale element ids from before the failure.
+    private func failureText(reason: String) async -> String {
+        let prefix = "Action failed: \(reason)"
+        guard !Task.isCancelled, let tree = try? await observeTree() else {
+            return prefix
+        }
+        return """
+        \(prefix)
+
+        The app state has been re-read — use the element indexes below, not \
+        earlier ones. Current state of \(computer.appName):
+        \(UITreeRenderer.compactText(tree))
+        """
     }
 
     /// Apply the approval gate. Returns whether the action may run.

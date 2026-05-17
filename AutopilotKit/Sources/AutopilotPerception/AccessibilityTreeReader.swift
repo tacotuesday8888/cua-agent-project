@@ -13,6 +13,8 @@ public struct WindowScan {
     public let snapshot: UITreeSnapshot
     /// Live AX element references, keyed by the snapshot's element ids.
     public let elements: [String: AXUIElement]
+    /// Whether the captured window is currently minimized to the Dock.
+    public let isWindowMinimized: Bool
 }
 
 /// Reads a macOS app's accessibility tree into a `UITreeSnapshot` — the
@@ -56,6 +58,7 @@ public struct AccessibilityTreeReader: Sendable {
         guard let window = focusedWindow(of: app) else { throw ReadError.noWindow }
         let windowTitle = window.stringAttribute(kAXTitleAttribute)
         let windowIdentifier = Self.windowIdentifier(pid: pid, title: windowTitle)
+        let isWindowMinimized = window.boolAttribute(kAXMinimizedAttribute)
 
         var counter = 0
         var elements: [String: AXUIElement] = [:]
@@ -69,7 +72,11 @@ public struct AccessibilityTreeReader: Sendable {
             turnIdentifier: turnIdentifier,
             root: root
         )
-        return WindowScan(snapshot: snapshot, elements: elements)
+        return WindowScan(
+            snapshot: snapshot,
+            elements: elements,
+            isWindowMinimized: isWindowMinimized
+        )
     }
 
     /// Pick the window the user is most likely working in.

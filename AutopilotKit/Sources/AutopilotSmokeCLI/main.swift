@@ -498,6 +498,8 @@ private func formatAgentEvent(_ event: AgentEvent) -> String? {
     switch event {
     case .started(let task):
         return "- started: \(task)"
+    case .prepared(let summary):
+        return "- prepared: \(summary)"
     case .diagnostics(let diagnostics):
         return "- diagnostics: \(diagnostics.summary)"
     case .thinking:
@@ -516,6 +518,8 @@ private func formatAgentEvent(_ event: AgentEvent) -> String? {
         return "- confirmation_denied: \(summary)"
     case .performed(let tool, let summary):
         return "- performed: \(tool.rawValue) - \(summary)"
+    case .actionFailed(let tool, let reason):
+        return "- action_failed: \(tool.rawValue) - \(reason)"
     case .askedUser(let question, _):
         return "- asked_user: \(question) -> answered"
     case .memoryProposed(let proposal):
