@@ -227,6 +227,87 @@ struct AgentSessionTests {
     }
 }
 
+struct ComputerUseSmokeRunnerTests {
+    private func fixtureComputer() -> MockComputer {
+        let field = UIElement(id: "e2", role: "AXTextField", label: "Search", value: "")
+        let button = UIElement(id: "e3", role: "AXButton", label: "Run", actions: ["AXShowMenu"])
+        let root = UIElement(id: "e1", role: "AXWindow", label: "Fixture",
+                             children: [field, button])
+        return MockComputer(appName: "Fixture", root: root, windowTitle: "Fixture")
+    }
+
+    private func fixturePlan(
+        clickElementIndex: Int = 3,
+        textElementIndex: Int = 2
+    ) -> ComputerUseSmokePlan {
+        ComputerUseSmokePlan(
+            clickElementIndex: clickElementIndex,
+            scrollElementIndex: nil,
+            scrollDirection: .down,
+            scrollAmount: 2,
+            textElementIndex: textElementIndex,
+            setValue: "direct value",
+            typeText: "typed value",
+            keyPress: KeyPress(key: "return"),
+            dragFromElementIndex: 2,
+            dragToElementIndex: 3,
+            secondaryElementIndex: 3,
+            secondaryAction: "AXShowMenu"
+        )
+    }
+
+    @Test func smokeRunnerCoversNineToolSurface() async {
+        let computer = fixtureComputer()
+        let report = await ComputerUseSmokeRunner().run(
+            computer: computer,
+            plan: fixturePlan()
+        )
+
+        #expect(report.passed)
+        #expect(report.steps.map(\.toolName) == [
+            "list_apps",
+            "get_app_state",
+            "click",
+            "scroll",
+            "type_text",
+            "press_key",
+            "set_value",
+            "drag",
+            "perform_secondary_action"
+        ])
+
+        let actions = await computer.performedActions
+        #expect(actions == [
+            "click:e3",
+            "scroll:down:2",
+            "typeText:typed value",
+            "key:return",
+            "setValue:e2=direct value",
+            "drag:e2->e3",
+            "secondary:e3:AXShowMenu"
+        ])
+    }
+
+    @Test func smokeRunnerStopsOnFirstFailedTool() async {
+        let computer = fixtureComputer()
+        let report = await ComputerUseSmokeRunner().run(
+            computer: computer,
+            plan: fixturePlan(clickElementIndex: 99)
+        )
+
+        #expect(!report.passed)
+        #expect(report.steps.map(\.toolName) == [
+            "list_apps",
+            "get_app_state",
+            "click"
+        ])
+        #expect(report.steps.last?.detail.contains("No element e99") == true)
+
+        let actions = await computer.performedActions
+        #expect(actions.isEmpty)
+    }
+}
+
 /// A `UserInteraction` that declines every risky action, for tests.
 struct DenyingInteraction: UserInteraction {
     func confirmRiskyAction(summary: String) async -> Bool { false }
