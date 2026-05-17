@@ -1,12 +1,35 @@
 # Mac Autopilot
 
 Native macOS app experiment for an Accessibility-tree-first computer-use agent.
+It reads a target app's accessibility tree, decides with an LLM, acts through
+Accessibility actions and synthesized input, then verifies the result — one app
+at a time.
 
-## Architecture
+## How It Works
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the current notch-led
-architecture, GLM 4.7 Flash setup, safety model, local session-state approach,
-and backend/account plan.
+- The agent runs a perceive → decide → act → verify loop (`AutopilotAgent`)
+  against a single app the user picks, or names inline with `@App` in the task.
+- Perception is the accessibility tree rendered to compact text, with
+  screenshots as a fallback. The transcript keeps only recent observations, so a
+  long run's token cost stays bounded.
+- Actions are risk-gated: reading is free, the first write to an app asks once,
+  and destructive actions (send, delete, pay, overwrite) always ask.
+- The loop stops itself when it repeats one action with no progress, and warns
+  the model as its step budget runs low.
+- The model can ask clarifying questions and propose durable memories, each
+  surfaced for the user to approve. Finished runs are kept in a redacted local
+  history. API keys live in the Keychain; nothing leaves the machine except the
+  chosen LLM provider's calls.
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the notch-led product
+shape, safety model, local session-state approach, and backend/account plan.
+
+## Permissions
+
+Mac Autopilot needs **Accessibility** access to read and control other apps,
+and optionally **Screen Recording** for screenshot fallback. Grant them from
+the app's permissions panel, or in System Settings > Privacy & Security. The
+smoke CLI process needs the same Accessibility grant.
 
 ## Build And Test
 
