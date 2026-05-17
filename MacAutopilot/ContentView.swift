@@ -38,7 +38,7 @@ struct ContentView: View {
             }
 
             HStack {
-                TextField("What should I do?  (or \"remember: …\")", text: $model.promptText)
+                TextField("What should I do?  (\"@App …\" or \"remember: …\")", text: $model.promptText)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { model.submit() }
                 runButton

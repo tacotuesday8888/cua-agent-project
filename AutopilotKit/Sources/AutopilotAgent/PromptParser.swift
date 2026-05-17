@@ -24,4 +24,16 @@ public struct PromptParser: Sendable {
         }
         return []
     }
+
+    /// The `@app` reference in a task, if any: the token following the first
+    /// "@". Lets the user name the target app inline — "@Safari summarize the
+    /// page" — instead of using the picker. An "@" inside a word (an email
+    /// address, say) is left alone.
+    public func appMention(in task: String) -> String? {
+        for word in task.split(whereSeparator: \.isWhitespace) where word.hasPrefix("@") {
+            let name = word.dropFirst().trimmingCharacters(in: .punctuationCharacters)
+            if !name.isEmpty { return name }
+        }
+        return nil
+    }
 }

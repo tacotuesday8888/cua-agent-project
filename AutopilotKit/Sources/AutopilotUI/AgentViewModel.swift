@@ -244,9 +244,16 @@ public final class AgentViewModel: UserInteraction {
             phase = .failed("Add your \(selectedProvider.displayName) API key to get started.")
             return
         }
+        // An "@app" mention in the task picks the target, overriding the picker.
+        var mentionedApp: String?
+        if let mention = promptParser.appMention(in: task),
+           let resolved = locator.runningApp(matching: mention) {
+            selectedAppName = resolved.name
+            mentionedApp = resolved.name
+        }
         let appName = selectedAppName.trimmingCharacters(in: .whitespaces)
         guard !appName.isEmpty, let target = locator.runningApp(matching: appName) else {
-            phase = .failed("Pick the app you want me to operate.")
+            phase = .failed("Pick the app you want me to operate, or name it with @.")
             return
         }
         let provider = selectedProvider
@@ -262,6 +269,9 @@ public final class AgentViewModel: UserInteraction {
         runInputTokens = 0
         runOutputTokens = 0
         append("Model — \(provider.displayName) (\(provider.model))")
+        if let mentionedApp {
+            append("Targeting \(mentionedApp) — named with @ in the task.")
+        }
         pendingApproval = nil
         pendingMemory = nil
         pendingQuestion = nil

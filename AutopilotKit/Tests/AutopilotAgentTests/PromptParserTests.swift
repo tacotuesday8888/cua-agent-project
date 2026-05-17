@@ -33,4 +33,24 @@ struct PromptParserTests {
     @Test func ignoresEmptyFact() {
         #expect(parser.explicitMemories(in: "remember:").isEmpty)
     }
+
+    @Test func extractsLeadingAppMention() {
+        #expect(parser.appMention(in: "@Safari summarize the open page") == "Safari")
+    }
+
+    @Test func extractsAppMentionAnywhere() {
+        #expect(parser.appMention(in: "summarize the page @Notes") == "Notes")
+    }
+
+    @Test func trimsPunctuationAroundAppMention() {
+        #expect(parser.appMention(in: "@Safari, please summarize") == "Safari")
+    }
+
+    @Test func ignoresAtSignInsideAWord() {
+        #expect(parser.appMention(in: "email me at user@example.com") == nil)
+    }
+
+    @Test func returnsNilWhenNoAppMention() {
+        #expect(parser.appMention(in: "summarize the open page") == nil)
+    }
 }
