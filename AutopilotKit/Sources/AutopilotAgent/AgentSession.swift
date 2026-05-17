@@ -14,17 +14,23 @@ public struct AgentConfiguration: Sendable {
     /// How long the agent surfaces an action's target before an un-gated action
     /// runs, so the UI can highlight it. Tests use `.zero`.
     public var highlightDwell: Duration
+    /// How many recent UI-tree observations stay verbatim in the transcript.
+    /// Older ones are replaced with a short placeholder so a long run's context
+    /// does not grow with every screen it has ever read.
+    public var liveObservationWindow: Int
 
     public init(
         model: String,
         maxSteps: Int = 25,
         maxTokens: Int = 4096,
-        highlightDwell: Duration = .milliseconds(400)
+        highlightDwell: Duration = .milliseconds(400),
+        liveObservationWindow: Int = 3
     ) {
         self.model = model
         self.maxSteps = maxSteps
         self.maxTokens = maxTokens
         self.highlightDwell = highlightDwell
+        self.liveObservationWindow = max(1, liveObservationWindow)
     }
 }
 
@@ -65,6 +71,17 @@ public actor AgentSession {
     private var trust: TrustStore
     /// Memory recalled at the start of the run, woven into the system prompt.
     private var recalledMemory: [MemoryItem] = []
+    /// The task being run, kept so a pruned initial message can be rebuilt.
+    private var task = ""
+    /// Tool-use ids whose results embed a full UI-tree render, so the
+    /// transcript compactor can find and prune the stale ones.
+    private var observationToolUseIDs: Set<String> = []
+
+    /// Placeholder left where a stale UI-tree observation was pruned.
+    private static let prunedObservationNote = """
+    [Earlier app state omitted to keep context small. Call get_app_state to \
+    re-read the current screen.]
+    """
 
     public init(
         llm: any LLMProvider,
@@ -86,6 +103,7 @@ public actor AgentSession {
 
     /// Run `task` to completion and return the outcome.
     public func run(task: String) async -> AgentOutcome {
+        self.task = task
         emit(.started(task: task))
 
         // A "remember:" prompt is a storage instruction, not an app task.
@@ -131,6 +149,7 @@ public actor AgentSession {
         for _ in 0..<configuration.maxSteps {
             if Task.isCancelled { return stop() }
             emit(.thinking)
+            compactTranscript()
 
             let response: LLMResponse
             do {
@@ -297,13 +316,22 @@ public actor AgentSession {
         do {
             let content = try await execute(tool: tool, input: use.input)
             emit(.performed(tool: tool, summary: target.description))
+            // Every tool but `list_apps` returns the freshly-read tree, so its
+            // result is an observation the transcript compactor can prune.
+            if tool != .listApps {
+                observationToolUseIDs.insert(use.id)
+            }
             results.append(.toolResult(ToolResult(toolUseID: use.id, content: content)))
         } catch {
             let reason = describe(error)
             emit(.actionFailed(tool: tool, reason: reason))
+            let failure = await failureText(reason: reason)
+            if failure.embeddedTree {
+                observationToolUseIDs.insert(use.id)
+            }
             results.append(.toolResult(ToolResult(
                 toolUseID: use.id,
-                text: await failureText(reason: reason),
+                text: failure.text,
                 isError: true
             )))
         }
@@ -313,19 +341,21 @@ public actor AgentSession {
     ///
     /// When the app is still readable, the current state is re-read and
     /// appended so the model can recover on its next step instead of acting on
-    /// stale element ids from before the failure.
-    private func failureText(reason: String) async -> String {
+    /// stale element ids from before the failure. `embeddedTree` reports
+    /// whether a re-read tree was appended, so the caller can mark the result
+    /// as a prunable observation.
+    private func failureText(reason: String) async -> (text: String, embeddedTree: Bool) {
         let prefix = "Action failed: \(reason)"
         guard !Task.isCancelled, let tree = try? await observeTree() else {
-            return prefix
+            return (prefix, false)
         }
-        return """
+        return ("""
         \(prefix)
 
         The app state has been re-read — use the element indexes below, not \
         earlier ones. Current state of \(computer.appName):
         \(UITreeRenderer.compactText(tree))
-        """
+        """, true)
     }
 
     /// Apply the approval gate. Returns whether the action may run.
@@ -492,6 +522,54 @@ public actor AgentSession {
         Updated state of \(computer.appName):
         \(UITreeRenderer.compactText(tree))
         """)]
+    }
+
+    /// Replace all but the most recent few UI-tree observations with a short
+    /// placeholder, so a long run's context stays bounded instead of carrying
+    /// every screen it has ever read. Tool-use/tool-result pairing is kept
+    /// intact — only the stale result *content* is shrunk.
+    private func compactTranscript() {
+        let window = configuration.liveObservationWindow
+
+        // Observation carriers, oldest first: the initial task message (which
+        // embeds the first tree), then every tool result that embedded a tree.
+        var carriers: [(message: Int, block: Int?)] = [(0, nil)]
+        for (messageIndex, message) in messages.enumerated() {
+            for (blockIndex, block) in message.content.enumerated() {
+                guard case .toolResult(let result) = block,
+                      observationToolUseIDs.contains(result.toolUseID) else {
+                    continue
+                }
+                carriers.append((messageIndex, blockIndex))
+            }
+        }
+        guard carriers.count > window else { return }
+
+        for carrier in carriers.dropLast(window) {
+            guard let blockIndex = carrier.block else {
+                messages[0] = LLMMessage(role: .user, content: [
+                    .text("Task: \(task)\n\n\(Self.prunedObservationNote)")
+                ])
+                continue
+            }
+            messages[carrier.message] = stubbingObservation(
+                at: blockIndex,
+                in: messages[carrier.message]
+            )
+        }
+    }
+
+    /// Return a copy of `message` with the tool-result block at `index` shrunk
+    /// to the prune placeholder, preserving its tool-use id and error flag.
+    private func stubbingObservation(at index: Int, in message: LLMMessage) -> LLMMessage {
+        var content = message.content
+        guard case .toolResult(let result) = content[index] else { return message }
+        content[index] = .toolResult(ToolResult(
+            toolUseID: result.toolUseID,
+            content: [.text(Self.prunedObservationNote)],
+            isError: result.isError
+        ))
+        return LLMMessage(role: message.role, content: content)
     }
 
     private func buildRequest() -> LLMRequest {

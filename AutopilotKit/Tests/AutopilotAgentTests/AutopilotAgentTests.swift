@@ -380,6 +380,108 @@ struct AgentSessionTests {
         let actions = await computer.performedActions
         #expect(actions == ["typeText:e2:focused text"])
     }
+
+    @Test func longRunPrunesStaleObservations() async {
+        var responses = (1...8).map { index in
+            toolResponse(id: "g\(index)", tool: "get_app_state", input: [:])
+        }
+        responses.append(toolResponse(id: "fin", tool: "done", input: ["summary": "Done."]))
+        let llm = ScriptedLLMProvider(responses)
+        let session = AgentSession(
+            llm: llm,
+            computer: musicComputer(),
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(
+                model: "test",
+                maxSteps: 12,
+                highlightDwell: .zero,
+                liveObservationWindow: 3
+            ),
+            memory: makeTestMemory()
+        )
+
+        let outcome = await session.run(task: "read repeatedly")
+        #expect(outcome.status == .completed)
+
+        let requests = await llm.requests
+        // The first request carries only the initial tree — nothing to prune.
+        #expect(occurrences(of: "App: Music", in: allText(in: requests[0])) == 1)
+        // The final request has seen the initial tree plus eight get_app_state
+        // reads, but only the observation window stays verbatim.
+        let finalText = allText(in: requests[requests.count - 1])
+        #expect(occurrences(of: "App: Music", in: finalText) == 3)
+        #expect(occurrences(of: "Earlier app state omitted", in: finalText) >= 1)
+    }
+
+    @Test func prunedTranscriptKeepsToolResultPairing() async {
+        var responses = (1...6).map { index in
+            toolResponse(id: "g\(index)", tool: "get_app_state", input: [:])
+        }
+        responses.append(toolResponse(id: "fin", tool: "done", input: ["summary": "Done."]))
+        let llm = ScriptedLLMProvider(responses)
+        let session = AgentSession(
+            llm: llm,
+            computer: musicComputer(),
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(
+                model: "test",
+                maxSteps: 10,
+                highlightDwell: .zero,
+                liveObservationWindow: 2
+            ),
+            memory: makeTestMemory()
+        )
+
+        let outcome = await session.run(task: "read repeatedly")
+        #expect(outcome.status == .completed)
+
+        // Every tool_use must still have a matching tool_result, pruned or not.
+        let requests = await llm.requests
+        let finalMessages = requests[requests.count - 1].messages
+        let toolUseIDs = Set(finalMessages.flatMap { message in
+            message.content.compactMap { block -> String? in
+                if case .toolUse(let use) = block { return use.id }
+                return nil
+            }
+        })
+        let toolResultIDs = Set(finalMessages.flatMap { message in
+            message.content.compactMap { block -> String? in
+                if case .toolResult(let result) = block { return result.toolUseID }
+                return nil
+            }
+        })
+        #expect(toolUseIDs == toolResultIDs)
+    }
+
+    private func allText(in request: LLMRequest) -> String {
+        request.messages.flatMap { message in
+            message.content.flatMap { block -> [String] in
+                switch block {
+                case .text(let text):
+                    return [text]
+                case .toolResult(let result):
+                    return result.content.compactMap { content in
+                        if case .text(let text) = content { return text }
+                        return nil
+                    }
+                case .toolUse, .image:
+                    return []
+                }
+            }
+        }
+        .joined(separator: "\n")
+    }
+
+    private func occurrences(of needle: String, in haystack: String) -> Int {
+        guard !needle.isEmpty else { return 0 }
+        var count = 0
+        var searchRange = haystack.startIndex..<haystack.endIndex
+        while let found = haystack.range(of: needle, range: searchRange) {
+            count += 1
+            searchRange = found.upperBound..<haystack.endIndex
+        }
+        return count
+    }
 }
 
 struct ComputerUseSmokeRunnerTests {
