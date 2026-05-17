@@ -4,6 +4,7 @@ import AutopilotLLM
 import AutopilotMac
 import Foundation
 import Observation
+import Security
 
 /// The state and logic behind the notch UI.
 ///
@@ -139,7 +140,12 @@ public final class AgentViewModel: UserInteraction {
         }
         let provider = selectedProvider
         let apiKey = apiKey
-        UserDefaults.standard.set(apiKey, forKey: provider.apiKeyDefaultsKey)
+        do {
+            try Self.saveAPIKey(apiKey, for: provider)
+        } catch {
+            phase = .failed("Could not save API key securely: \(error.localizedDescription)")
+            return
+        }
 
         feed = []
         phase = .running
@@ -251,7 +257,26 @@ public final class AgentViewModel: UserInteraction {
     }
 
     private static func savedAPIKey(for provider: Provider) -> String {
-        UserDefaults.standard.string(forKey: provider.apiKeyDefaultsKey) ?? ""
+        if let key = try? APIKeyStore.load(account: provider.apiKeyDefaultsKey),
+           !key.isEmpty {
+            return key
+        }
+
+        guard
+            let legacyKey = UserDefaults.standard.string(forKey: provider.apiKeyDefaultsKey),
+            !legacyKey.isEmpty
+        else {
+            return ""
+        }
+
+        try? APIKeyStore.save(legacyKey, account: provider.apiKeyDefaultsKey)
+        UserDefaults.standard.removeObject(forKey: provider.apiKeyDefaultsKey)
+        return legacyKey
+    }
+
+    private static func saveAPIKey(_ apiKey: String, for provider: Provider) throws {
+        try APIKeyStore.save(apiKey, account: provider.apiKeyDefaultsKey)
+        UserDefaults.standard.removeObject(forKey: provider.apiKeyDefaultsKey)
     }
 
     private static func makeLLMProvider(provider: Provider, apiKey: String) -> any LLMProvider {
@@ -261,5 +286,74 @@ public final class AgentViewModel: UserInteraction {
         case .anthropic:
             AnthropicProvider(apiKey: apiKey)
         }
+    }
+}
+
+private enum APIKeyStore {
+    private static let service = "com.langqi.MacAutopilot.llm-api-keys"
+
+    static func load(account: String) throws -> String {
+        var query = baseQuery(account: account)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        if status == errSecItemNotFound { return "" }
+        guard status == errSecSuccess else { throw KeychainError(status: status) }
+        guard
+            let data = item as? Data,
+            let value = String(data: data, encoding: .utf8)
+        else {
+            return ""
+        }
+        return value
+    }
+
+    static func save(_ value: String, account: String) throws {
+        guard !value.isEmpty else {
+            try delete(account: account)
+            return
+        }
+
+        let data = Data(value.utf8)
+        let query = baseQuery(account: account)
+        let attributes = [kSecValueData as String: data]
+        let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if updateStatus == errSecSuccess { return }
+        guard updateStatus == errSecItemNotFound else {
+            throw KeychainError(status: updateStatus)
+        }
+
+        var addQuery = query
+        addQuery[kSecValueData as String] = data
+        let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+        guard addStatus == errSecSuccess else { throw KeychainError(status: addStatus) }
+    }
+
+    private static func delete(account: String) throws {
+        let status = SecItemDelete(baseQuery(account: account) as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw KeychainError(status: status)
+        }
+    }
+
+    private static func baseQuery(account: String) -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+    }
+}
+
+private struct KeychainError: LocalizedError {
+    let status: OSStatus
+
+    var errorDescription: String? {
+        if let message = SecCopyErrorMessageString(status, nil) as String? {
+            return message
+        }
+        return "Keychain error \(status)"
     }
 }
