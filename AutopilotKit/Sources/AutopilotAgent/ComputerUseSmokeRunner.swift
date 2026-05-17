@@ -49,6 +49,128 @@ public struct ComputerUseSmokePlan: Sendable, Hashable {
     }
 }
 
+/// Accessibility identifiers used by the bundled smoke fixture app.
+public struct ComputerUseSmokeFixtureIdentifiers: Sendable, Hashable {
+    public var clickIdentifier: String
+    public var scrollIdentifier: String?
+    public var textIdentifier: String
+    public var dragFromIdentifier: String
+    public var dragToIdentifier: String
+    public var secondaryIdentifier: String
+    public var secondaryAction: String
+
+    public init(
+        clickIdentifier: String,
+        scrollIdentifier: String? = nil,
+        textIdentifier: String,
+        dragFromIdentifier: String,
+        dragToIdentifier: String,
+        secondaryIdentifier: String,
+        secondaryAction: String
+    ) {
+        self.clickIdentifier = clickIdentifier
+        self.scrollIdentifier = scrollIdentifier
+        self.textIdentifier = textIdentifier
+        self.dragFromIdentifier = dragFromIdentifier
+        self.dragToIdentifier = dragToIdentifier
+        self.secondaryIdentifier = secondaryIdentifier
+        self.secondaryAction = secondaryAction
+    }
+
+    public static let autopilotFixture = ComputerUseSmokeFixtureIdentifiers(
+        clickIdentifier: "autopilot.fixture.run-button",
+        scrollIdentifier: "autopilot.fixture.scroll",
+        textIdentifier: "autopilot.fixture.input",
+        dragFromIdentifier: "autopilot.fixture.drag-source",
+        dragToIdentifier: "autopilot.fixture.drop-target",
+        secondaryIdentifier: "autopilot.fixture.run-button",
+        secondaryAction: "AXPress"
+    )
+}
+
+public enum ComputerUseSmokePlanResolutionError: Error, Sendable, Equatable {
+    case missingElement(identifier: String)
+    case invalidElementID(String)
+}
+
+extension ComputerUseSmokePlanResolutionError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .missingElement(let identifier):
+            return "The fixture tree does not contain accessibility identifier \(identifier)."
+        case .invalidElementID(let id):
+            return "The fixture element id \(id) does not use the expected e<number> format."
+        }
+    }
+}
+
+public extension ComputerUseSmokePlan {
+    /// Resolve the bundled fixture app's accessibility identifiers to the
+    /// element indexes expected by the 9-tool smoke runner.
+    static func autopilotFixturePlan(
+        for snapshot: UITreeSnapshot,
+        identifiers: ComputerUseSmokeFixtureIdentifiers = .autopilotFixture,
+        setValue: String = "direct smoke value",
+        typeText: String = " typed smoke",
+        keyPress: KeyPress = KeyPress(key: "return"),
+        scrollDirection: ScrollDirection = .down,
+        scrollAmount: Int = 3
+    ) throws -> ComputerUseSmokePlan {
+        ComputerUseSmokePlan(
+            clickElementIndex: try index(
+                forIdentifier: identifiers.clickIdentifier,
+                in: snapshot
+            ),
+            scrollElementIndex: try identifiers.scrollIdentifier.map {
+                try index(forIdentifier: $0, in: snapshot)
+            },
+            scrollDirection: scrollDirection,
+            scrollAmount: scrollAmount,
+            textElementIndex: try index(
+                forIdentifier: identifiers.textIdentifier,
+                in: snapshot
+            ),
+            setValue: setValue,
+            typeText: typeText,
+            keyPress: keyPress,
+            dragFromElementIndex: try index(
+                forIdentifier: identifiers.dragFromIdentifier,
+                in: snapshot
+            ),
+            dragToElementIndex: try index(
+                forIdentifier: identifiers.dragToIdentifier,
+                in: snapshot
+            ),
+            secondaryElementIndex: try index(
+                forIdentifier: identifiers.secondaryIdentifier,
+                in: snapshot
+            ),
+            secondaryAction: identifiers.secondaryAction
+        )
+    }
+
+    private static func index(
+        forIdentifier identifier: String,
+        in snapshot: UITreeSnapshot
+    ) throws -> Int {
+        guard let element = snapshot.root.flattened.first(where: {
+            $0.identifier == identifier
+        }) else {
+            throw ComputerUseSmokePlanResolutionError.missingElement(
+                identifier: identifier
+            )
+        }
+        return try index(fromElementID: element.id)
+    }
+
+    private static func index(fromElementID id: String) throws -> Int {
+        guard id.first == "e", let index = Int(id.dropFirst()) else {
+            throw ComputerUseSmokePlanResolutionError.invalidElementID(id)
+        }
+        return index
+    }
+}
+
 /// One smoke-suite step result.
 public struct ComputerUseSmokeStepResult: Sendable, Hashable {
     public enum Status: String, Sendable, Hashable {
@@ -101,7 +223,23 @@ public struct ComputerUseSmokeRunner: Sendable {
         computer: any ComputerControl,
         plan: ComputerUseSmokePlan
     ) async -> ComputerUseSmokeReport {
+        await run(computer: computer, initialPlan: plan, planResolver: nil)
+    }
+
+    public func run(
+        computer: any ComputerControl,
+        planForState planResolver: @escaping @Sendable (ComputerAppState) throws -> ComputerUseSmokePlan
+    ) async -> ComputerUseSmokeReport {
+        await run(computer: computer, initialPlan: nil, planResolver: planResolver)
+    }
+
+    private func run(
+        computer: any ComputerControl,
+        initialPlan: ComputerUseSmokePlan?,
+        planResolver: (@Sendable (ComputerAppState) throws -> ComputerUseSmokePlan)?
+    ) async -> ComputerUseSmokeReport {
         var steps: [ComputerUseSmokeStepResult] = []
+        var plan = initialPlan
 
         var step = await record("list_apps", {
             let apps = try await computer.listApps()
@@ -121,6 +259,9 @@ public struct ComputerUseSmokeRunner: Sendable {
             guard count > 0 else {
                 throw AgentError.computer("get_app_state returned an empty tree")
             }
+            if let planResolver {
+                plan = try planResolver(state)
+            }
             return "Read \(count) element(s)."
         })
         steps.append(step)
@@ -128,9 +269,18 @@ public struct ComputerUseSmokeRunner: Sendable {
             return ComputerUseSmokeReport(appName: computer.appName, steps: steps)
         }
 
+        guard var activePlan = plan else {
+            steps.append(ComputerUseSmokeStepResult(
+                toolName: "resolve_plan",
+                status: .failed,
+                detail: "No smoke plan was provided or resolved from get_app_state."
+            ))
+            return ComputerUseSmokeReport(appName: computer.appName, steps: steps)
+        }
+
         step = await record("click", {
-            try await computer.click(elementID: plan.elementID(plan.clickElementIndex))
-            return "Clicked element \(plan.clickElementIndex)."
+            try await computer.click(elementID: activePlan.elementID(activePlan.clickElementIndex))
+            return "Clicked element \(activePlan.clickElementIndex)."
         })
         steps.append(step)
         guard step.status == .passed else {
@@ -139,29 +289,11 @@ public struct ComputerUseSmokeRunner: Sendable {
 
         step = await record("scroll", {
             try await computer.scroll(
-                elementID: plan.scrollElementIndex.map { plan.elementID($0) },
-                direction: plan.scrollDirection,
-                amount: plan.scrollAmount
+                elementID: activePlan.scrollElementIndex.map { activePlan.elementID($0) },
+                direction: activePlan.scrollDirection,
+                amount: activePlan.scrollAmount
             )
-            return "Scrolled \(plan.scrollDirection.rawValue)."
-        })
-        steps.append(step)
-        guard step.status == .passed else {
-            return ComputerUseSmokeReport(appName: computer.appName, steps: steps)
-        }
-
-        step = await record("type_text", {
-            try await computer.typeText(plan.typeText)
-            return "Typed \(plan.typeText.count) character(s)."
-        })
-        steps.append(step)
-        guard step.status == .passed else {
-            return ComputerUseSmokeReport(appName: computer.appName, steps: steps)
-        }
-
-        step = await record("press_key", {
-            try await computer.pressKey(plan.keyPress)
-            return "Pressed \(plan.keyPress.key)."
+            return "Scrolled \(activePlan.scrollDirection.rawValue)."
         })
         steps.append(step)
         guard step.status == .passed else {
@@ -170,10 +302,41 @@ public struct ComputerUseSmokeRunner: Sendable {
 
         step = await record("set_value", {
             try await computer.setValue(
-                elementID: plan.elementID(plan.textElementIndex),
-                value: plan.setValue
+                elementID: activePlan.elementID(activePlan.textElementIndex),
+                value: activePlan.setValue
             )
-            return "Set element \(plan.textElementIndex)."
+            let state = try await computer.getAppState(includeScreenshot: false)
+            if let planResolver {
+                activePlan = try planResolver(state)
+            }
+            let value = state.snapshot.element(
+                id: activePlan.elementID(activePlan.textElementIndex)
+            )?.value
+            guard value == activePlan.setValue else {
+                let observed = value.map { "'\($0)'" } ?? "nil"
+                throw AgentError.computer(
+                    "set_value did not update element \(activePlan.textElementIndex); observed \(observed)."
+                )
+            }
+            return "Set and verified element \(activePlan.textElementIndex)."
+        })
+        steps.append(step)
+        guard step.status == .passed else {
+            return ComputerUseSmokeReport(appName: computer.appName, steps: steps)
+        }
+
+        step = await record("type_text", {
+            try await computer.typeText(activePlan.typeText)
+            return "Typed \(activePlan.typeText.count) character(s)."
+        })
+        steps.append(step)
+        guard step.status == .passed else {
+            return ComputerUseSmokeReport(appName: computer.appName, steps: steps)
+        }
+
+        step = await record("press_key", {
+            try await computer.pressKey(activePlan.keyPress)
+            return "Pressed \(activePlan.keyPress.key)."
         })
         steps.append(step)
         guard step.status == .passed else {
@@ -182,10 +345,10 @@ public struct ComputerUseSmokeRunner: Sendable {
 
         step = await record("drag", {
             try await computer.drag(
-                fromElementID: plan.elementID(plan.dragFromElementIndex),
-                toElementID: plan.elementID(plan.dragToElementIndex)
+                fromElementID: activePlan.elementID(activePlan.dragFromElementIndex),
+                toElementID: activePlan.elementID(activePlan.dragToElementIndex)
             )
-            return "Dragged \(plan.dragFromElementIndex) to \(plan.dragToElementIndex)."
+            return "Dragged \(activePlan.dragFromElementIndex) to \(activePlan.dragToElementIndex)."
         })
         steps.append(step)
         guard step.status == .passed else {
@@ -194,10 +357,10 @@ public struct ComputerUseSmokeRunner: Sendable {
 
         step = await record("perform_secondary_action", {
             try await computer.performSecondaryAction(
-                elementID: plan.elementID(plan.secondaryElementIndex),
-                action: plan.secondaryAction
+                elementID: activePlan.elementID(activePlan.secondaryElementIndex),
+                action: activePlan.secondaryAction
             )
-            return "Performed \(plan.secondaryAction)."
+            return "Performed \(activePlan.secondaryAction)."
         })
         steps.append(step)
 

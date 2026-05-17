@@ -13,7 +13,9 @@ let package = Package(
         .library(name: "AutopilotPerception", targets: ["AutopilotPerception"]),
         .library(name: "AutopilotAction", targets: ["AutopilotAction"]),
         .library(name: "AutopilotMac", targets: ["AutopilotMac"]),
-        .library(name: "AutopilotUI", targets: ["AutopilotUI"])
+        .library(name: "AutopilotUI", targets: ["AutopilotUI"]),
+        .executable(name: "AutopilotFixtureApp", targets: ["AutopilotFixtureApp"]),
+        .executable(name: "AutopilotSmokeCLI", targets: ["AutopilotSmokeCLI"])
     ],
     targets: [
         .target(name: "AutopilotCore"),
@@ -48,6 +50,17 @@ let package = Package(
                 "AutopilotCore",
                 "AutopilotLLM",
                 "AutopilotAgent",
+                "AutopilotMac"
+            ]
+        ),
+        .executableTarget(
+            name: "AutopilotFixtureApp"
+        ),
+        .executableTarget(
+            name: "AutopilotSmokeCLI",
+            dependencies: [
+                "AutopilotAgent",
+                "AutopilotCore",
                 "AutopilotMac"
             ]
         ),

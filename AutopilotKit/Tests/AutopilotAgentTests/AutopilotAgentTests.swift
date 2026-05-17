@@ -229,8 +229,20 @@ struct AgentSessionTests {
 
 struct ComputerUseSmokeRunnerTests {
     private func fixtureComputer() -> MockComputer {
-        let field = UIElement(id: "e2", role: "AXTextField", label: "Search", value: "")
-        let button = UIElement(id: "e3", role: "AXButton", label: "Run", actions: ["AXShowMenu"])
+        let field = UIElement(
+            id: "e2",
+            role: "AXTextField",
+            identifier: "fixture.input",
+            label: "Search",
+            value: ""
+        )
+        let button = UIElement(
+            id: "e3",
+            role: "AXButton",
+            identifier: "fixture.button",
+            label: "Run",
+            actions: ["AXShowMenu"]
+        )
         let root = UIElement(id: "e1", role: "AXWindow", label: "Fixture",
                              children: [field, button])
         return MockComputer(appName: "Fixture", root: root, windowTitle: "Fixture")
@@ -269,9 +281,9 @@ struct ComputerUseSmokeRunnerTests {
             "get_app_state",
             "click",
             "scroll",
+            "set_value",
             "type_text",
             "press_key",
-            "set_value",
             "drag",
             "perform_secondary_action"
         ])
@@ -280,9 +292,9 @@ struct ComputerUseSmokeRunnerTests {
         #expect(actions == [
             "click:e3",
             "scroll:down:2",
+            "setValue:e2=direct value",
             "typeText:typed value",
             "key:return",
-            "setValue:e2=direct value",
             "drag:e2->e3",
             "secondary:e3:AXShowMenu"
         ])
@@ -305,6 +317,98 @@ struct ComputerUseSmokeRunnerTests {
 
         let actions = await computer.performedActions
         #expect(actions.isEmpty)
+    }
+
+    @Test func fixturePlanResolvesAccessibilityIdentifiers() throws {
+        let input = UIElement(
+            id: "e10",
+            role: "AXTextField",
+            identifier: "fixture.input"
+        )
+        let scroll = UIElement(
+            id: "e11",
+            role: "AXScrollArea",
+            identifier: "fixture.scroll"
+        )
+        let button = UIElement(
+            id: "e12",
+            role: "AXButton",
+            identifier: "fixture.button",
+            actions: ["AXPress"]
+        )
+        let source = UIElement(
+            id: "e13",
+            role: "AXGroup",
+            identifier: "fixture.source"
+        )
+        let target = UIElement(
+            id: "e14",
+            role: "AXGroup",
+            identifier: "fixture.target"
+        )
+        let snapshot = UITreeSnapshot(
+            appName: "Fixture",
+            root: UIElement(
+                id: "e0",
+                role: "AXWindow",
+                children: [input, scroll, button, source, target]
+            )
+        )
+
+        let plan = try ComputerUseSmokePlan.autopilotFixturePlan(
+            for: snapshot,
+            identifiers: ComputerUseSmokeFixtureIdentifiers(
+                clickIdentifier: "fixture.button",
+                scrollIdentifier: "fixture.scroll",
+                textIdentifier: "fixture.input",
+                dragFromIdentifier: "fixture.source",
+                dragToIdentifier: "fixture.target",
+                secondaryIdentifier: "fixture.button",
+                secondaryAction: "AXPress"
+            )
+        )
+
+        #expect(plan.clickElementIndex == 12)
+        #expect(plan.scrollElementIndex == 11)
+        #expect(plan.textElementIndex == 10)
+        #expect(plan.dragFromElementIndex == 13)
+        #expect(plan.dragToElementIndex == 14)
+        #expect(plan.secondaryElementIndex == 12)
+        #expect(plan.secondaryAction == "AXPress")
+    }
+
+    @Test func smokeRunnerCanResolvePlanFromCurrentState() async {
+        let computer = fixtureComputer()
+        let report = await ComputerUseSmokeRunner().run(
+            computer: computer,
+            planForState: { state in
+                try ComputerUseSmokePlan.autopilotFixturePlan(
+                    for: state.snapshot,
+                    identifiers: ComputerUseSmokeFixtureIdentifiers(
+                        clickIdentifier: "fixture.button",
+                        scrollIdentifier: nil,
+                        textIdentifier: "fixture.input",
+                        dragFromIdentifier: "fixture.input",
+                        dragToIdentifier: "fixture.button",
+                        secondaryIdentifier: "fixture.button",
+                        secondaryAction: "AXShowMenu"
+                    )
+                )
+            }
+        )
+
+        #expect(report.passed)
+        #expect(report.steps.map(\.toolName) == [
+            "list_apps",
+            "get_app_state",
+            "click",
+            "scroll",
+            "set_value",
+            "type_text",
+            "press_key",
+            "drag",
+            "perform_secondary_action"
+        ])
     }
 }
 
