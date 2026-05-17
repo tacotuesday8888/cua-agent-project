@@ -234,8 +234,20 @@ public struct NotchAssistantView: View {
         .background(.purple.opacity(0.16), in: RoundedRectangle(cornerRadius: 8))
     }
 
-    @ViewBuilder
     private var phaseLine: some View {
+        HStack(spacing: 6) {
+            phaseLabel
+            Spacer(minLength: 4)
+            if let usage = model.tokenUsageText {
+                Text(usage)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.4))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var phaseLabel: some View {
         switch model.phase {
         case .idle:
             EmptyView()

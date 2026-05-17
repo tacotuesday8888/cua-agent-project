@@ -453,6 +453,57 @@ struct AgentSessionTests {
         #expect(toolUseIDs == toolResultIDs)
     }
 
+    @Test func accumulatesTokenUsageAcrossSteps() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "t1", tool: "get_app_state", input: [:]),
+            toolResponse(id: "t2", tool: "get_app_state", input: [:]),
+            toolResponse(id: "t3", tool: "done", input: ["summary": "Done."])
+        ])
+        let collector = EventCollector()
+        let session = AgentSession(
+            llm: llm,
+            computer: musicComputer(),
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory(),
+            eventHandler: { collector.append($0) }
+        )
+
+        _ = await session.run(task: "read twice")
+
+        let usage = collector.all().compactMap { event -> (Int, Int)? in
+            if case .tokenUsage(let input, let output) = event { return (input, output) }
+            return nil
+        }
+        // One usage event per LLM call, each carrying the cumulative tally.
+        #expect(usage.count == 3)
+        #expect(usage.map(\.0) == [1, 2, 3])
+        #expect(usage.last?.1 == 3)
+    }
+
+    @Test func warnsModelWhenStepBudgetRunsLow() async {
+        let llm = ScriptedLLMProvider((1...3).map { index in
+            toolResponse(id: "g\(index)", tool: "get_app_state", input: [:])
+        })
+        let session = AgentSession(
+            llm: llm,
+            computer: musicComputer(),
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: "test", maxSteps: 3, highlightDwell: .zero),
+            memory: makeTestMemory()
+        )
+
+        let outcome = await session.run(task: "never finishes")
+        #expect(outcome.status == .failed)
+        #expect(outcome.summary.contains("3-step limit"))
+
+        let requests = await llm.requests
+        #expect(requests.count == 3)
+        #expect(!allText(in: requests[0]).contains("Step budget"))
+        #expect(allText(in: requests[1]).contains("2 steps remain"))
+        #expect(allText(in: requests[2]).contains("only 1 step remains"))
+    }
+
     private func allText(in request: LLMRequest) -> String {
         request.messages.flatMap { message in
             message.content.flatMap { block -> [String] in

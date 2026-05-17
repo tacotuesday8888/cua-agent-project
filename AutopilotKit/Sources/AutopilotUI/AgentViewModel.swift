@@ -108,6 +108,10 @@ public final class AgentViewModel: UserInteraction {
     public var phase: Phase = .idle
     /// The live status feed shown in the expanded notch.
     public var feed: [FeedItem] = []
+    /// Cumulative input tokens reported by the provider for the current run.
+    public private(set) var runInputTokens: Int = 0
+    /// Cumulative output tokens reported by the provider for the current run.
+    public private(set) var runOutputTokens: Int = 0
     /// A gated action awaiting approval, or `nil`.
     public var pendingApproval: PendingApproval?
     /// A proposed memory awaiting approval, or `nil`.
@@ -139,6 +143,18 @@ public final class AgentViewModel: UserInteraction {
 
     public var apiKeyPlaceholder: String { selectedProvider.apiKeyPlaceholder }
     public var selectedModelName: String { selectedProvider.model }
+
+    /// A compact "1.2k in · 0.3k out" token-usage label, or `nil` before any
+    /// tokens have been reported.
+    public var tokenUsageText: String? {
+        guard runInputTokens > 0 || runOutputTokens > 0 else { return nil }
+        return "\(Self.compactCount(runInputTokens)) in · "
+            + "\(Self.compactCount(runOutputTokens)) out"
+    }
+
+    private static func compactCount(_ value: Int) -> String {
+        value < 1000 ? "\(value)" : String(format: "%.1fk", Double(value) / 1000)
+    }
 
     // MARK: - Private
 
@@ -221,6 +237,8 @@ public final class AgentViewModel: UserInteraction {
         }
 
         feed = []
+        runInputTokens = 0
+        runOutputTokens = 0
         append("Model — \(provider.displayName) (\(provider.model))")
         pendingApproval = nil
         pendingMemory = nil
@@ -390,6 +408,9 @@ public final class AgentViewModel: UserInteraction {
             break
         case .observedTree(let count):
             append("Read the screen (\(count) elements)")
+        case .tokenUsage(let inputTokens, let outputTokens):
+            runInputTokens = inputTokens
+            runOutputTokens = outputTokens
         case .message(let text):
             append(text)
         case .memoryRecalled(let items):

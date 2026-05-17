@@ -77,11 +77,17 @@ public actor AgentSession {
     /// transcript compactor can find and prune the stale ones.
     private var observationToolUseIDs: Set<String> = []
 
+    /// Cumulative provider token usage across the run's LLM calls.
+    private var cumulativeUsage = LLMResponse.Usage(inputTokens: 0, outputTokens: 0)
+
     /// Placeholder left where a stale UI-tree observation was pruned.
     private static let prunedObservationNote = """
     [Earlier app state omitted to keep context small. Call get_app_state to \
     re-read the current screen.]
     """
+
+    /// Steps remaining at or below which the model is warned to wrap up.
+    private static let budgetWarningThreshold = 5
 
     public init(
         llm: any LLMProvider,
@@ -146,7 +152,7 @@ public actor AgentSession {
             ])
         ]
 
-        for _ in 0..<configuration.maxSteps {
+        for stepIndex in 0..<configuration.maxSteps {
             if Task.isCancelled { return stop() }
             emit(.thinking)
             compactTranscript()
@@ -157,6 +163,7 @@ public actor AgentSession {
             } catch {
                 return fail("LLM error: \(error.localizedDescription)")
             }
+            recordUsage(response.usage)
             messages.append(LLMMessage(role: .assistant, content: response.content))
 
             let assistantText = response.text
@@ -176,10 +183,55 @@ public actor AgentSession {
                     return outcome
                 }
             }
+            appendBudgetNote(
+                stepsRemaining: configuration.maxSteps - stepIndex - 1,
+                to: &results
+            )
             messages.append(LLMMessage(role: .user, content: results))
         }
 
-        return fail("Reached the \(configuration.maxSteps)-step limit.")
+        return fail(
+            "Stopped after the \(configuration.maxSteps)-step limit without an explicit finish."
+        )
+    }
+
+    /// Add `usage` to the run total and surface the running tally.
+    private func recordUsage(_ usage: LLMResponse.Usage) {
+        cumulativeUsage = LLMResponse.Usage(
+            inputTokens: cumulativeUsage.inputTokens + usage.inputTokens,
+            outputTokens: cumulativeUsage.outputTokens + usage.outputTokens
+        )
+        emit(.tokenUsage(
+            inputTokens: cumulativeUsage.inputTokens,
+            outputTokens: cumulativeUsage.outputTokens
+        ))
+    }
+
+    /// When the step budget is running low, append a note to the last tool
+    /// result so the model wraps up while it still has steps to do so.
+    private func appendBudgetNote(stepsRemaining: Int, to results: inout [LLMContentBlock]) {
+        guard stepsRemaining <= Self.budgetWarningThreshold,
+              let lastIndex = results.lastIndex(where: {
+                  if case .toolResult = $0 { return true }
+                  return false
+              }),
+              case .toolResult(let result) = results[lastIndex] else {
+            return
+        }
+        let note = stepsRemaining <= 1
+            ? """
+            Step budget: only 1 step remains. Call done now with a summary of \
+            what you accomplished — any further action will not run.
+            """
+            : """
+            Step budget: \(stepsRemaining) steps remain before the run stops. \
+            Finish the task or call done soon.
+            """
+        results[lastIndex] = .toolResult(ToolResult(
+            toolUseID: result.toolUseID,
+            content: result.content + [.text(note)],
+            isError: result.isError
+        ))
     }
 
     // MARK: - Memory

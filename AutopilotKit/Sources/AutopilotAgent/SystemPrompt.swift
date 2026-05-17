@@ -35,6 +35,9 @@ enum SystemPrompt {
         - Work strictly within the target app; never attempt cross-app tasks.
         - Proceed step by step. Do not invent element indexes — use indexes from \
         get_app_state.
+        - Work efficiently: you have a limited number of steps. Do not re-read \
+        state you already have, and call done as soon as the task is complete \
+        or clearly cannot be done.
         - Consequential actions (delete, send, purchase, …) are gated: the user \
         is asked to approve them. If the user declines, do not retry — find an \
         alternative or finish.

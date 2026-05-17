@@ -506,6 +506,8 @@ private func formatAgentEvent(_ event: AgentEvent) -> String? {
         return "- thinking"
     case .observedTree(let elementCount):
         return "- observed_tree: \(elementCount) element(s)"
+    case .tokenUsage(let inputTokens, let outputTokens):
+        return "- token_usage: \(inputTokens) in / \(outputTokens) out"
     case .message(let message):
         return "- message: \(message)"
     case .memoryRecalled(let items):

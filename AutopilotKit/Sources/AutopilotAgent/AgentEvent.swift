@@ -13,6 +13,8 @@ public enum AgentEvent: Sendable {
     case thinking
     /// The agent observed the UI tree (with its element count).
     case observedTree(elementCount: Int)
+    /// Cumulative provider token usage so far in the run.
+    case tokenUsage(inputTokens: Int, outputTokens: Int)
     /// The model produced a text message.
     case message(String)
     /// Memory relevant to this task was recalled into the agent's context.

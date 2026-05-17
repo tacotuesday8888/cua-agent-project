@@ -56,6 +56,12 @@ struct ContentView: View {
 
             phaseLine
 
+            if let usage = model.tokenUsageText {
+                Text("Tokens — \(usage)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             if !model.feed.isEmpty {
                 feedView
             }
