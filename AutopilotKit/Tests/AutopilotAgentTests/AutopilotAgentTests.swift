@@ -504,6 +504,70 @@ struct AgentSessionTests {
         #expect(allText(in: requests[2]).contains("only 1 step remains"))
     }
 
+    @Test func repeatedActionStopsTheRun() async {
+        let llm = ScriptedLLMProvider((1...3).map { index in
+            toolResponse(id: "c\(index)", tool: "click", input: ["element_index": 3])
+        })
+        let computer = musicComputer()
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory()
+        )
+
+        let outcome = await session.run(task: "click forever")
+        #expect(outcome.status == .failed)
+        #expect(outcome.summary.contains("repeated three times"))
+
+        // The third, looping click is blocked — only the first two run.
+        let actions = await computer.performedActions
+        #expect(actions == ["click:e3", "click:e3"])
+    }
+
+    @Test func repeatedActionWarnsBeforeStopping() async {
+        let llm = ScriptedLLMProvider((1...3).map { index in
+            toolResponse(id: "c\(index)", tool: "click", input: ["element_index": 3])
+        })
+        let session = AgentSession(
+            llm: llm,
+            computer: musicComputer(),
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory()
+        )
+
+        _ = await session.run(task: "click forever")
+
+        // The first click is not flagged; the second draws the loop warning.
+        let requests = await llm.requests
+        #expect(!allText(in: requests[1]).contains("repeated an action identical"))
+        #expect(allText(in: requests[2]).contains("repeated an action identical"))
+    }
+
+    @Test func repeatedScrollDoesNotTripLoopGuard() async {
+        var responses = (1...4).map { index in
+            toolResponse(id: "s\(index)", tool: "scroll", input: ["direction": "down"])
+        }
+        responses.append(toolResponse(id: "fin", tool: "done", input: ["summary": "Done."]))
+        let computer = musicComputer()
+        let session = AgentSession(
+            llm: ScriptedLLMProvider(responses),
+            computer: computer,
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory()
+        )
+
+        let outcome = await session.run(task: "scroll the list")
+        #expect(outcome.status == .completed)
+
+        // Scrolling repeatedly is normal traversal, not a stuck loop.
+        let actions = await computer.performedActions
+        #expect(actions == Array(repeating: "scroll:down:3", count: 4))
+    }
+
     private func allText(in request: LLMRequest) -> String {
         request.messages.flatMap { message in
             message.content.flatMap { block -> [String] in

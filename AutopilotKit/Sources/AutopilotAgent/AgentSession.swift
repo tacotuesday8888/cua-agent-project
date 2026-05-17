@@ -79,6 +79,10 @@ public actor AgentSession {
 
     /// Cumulative provider token usage across the run's LLM calls.
     private var cumulativeUsage = LLMResponse.Usage(inputTokens: 0, outputTokens: 0)
+    /// Signature of the most recent guarded action, for loop detection.
+    private var lastActionSignature: String?
+    /// How many times in a row the same action signature has been seen.
+    private var consecutiveActionRepeats = 0
 
     /// Placeholder left where a stale UI-tree observation was pruned.
     private static let prunedObservationNote = """
@@ -86,8 +90,22 @@ public actor AgentSession {
     re-read the current screen.]
     """
 
+    /// Note appended after a guarded action repeats its predecessor once.
+    private static let repeatedActionNote = """
+    You just repeated an action identical to your previous one. Repeating it \
+    again will stop the run. Try a different element or approach, or call done \
+    if the task cannot be completed.
+    """
+
     /// Steps remaining at or below which the model is warned to wrap up.
     private static let budgetWarningThreshold = 5
+
+    /// Tools where repeating the identical call signals a stuck loop.
+    /// Traversal tools such as scroll and press_key are intentionally excluded,
+    /// since repeating those is a normal way to move through content.
+    private static let loopGuardedTools: Set<AgentTool> = [
+        .click, .setValue, .drag, .performSecondaryAction
+    ]
 
     public init(
         llm: any LLMProvider,
@@ -210,14 +228,7 @@ public actor AgentSession {
     /// When the step budget is running low, append a note to the last tool
     /// result so the model wraps up while it still has steps to do so.
     private func appendBudgetNote(stepsRemaining: Int, to results: inout [LLMContentBlock]) {
-        guard stepsRemaining <= Self.budgetWarningThreshold,
-              let lastIndex = results.lastIndex(where: {
-                  if case .toolResult = $0 { return true }
-                  return false
-              }),
-              case .toolResult(let result) = results[lastIndex] else {
-            return
-        }
+        guard stepsRemaining <= Self.budgetWarningThreshold else { return }
         let note = stepsRemaining <= 1
             ? """
             Step budget: only 1 step remains. Call done now with a summary of \
@@ -227,6 +238,19 @@ public actor AgentSession {
             Step budget: \(stepsRemaining) steps remain before the run stops. \
             Finish the task or call done soon.
             """
+        appendNote(note, to: &results)
+    }
+
+    /// Append `note` as an extra text block on the last tool result, so the
+    /// model reads it alongside that result. Tool-use pairing is unaffected.
+    private func appendNote(_ note: String, to results: inout [LLMContentBlock]) {
+        guard let lastIndex = results.lastIndex(where: {
+                  if case .toolResult = $0 { return true }
+                  return false
+              }),
+              case .toolResult(let result) = results[lastIndex] else {
+            return
+        }
         results[lastIndex] = .toolResult(ToolResult(
             toolUseID: result.toolUseID,
             content: result.content + [.text(note)],
@@ -283,9 +307,48 @@ public actor AgentSession {
             return nil
 
         default:
+            let repeats = registerAction(tool: tool, input: use.input)
+            let guarded = Self.loopGuardedTools.contains(tool)
+            if guarded, repeats >= 2 {
+                return loopFailure(tool: tool)
+            }
             await performAction(tool: tool, use: use, into: &results)
+            if guarded, repeats == 1 {
+                appendNote(Self.repeatedActionNote, to: &results)
+            }
             return nil
         }
+    }
+
+    /// Update the repeat tracker and return how many times in a row this exact
+    /// tool call has now been seen (0 = first, 1 = repeated once, …).
+    private func registerAction(tool: AgentTool, input: JSONValue) -> Int {
+        let signature = actionSignature(tool: tool, input: input)
+        if signature == lastActionSignature {
+            consecutiveActionRepeats += 1
+        } else {
+            lastActionSignature = signature
+            consecutiveActionRepeats = 0
+        }
+        return consecutiveActionRepeats
+    }
+
+    /// A stable string identifying a tool call, so identical calls compare
+    /// equal regardless of key ordering in the model's JSON.
+    private func actionSignature(tool: AgentTool, input: JSONValue) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let json = (try? encoder.encode(input))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        return "\(tool.rawValue) \(json)"
+    }
+
+    /// End the run because the model is stuck repeating one action.
+    private func loopFailure(tool: AgentTool) -> AgentOutcome {
+        fail("""
+        Stopped: the same \(tool.rawValue) action was repeated three times in \
+        a row without making progress.
+        """)
     }
 
     /// Handle a `propose_memory` call: surface the proposal, and store it if
