@@ -74,6 +74,55 @@ public actor MacComputer: ComputerControl {
         ]
     }
 
+    public func diagnose() async -> ComputerDiagnostics {
+        var checks: [ComputerDiagnosticCheck] = []
+
+        let runningApp = NSRunningApplication(processIdentifier: pid)
+        checks.append(ComputerDiagnosticCheck(
+            id: "target-app",
+            status: runningApp == nil || runningApp?.isTerminated == true ? .failed : .passed,
+            title: "Target app",
+            detail: runningApp == nil || runningApp?.isTerminated == true
+                ? "\(appName) is not running."
+                : "\(appName) is running with pid \(pid).",
+            recovery: runningApp == nil || runningApp?.isTerminated == true
+                ? "Open the app, select it again, then start the task."
+                : nil
+        ))
+
+        let accessibilityTrusted = AccessibilityPermission.isTrusted
+        checks.append(ComputerDiagnosticCheck(
+            id: "accessibility",
+            status: accessibilityTrusted ? .passed : .failed,
+            title: "Accessibility permission",
+            detail: accessibilityTrusted
+                ? "Mac Autopilot can read and control other app UIs."
+                : "Mac Autopilot does not have Accessibility permission.",
+            recovery: accessibilityTrusted
+                ? nil
+                : "Grant Accessibility in System Settings > Privacy & Security > Accessibility."
+        ))
+
+        let screenRecordingTrusted = CGPreflightScreenCaptureAccess()
+        checks.append(ComputerDiagnosticCheck(
+            id: "screen-recording",
+            status: screenRecordingTrusted ? .passed : .warning,
+            title: "Screen Recording permission",
+            detail: screenRecordingTrusted
+                ? "Target-window screenshots are available."
+                : "Screen Recording is not granted, so screenshot fallback may fail.",
+            recovery: screenRecordingTrusted
+                ? nil
+                : "Grant Screen Recording in System Settings > Privacy & Security > Screen Recording."
+        ))
+
+        if accessibilityTrusted, runningApp != nil, runningApp?.isTerminated == false {
+            checks.append(contentsOf: windowDiagnostics())
+        }
+
+        return ComputerDiagnostics(appName: appName, checks: checks)
+    }
+
     public func click(elementID: String) async throws {
         try actuator.press(element(for: elementID))
     }
@@ -183,6 +232,57 @@ public actor MacComputer: ComputerControl {
             throw MacComputerError.screenshotUnavailable
         }
         return png
+    }
+
+    private func windowDiagnostics() -> [ComputerDiagnosticCheck] {
+        do {
+            let scan = try reader.readWindow(
+                pid: pid,
+                appName: appName,
+                bundleIdentifier: bundleIdentifier
+            )
+            let count = scan.snapshot.root.flattened.count
+            var checks = [
+                ComputerDiagnosticCheck(
+                    id: "accessibility-tree",
+                    status: .passed,
+                    title: "Accessibility tree",
+                    detail: "Read \(count) accessibility element(s) from the target window."
+                )
+            ]
+            checks.append(ComputerDiagnosticCheck(
+                id: "window-match",
+                status: scan.snapshot.windowIdentifier == nil ? .warning : .passed,
+                title: "Target window match",
+                detail: scan.snapshot.windowIdentifier == nil
+                    ? "Could not match the AX window to a CoreGraphics window id."
+                    : "Matched target window id \(scan.snapshot.windowIdentifier ?? 0).",
+                recovery: scan.snapshot.windowIdentifier == nil
+                    ? "The driver can still use AX, but screenshot fallback may capture the display instead of the window."
+                    : nil
+            ))
+            return checks
+        } catch AccessibilityTreeReader.ReadError.noWindow {
+            return [
+                ComputerDiagnosticCheck(
+                    id: "accessibility-tree",
+                    status: .failed,
+                    title: "Accessibility tree",
+                    detail: "\(appName) exposes no readable window.",
+                    recovery: "Make sure the target app has a visible, unminimized window."
+                )
+            ]
+        } catch {
+            return [
+                ComputerDiagnosticCheck(
+                    id: "accessibility-tree",
+                    status: .failed,
+                    title: "Accessibility tree",
+                    detail: "Could not read \(appName)'s accessibility tree: \(error).",
+                    recovery: "Call get_app_state after confirming the app is visible and permissions are granted."
+                )
+            ]
+        }
     }
 }
 

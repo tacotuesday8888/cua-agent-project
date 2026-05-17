@@ -68,6 +68,12 @@ public actor AgentSession {
     public func run(task: String) async -> AgentOutcome {
         emit(.started(task: task))
 
+        let diagnostics = await computer.diagnose()
+        emit(.diagnostics(diagnostics))
+        guard diagnostics.isReady else {
+            return fail(diagnostics.failureSummary)
+        }
+
         let initialTree: UITreeSnapshot
         do {
             initialTree = try await observeTree()

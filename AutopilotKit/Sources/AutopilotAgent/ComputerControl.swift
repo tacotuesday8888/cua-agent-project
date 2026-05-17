@@ -1,6 +1,81 @@
 import AutopilotCore
 import Foundation
 
+/// One readiness check for the computer-use driver.
+public struct ComputerDiagnosticCheck: Sendable, Hashable, Codable {
+    public enum Status: String, Sendable, Hashable, Codable {
+        case passed
+        case warning
+        case failed
+    }
+
+    public let id: String
+    public let status: Status
+    public let title: String
+    public let detail: String
+    public let recovery: String?
+
+    public init(
+        id: String,
+        status: Status,
+        title: String,
+        detail: String,
+        recovery: String? = nil
+    ) {
+        self.id = id
+        self.status = status
+        self.title = title
+        self.detail = detail
+        self.recovery = recovery
+    }
+}
+
+/// Readiness information for the selected target app and driver.
+public struct ComputerDiagnostics: Sendable, Hashable, Codable {
+    public let appName: String
+    public let checks: [ComputerDiagnosticCheck]
+
+    public init(appName: String, checks: [ComputerDiagnosticCheck]) {
+        self.appName = appName
+        self.checks = checks
+    }
+
+    public var isReady: Bool {
+        !checks.contains { $0.status == .failed }
+    }
+
+    public var failures: [ComputerDiagnosticCheck] {
+        checks.filter { $0.status == .failed }
+    }
+
+    public var warnings: [ComputerDiagnosticCheck] {
+        checks.filter { $0.status == .warning }
+    }
+
+    public var summary: String {
+        let failed = failures.count
+        let warning = warnings.count
+        if failed == 0 && warning == 0 {
+            return "Driver readiness check passed for \(appName)."
+        }
+        return "Driver readiness check found \(failed) failure(s) and \(warning) warning(s) for \(appName)."
+    }
+
+    public var failureSummary: String {
+        guard !failures.isEmpty else { return summary }
+        let lines = failures.map { check in
+            if let recovery = check.recovery, !recovery.isEmpty {
+                return "\(check.title): \(check.detail) \(recovery)"
+            }
+            return "\(check.title): \(check.detail)"
+        }
+        return """
+        \(summary)
+        \(lines.joined(separator: "\n"))
+        """
+    }
+}
+
 /// Recovery-oriented driver errors returned to the agent as tool-result text.
 public enum ComputerControlError: Error, Sendable, Equatable {
     case noCachedState(appName: String)
@@ -74,6 +149,9 @@ public protocol ComputerControl: Sendable {
     /// The name of the app this controller operates.
     var appName: String { get }
 
+    /// Check whether the driver can read and control the selected target app.
+    func diagnose() async -> ComputerDiagnostics
+
     /// List apps available to the driver.
     func listApps() async throws -> [ComputerAppInfo]
 
@@ -109,6 +187,17 @@ public protocol ComputerControl: Sendable {
 }
 
 public extension ComputerControl {
+    func diagnose() async -> ComputerDiagnostics {
+        ComputerDiagnostics(appName: appName, checks: [
+            ComputerDiagnosticCheck(
+                id: "driver",
+                status: .passed,
+                title: "Driver",
+                detail: "Default driver diagnostics are available."
+            )
+        ])
+    }
+
     func listApps() async throws -> [ComputerAppInfo] {
         [
             ComputerAppInfo(

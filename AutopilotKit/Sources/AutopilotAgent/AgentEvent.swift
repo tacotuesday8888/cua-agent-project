@@ -4,6 +4,8 @@ import AutopilotCore
 public enum AgentEvent: Sendable {
     /// The run started for the given task.
     case started(task: String)
+    /// The driver completed its readiness checks.
+    case diagnostics(ComputerDiagnostics)
     /// The agent is waiting on the model.
     case thinking
     /// The agent observed the UI tree (with its element count).

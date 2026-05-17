@@ -207,6 +207,11 @@ public final class AgentViewModel: UserInteraction {
         switch event {
         case .started:
             append("Starting…")
+        case .diagnostics(let diagnostics):
+            append(diagnostics.summary, isError: !diagnostics.isReady)
+            for warning in diagnostics.warnings {
+                append("\(warning.title): \(warning.detail)")
+            }
         case .thinking:
             break
         case .observedTree(let count):

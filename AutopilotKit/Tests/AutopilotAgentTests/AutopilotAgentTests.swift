@@ -164,6 +164,27 @@ struct AgentSessionTests {
         #expect(actions.isEmpty)
     }
 
+    @Test func failedDiagnosticsStopsBeforeLLMCall() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "t1", tool: "done", input: ["summary": "Should not run."])
+        ])
+        let computer = UnreadyComputer(appName: "BrokenApp")
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: "test")
+        )
+
+        let outcome = await session.run(task: "do something")
+        #expect(outcome.status == .failed)
+        #expect(outcome.summary.contains("Driver readiness check found 1 failure"))
+        #expect(outcome.summary.contains("Accessibility permission"))
+
+        let requests = await llm.requests
+        #expect(requests.isEmpty)
+    }
+
     @Test func deniedRiskyActionIsNotPerformed() async {
         let deleteButton = UIElement(id: "e2", role: "AXButton", label: "Delete Playlist")
         let root = UIElement(id: "e1", role: "AXWindow", children: [deleteButton])
@@ -227,5 +248,49 @@ final class EventCollector: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return events
+    }
+}
+
+actor UnreadyComputer: ComputerControl {
+    nonisolated let appName: String
+
+    init(appName: String) {
+        self.appName = appName
+    }
+
+    func diagnose() async -> ComputerDiagnostics {
+        ComputerDiagnostics(appName: appName, checks: [
+            ComputerDiagnosticCheck(
+                id: "accessibility",
+                status: .failed,
+                title: "Accessibility permission",
+                detail: "Missing.",
+                recovery: "Grant Accessibility."
+            )
+        ])
+    }
+
+    func captureTree() async throws -> UITreeSnapshot {
+        throw AgentError.computer("captureTree should not be called")
+    }
+
+    func click(elementID: String) async throws {
+        throw AgentError.computer("click should not be called")
+    }
+
+    func setValue(elementID: String, value: String) async throws {
+        throw AgentError.computer("setValue should not be called")
+    }
+
+    func scroll(elementID: String?, direction: ScrollDirection, amount: Int) async throws {
+        throw AgentError.computer("scroll should not be called")
+    }
+
+    func pressKey(_ key: KeyPress) async throws {
+        throw AgentError.computer("pressKey should not be called")
+    }
+
+    func captureScreenshot() async throws -> Data {
+        throw AgentError.computer("captureScreenshot should not be called")
     }
 }
