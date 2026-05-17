@@ -154,7 +154,7 @@ public actor AgentSession {
             return fail("Could not read \(computer.appName): \(error.localizedDescription)")
         }
 
-        recalledMemory = await memory.relevant(appName: computer.appName)
+        recalledMemory = await memory.relevant(appName: computer.appName, taskText: task)
         if !recalledMemory.isEmpty {
             emit(.memoryRecalled(recalledMemory))
         }

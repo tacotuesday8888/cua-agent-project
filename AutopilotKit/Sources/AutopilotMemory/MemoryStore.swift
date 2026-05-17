@@ -48,10 +48,10 @@ public actor MemoryStore {
     }
 
     /// The memories relevant to a task: every global memory, the target app's
-    /// memories, and the memories of any named contact. Newest first.
-    public func relevant(appName: String, contacts: [String] = []) -> [MemoryItem] {
+    /// memories, and any contact memory whose person is named in the task.
+    /// Newest first.
+    public func relevant(appName: String, taskText: String = "") -> [MemoryItem] {
         let app = appName.lowercased()
-        let people = Set(contacts.map { $0.lowercased() })
         return all().filter { item in
             switch item.scope {
             case .global:
@@ -59,9 +59,28 @@ public actor MemoryStore {
             case .app(let name):
                 name.lowercased() == app
             case .contact(let name):
-                people.contains(name.lowercased())
+                Self.taskMentions(name, in: taskText)
             }
         }
+    }
+
+    /// Whether `taskText` names `contact` as a whole word, case-insensitively,
+    /// so a contact memory only surfaces when that person is actually involved.
+    /// Whole-word matching keeps "Sam" out of "summary" and "Al" out of "also".
+    private static func taskMentions(_ contact: String, in taskText: String) -> Bool {
+        let needle = contact.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return false }
+        let haystack = taskText.lowercased()
+        var searchStart = haystack.startIndex
+        while let found = haystack.range(of: needle, range: searchStart..<haystack.endIndex) {
+            let beforeOK = found.lowerBound == haystack.startIndex
+                || !haystack[haystack.index(before: found.lowerBound)].isLetter
+            let afterOK = found.upperBound == haystack.endIndex
+                || !haystack[found.upperBound].isLetter
+            if beforeOK, afterOK { return true }
+            searchStart = found.upperBound
+        }
+        return false
     }
 
     // MARK: - Persistence

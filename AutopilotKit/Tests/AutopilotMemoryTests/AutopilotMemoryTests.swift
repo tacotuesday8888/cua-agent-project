@@ -73,10 +73,22 @@ struct MemoryStoreTests {
         await store.add(MemoryItem(text: "mail fact", scope: .app("Mail"), source: .explicit))
         await store.add(MemoryItem(text: "maya fact", scope: .contact("Maya"), source: .explicit))
 
-        let relevant = await store.relevant(appName: "music", contacts: ["maya"])
+        let relevant = await store.relevant(appName: "music", taskText: "send Maya the setlist")
         let texts = Set(relevant.map(\.text))
         #expect(texts == ["global fact", "music fact", "maya fact"])
         #expect(!texts.contains("mail fact"))
+    }
+
+    @Test func contactMemoryMatchesWholeWordOnly() async {
+        let store = MemoryStore(directory: tempDirectory())
+        await store.add(MemoryItem(text: "sam fact", scope: .contact("Sam"), source: .explicit))
+
+        let named = await store.relevant(appName: "App", taskText: "ping Sam about lunch")
+        #expect(named.map(\.text) == ["sam fact"])
+
+        // "Sam" must not surface as a substring of an unrelated word.
+        let unrelated = await store.relevant(appName: "App", taskText: "write a summary")
+        #expect(unrelated.isEmpty)
     }
 
     @Test func missingFileYieldsEmpty() async {
