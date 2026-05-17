@@ -49,4 +49,17 @@ public struct AppLocator {
                 || (app.bundleIdentifier?.lowercased().contains(needle) ?? false)
         }
     }
+
+    /// The frontmost regular application, if any.
+    public func frontmostApp() -> RunningApp? {
+        guard
+            let app = NSWorkspace.shared.frontmostApplication,
+            let name = app.localizedName
+        else { return nil }
+        return RunningApp(
+            name: name,
+            bundleIdentifier: app.bundleIdentifier,
+            processID: app.processIdentifier
+        )
+    }
 }
