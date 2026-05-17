@@ -1,6 +1,40 @@
 import AutopilotCore
 import Foundation
 
+/// Recovery-oriented driver errors returned to the agent as tool-result text.
+public enum ComputerControlError: Error, Sendable, Equatable {
+    case noCachedState(appName: String)
+    case invalidElement(elementID: String, appName: String, turnIdentifier: Int?)
+    case unavailableAction(elementID: String, action: String)
+    case unsupportedTool(String)
+}
+
+extension ComputerControlError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .noCachedState(let appName):
+            return """
+            No cached app state for \(appName). Call get_app_state before \
+            interacting, then use element_index values from that latest result.
+            """
+        case .invalidElement(let elementID, let appName, let turnIdentifier):
+            let turnText = turnIdentifier.map { " turn \($0)" } ?? ""
+            return """
+            No element \(elementID) exists in \(appName)'s latest app state\(turnText). \
+            The UI may have changed. Call get_app_state again and use a current \
+            element_index.
+            """
+        case .unavailableAction(let elementID, let action):
+            return """
+            \(action) is not available on \(elementID). Call get_app_state and use \
+            one of the actions shown for that element.
+            """
+        case .unsupportedTool(let tool):
+            return "\(tool) is not implemented by this driver yet."
+        }
+    }
+}
+
 /// A macOS app visible to the computer-use driver.
 public struct ComputerAppInfo: Sendable, Hashable, Codable {
     public let name: String
@@ -93,14 +127,14 @@ public extension ComputerControl {
     }
 
     func typeText(_ text: String) async throws {
-        throw AgentError.computer("type_text is not implemented for \(appName)")
+        throw ComputerControlError.unsupportedTool("type_text")
     }
 
     func drag(fromElementID: String, toElementID: String) async throws {
-        throw AgentError.computer("drag is not implemented for \(appName)")
+        throw ComputerControlError.unsupportedTool("drag")
     }
 
     func performSecondaryAction(elementID: String, action: String) async throws {
-        throw AgentError.computer("perform_secondary_action is not implemented for \(appName)")
+        throw ComputerControlError.unsupportedTool("perform_secondary_action")
     }
 }

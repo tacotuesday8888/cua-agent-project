@@ -32,14 +32,14 @@ public actor MockComputer: ComputerControl {
 
     public func click(elementID: String) async throws {
         guard snapshot.element(id: elementID) != nil else {
-            throw AgentError.computer("no element with id \(elementID)")
+            throw invalidElement(elementID)
         }
         actionLog.append("click:\(elementID)")
     }
 
     public func setValue(elementID: String, value: String) async throws {
         guard snapshot.element(id: elementID) != nil else {
-            throw AgentError.computer("no element with id \(elementID)")
+            throw invalidElement(elementID)
         }
         snapshot = UITreeSnapshot(
             appName: snapshot.appName,
@@ -55,6 +55,9 @@ public actor MockComputer: ComputerControl {
     }
 
     public func scroll(elementID: String?, direction: ScrollDirection, amount: Int) async throws {
+        if let elementID, snapshot.element(id: elementID) == nil {
+            throw invalidElement(elementID)
+        }
         actionLog.append("scroll:\(direction.rawValue):\(amount)")
     }
 
@@ -64,20 +67,20 @@ public actor MockComputer: ComputerControl {
 
     public func drag(fromElementID: String, toElementID: String) async throws {
         guard snapshot.element(id: fromElementID) != nil else {
-            throw AgentError.computer("no element with id \(fromElementID)")
+            throw invalidElement(fromElementID)
         }
         guard snapshot.element(id: toElementID) != nil else {
-            throw AgentError.computer("no element with id \(toElementID)")
+            throw invalidElement(toElementID)
         }
         actionLog.append("drag:\(fromElementID)->\(toElementID)")
     }
 
     public func performSecondaryAction(elementID: String, action: String) async throws {
         guard let element = snapshot.element(id: elementID) else {
-            throw AgentError.computer("no element with id \(elementID)")
+            throw invalidElement(elementID)
         }
         guard element.actions.contains(action) else {
-            throw AgentError.computer("\(action) is not available on \(elementID)")
+            throw ComputerControlError.unavailableAction(elementID: elementID, action: action)
         }
         actionLog.append("secondary:\(elementID):\(action)")
     }
@@ -90,5 +93,13 @@ public actor MockComputer: ComputerControl {
     /// The actions performed so far, in order — for test assertions.
     public var performedActions: [String] {
         actionLog
+    }
+
+    private func invalidElement(_ elementID: String) -> ComputerControlError {
+        ComputerControlError.invalidElement(
+            elementID: elementID,
+            appName: appName,
+            turnIdentifier: snapshot.turnIdentifier
+        )
     }
 }

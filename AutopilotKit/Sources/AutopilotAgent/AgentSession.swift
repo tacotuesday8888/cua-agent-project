@@ -185,7 +185,7 @@ public actor AgentSession {
         } catch {
             results.append(.toolResult(ToolResult(
                 toolUseID: use.id,
-                text: "Action failed: \(error)",
+                text: "Action failed: \(describe(error))",
                 isError: true
             )))
         }
@@ -312,6 +312,15 @@ public actor AgentSession {
     private func fail(_ reason: String) -> AgentOutcome {
         emit(.failed(reason: reason))
         return AgentOutcome(status: .failed, summary: reason)
+    }
+
+    private func describe(_ error: Error) -> String {
+        if let localized = error as? LocalizedError,
+           let description = localized.errorDescription,
+           !description.isEmpty {
+            return description
+        }
+        return String(describing: error)
     }
 
     private func requireString(

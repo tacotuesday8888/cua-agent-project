@@ -130,6 +130,40 @@ struct AgentSessionTests {
         ])
     }
 
+    @Test func invalidElementReturnsRecoveryInstruction() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "t1", tool: "click", input: ["element_index": 99]),
+            toolResponse(id: "t2", tool: "done", input: ["summary": "Stopped."])
+        ])
+        let computer = musicComputer()
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: "test", maxSteps: 10)
+        )
+
+        _ = await session.run(task: "click missing")
+
+        let requests = await llm.requests
+        #expect(requests.count == 2)
+        let toolResult = requests.last?.messages.last?.content.compactMap { block -> ToolResult? in
+            if case .toolResult(let result) = block { return result }
+            return nil
+        }.first
+
+        #expect(toolResult?.isError == true)
+        let text = toolResult?.content.compactMap { content -> String? in
+            if case .text(let text) = content { return text }
+            return nil
+        }.joined(separator: "\n") ?? ""
+        #expect(text.contains("No element e99"))
+        #expect(text.contains("Call get_app_state again"))
+
+        let actions = await computer.performedActions
+        #expect(actions.isEmpty)
+    }
+
     @Test func deniedRiskyActionIsNotPerformed() async {
         let deleteButton = UIElement(id: "e2", role: "AXButton", label: "Delete Playlist")
         let root = UIElement(id: "e1", role: "AXWindow", children: [deleteButton])

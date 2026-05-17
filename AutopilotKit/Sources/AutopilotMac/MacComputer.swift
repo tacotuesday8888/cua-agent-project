@@ -9,8 +9,6 @@ import ScreenCaptureKit
 
 /// Errors specific to driving a real macOS app.
 public enum MacComputerError: Error, Sendable {
-    /// An element id was not found in the most recent capture.
-    case unknownElement(String)
     /// A screenshot could not be produced.
     case screenshotUnavailable
 }
@@ -93,7 +91,7 @@ public actor MacComputer: ComputerControl {
         direction: ScrollDirection,
         amount: Int
     ) async throws {
-        let point = elementID.flatMap { latestSnapshot?.element(id: $0)?.frame.center }
+        let point = try elementID.map { try center(of: $0) }
         try actuator.scroll(direction: direction, amount: amount, at: point, pid: pid)
     }
 
@@ -144,15 +142,29 @@ public actor MacComputer: ComputerControl {
 
     /// Resolve an element id from the most recent capture to a live AX element.
     private func element(for id: String) throws -> AXUIElement {
+        guard !latestElements.isEmpty else {
+            throw ComputerControlError.noCachedState(appName: appName)
+        }
         guard let element = latestElements[id] else {
-            throw MacComputerError.unknownElement(id)
+            throw ComputerControlError.invalidElement(
+                elementID: id,
+                appName: appName,
+                turnIdentifier: latestSnapshot?.turnIdentifier
+            )
         }
         return element
     }
 
     private func center(of id: String) throws -> CGPoint {
+        guard latestSnapshot != nil else {
+            throw ComputerControlError.noCachedState(appName: appName)
+        }
         guard let element = latestSnapshot?.element(id: id) else {
-            throw MacComputerError.unknownElement(id)
+            throw ComputerControlError.invalidElement(
+                elementID: id,
+                appName: appName,
+                turnIdentifier: latestSnapshot?.turnIdentifier
+            )
         }
         return element.frame.center
     }
