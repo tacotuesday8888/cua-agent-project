@@ -568,6 +568,26 @@ struct AgentSessionTests {
         #expect(actions == Array(repeating: "scroll:down:3", count: 4))
     }
 
+    @Test func cancellingDuringAnLLMCallReportsStopped() async {
+        let session = AgentSession(
+            llm: SlowLLMProvider(),
+            computer: musicComputer(),
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: "test", highlightDwell: .zero),
+            memory: makeTestMemory()
+        )
+
+        let runTask = Task { await session.run(task: "slow task") }
+        // Let the run reach the blocking LLM call, then hit the kill switch.
+        try? await Task.sleep(for: .milliseconds(100))
+        runTask.cancel()
+        let outcome = await runTask.value
+
+        // A cancelled provider call is a stop, not a failure.
+        #expect(outcome.status == .stopped)
+        #expect(outcome.summary == "Stopped by the user.")
+    }
+
     private func allText(in request: LLMRequest) -> String {
         request.messages.flatMap { message in
             message.content.flatMap { block -> [String] in
@@ -821,6 +841,21 @@ final class CountingInteraction: UserInteraction, @unchecked Sendable {
     /// How many approval requests have been made so far.
     var approvalsRequested: Int {
         lock.withLock { count }
+    }
+}
+
+/// An `LLMProvider` whose `send` blocks until cancelled, for exercising the
+/// kill switch while a provider call is in flight.
+actor SlowLLMProvider: LLMProvider {
+    nonisolated let identifier = "slow"
+
+    func send(_ request: LLMRequest) async throws -> LLMResponse {
+        try await Task.sleep(for: .seconds(30))
+        return LLMResponse(
+            content: [],
+            stopReason: .endTurn,
+            usage: .init(inputTokens: 0, outputTokens: 0)
+        )
     }
 }
 

@@ -140,6 +140,7 @@ public actor AgentSession {
         do {
             initialTree = try await observeTree()
         } catch {
+            if Task.isCancelled { return stop() }
             return fail("Could not read \(computer.appName): \(error.localizedDescription)")
         }
 
@@ -164,6 +165,9 @@ public actor AgentSession {
             do {
                 response = try await llm.send(buildRequest())
             } catch {
+                // A cancelled provider call is the user's kill switch, not a
+                // run failure — report it as a stop.
+                if Task.isCancelled { return stop() }
                 return fail("LLM error: \(error.localizedDescription)")
             }
             recordUsage(response.usage)
