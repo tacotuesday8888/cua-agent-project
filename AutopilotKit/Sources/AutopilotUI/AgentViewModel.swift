@@ -202,6 +202,7 @@ public final class AgentViewModel: UserInteraction {
         }
 
         feed = []
+        append("Model — \(provider.displayName) (\(provider.model))")
         pendingApproval = nil
         pendingMemory = nil
         pendingQuestion = nil
@@ -353,6 +354,8 @@ public final class AgentViewModel: UserInteraction {
         switch event {
         case .started:
             append("Starting…")
+        case .prepared(let summary):
+            append(summary)
         case .diagnostics(let diagnostics):
             append(diagnostics.summary, isError: !diagnostics.isReady)
             for warning in diagnostics.warnings {
@@ -374,6 +377,8 @@ public final class AgentViewModel: UserInteraction {
             append("Skipped: \(summary)", isError: true)
         case .performed(_, let summary):
             append("Done: \(summary)")
+        case .actionFailed(let tool, let reason):
+            append("\(tool.rawValue) failed — \(reason)", isError: true)
         case .askedUser(let question, _):
             append("Asked: \(question)")
         case .memoryProposed(let proposal):

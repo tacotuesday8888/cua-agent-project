@@ -16,6 +16,19 @@ public struct TargetProcessState: Sendable, Hashable {
     }
 }
 
+/// What bringing the target app forward actually did, so a run can report it.
+public struct ActivationResult: Sendable, Hashable {
+    /// Whether a running process was found for the pid.
+    public var appFound: Bool
+    /// Whether the app was hidden and an unhide was issued.
+    public var wasHidden: Bool
+
+    public init(appFound: Bool, wasHidden: Bool) {
+        self.appFound = appFound
+        self.wasHidden = wasHidden
+    }
+}
+
 /// The live macOS facts the `MacComputer` driver depends on.
 ///
 /// Bundling them behind injectable closures lets the driver's readiness logic
@@ -29,13 +42,15 @@ public struct MacComputerEnvironment: Sendable {
     /// Whether this process holds the Screen Recording permission.
     public var isScreenRecordingTrusted: @Sendable () -> Bool
     /// Bring the target app to the front, unhiding it first when needed.
-    public var activateTarget: @Sendable (pid_t) async -> Void
+    public var activateTarget: @Sendable (pid_t) async -> ActivationResult
 
     public init(
         targetProcess: @escaping @Sendable (pid_t) -> TargetProcessState?,
         isAccessibilityTrusted: @escaping @Sendable () -> Bool,
         isScreenRecordingTrusted: @escaping @Sendable () -> Bool,
-        activateTarget: @escaping @Sendable (pid_t) async -> Void = { _ in }
+        activateTarget: @escaping @Sendable (pid_t) async -> ActivationResult = { _ in
+            ActivationResult(appFound: false, wasHidden: false)
+        }
     ) {
         self.targetProcess = targetProcess
         self.isAccessibilityTrusted = isAccessibilityTrusted
@@ -55,9 +70,13 @@ public struct MacComputerEnvironment: Sendable {
         isScreenRecordingTrusted: { CGPreflightScreenCaptureAccess() },
         activateTarget: { pid in
             await MainActor.run {
-                guard let app = NSRunningApplication(processIdentifier: pid) else { return }
-                if app.isHidden { _ = app.unhide() }
+                guard let app = NSRunningApplication(processIdentifier: pid) else {
+                    return ActivationResult(appFound: false, wasHidden: false)
+                }
+                let wasHidden = app.isHidden
+                if wasHidden { _ = app.unhide() }
                 _ = app.activate()
+                return ActivationResult(appFound: true, wasHidden: wasHidden)
             }
         }
     )

@@ -78,9 +78,15 @@ public actor MacComputer: ComputerControl {
     }
 
     /// Bring the target app forward so input and window reads land on a
-    /// frontmost window.
-    public func prepare() async {
-        await environment.activateTarget(pid)
+    /// frontmost window, and report what was done.
+    public func prepare() async -> String {
+        let result = await environment.activateTarget(pid)
+        guard result.appFound else {
+            return "\(appName) is not running, so it could not be brought forward."
+        }
+        return result.wasHidden
+            ? "Unhid and activated \(appName)."
+            : "Activated \(appName)."
     }
 
     public func diagnose() async -> ComputerDiagnostics {

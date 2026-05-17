@@ -185,6 +185,7 @@ struct ContentView: View {
                 }
             }
             .padding(8)
+            .textSelection(.enabled)
         }
         .frame(maxHeight: 220)
         .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))

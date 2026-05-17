@@ -151,10 +151,11 @@ public protocol ComputerControl: Sendable {
 
     /// Bring the target app forward and ready it for a run.
     ///
-    /// Called once before `diagnose()`. The default is a no-op; the macOS
-    /// driver uses it to activate and unhide the target app so input and
-    /// window reads land on a frontmost window.
-    func prepare() async
+    /// Called once before `diagnose()`. Returns a short human-readable summary
+    /// of what was done, or an empty string when nothing was. The default is a
+    /// no-op; the macOS driver uses it to activate and unhide the target app
+    /// so input and window reads land on a frontmost window.
+    func prepare() async -> String
 
     /// Check whether the driver can read and control the selected target app.
     func diagnose() async -> ComputerDiagnostics
@@ -197,7 +198,7 @@ public protocol ComputerControl: Sendable {
 }
 
 public extension ComputerControl {
-    func prepare() async {}
+    func prepare() async -> String { "" }
 
     func diagnose() async -> ComputerDiagnostics {
         ComputerDiagnostics(appName: appName, checks: [

@@ -266,6 +266,31 @@ struct AgentSessionTests {
         #expect(text.contains("\"Play\""))
     }
 
+    @Test func failedActionEmitsActionFailedEvent() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "t1", tool: "click", input: ["element_index": 99]),
+            toolResponse(id: "t2", tool: "done", input: ["summary": "Stopped."])
+        ])
+        let collector = EventCollector()
+        let session = AgentSession(
+            llm: llm,
+            computer: musicComputer(),
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory(),
+            eventHandler: { collector.append($0) }
+        )
+
+        _ = await session.run(task: "click missing")
+
+        let failure = collector.all().compactMap { event -> (AgentTool, String)? in
+            if case .actionFailed(let tool, let reason) = event { return (tool, reason) }
+            return nil
+        }.first
+        #expect(failure?.0 == .click)
+        #expect(failure?.1.contains("No element e99") == true)
+    }
+
     @Test func failedDiagnosticsStopsBeforeLLMCall() async {
         let llm = ScriptedLLMProvider([
             toolResponse(id: "t1", tool: "done", input: ["summary": "Should not run."])
