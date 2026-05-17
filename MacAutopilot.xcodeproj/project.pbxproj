@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		0A234545A4775E4289E39A25 /* AutopilotAgent in Frameworks */ = {isa = PBXBuildFile; productRef = E2C1701687B09E7182366316 /* AutopilotAgent */; };
+		D1E2F3A4B5C6D7E8F9A0B1C2 /* AutopilotUI in Frameworks */ = {isa = PBXBuildFile; productRef = C2B1A0F9E8D7C6B5A4F3E2D1 /* AutopilotUI */; };
 		A5D7F6E0EF733CE249BBEE96 /* AutopilotCore in Frameworks */ = {isa = PBXBuildFile; productRef = 8FF2EC3426FF996A35B951FF /* AutopilotCore */; };
 		B18B37A2430BA4993177A607 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D8FF34B626C1F73BBCB7465 /* ContentView.swift */; };
 		CB4671DB015FAA38964052DC /* MacAutopilotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D0BF057B2091CE0320A5958 /* MacAutopilotTests.swift */; };
@@ -43,6 +44,7 @@
 				A5D7F6E0EF733CE249BBEE96 /* AutopilotCore in Frameworks */,
 				D8372C345B3276B9AE06800B /* AutopilotLLM in Frameworks */,
 				0A234545A4775E4289E39A25 /* AutopilotAgent in Frameworks */,
+				D1E2F3A4B5C6D7E8F9A0B1C2 /* AutopilotUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -113,6 +115,7 @@
 				8FF2EC3426FF996A35B951FF /* AutopilotCore */,
 				4C6C024C9585F7102B43F33D /* AutopilotLLM */,
 				E2C1701687B09E7182366316 /* AutopilotAgent */,
+				C2B1A0F9E8D7C6B5A4F3E2D1 /* AutopilotUI */,
 			);
 			productName = MacAutopilot;
 			productReference = BE75A44D29DB0A0EBA24C4E8 /* MacAutopilot.app */;
@@ -463,6 +466,10 @@
 		E2C1701687B09E7182366316 /* AutopilotAgent */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = AutopilotAgent;
+		};
+		C2B1A0F9E8D7C6B5A4F3E2D1 /* AutopilotUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AutopilotUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

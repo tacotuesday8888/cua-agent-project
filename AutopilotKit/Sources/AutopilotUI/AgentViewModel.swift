@@ -37,8 +37,10 @@ public final class AgentViewModel: UserInteraction {
 
     /// The free-text prompt the user is typing.
     public var promptText: String = ""
-    /// The app pinned via the `@app` picker, if any.
-    public var pinnedApp: AppLocator.RunningApp?
+    /// Names of currently-running apps, for the target picker.
+    public var runningAppNames: [String] = []
+    /// The app the user selected as the agent's target.
+    public var selectedAppName: String = ""
     /// The high-level run state.
     public var phase: Phase = .idle
     /// The live status feed shown in the expanded notch.
@@ -65,6 +67,14 @@ public final class AgentViewModel: UserInteraction {
 
     // MARK: - Actions
 
+    /// Refresh the list of running apps for the target picker.
+    public func refreshApps() {
+        runningAppNames = locator.runningApps().map(\.name).sorted()
+        if selectedAppName.isEmpty {
+            selectedAppName = runningAppNames.first ?? ""
+        }
+    }
+
     /// Run the current prompt as an agent task.
     public func submit() {
         let task = promptText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -73,8 +83,9 @@ public final class AgentViewModel: UserInteraction {
             phase = .failed("Add your Anthropic API key to get started.")
             return
         }
-        guard let target = pinnedApp ?? locator.frontmostApp() else {
-            phase = .failed("Open the app you want me to use, then try again.")
+        let appName = selectedAppName.trimmingCharacters(in: .whitespaces)
+        guard !appName.isEmpty, let target = locator.runningApp(matching: appName) else {
+            phase = .failed("Pick the app you want me to operate.")
             return
         }
         UserDefaults.standard.set(apiKey, forKey: Self.apiKeyDefaultsKey)
