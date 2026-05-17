@@ -79,6 +79,9 @@ public actor AgentSession {
     private var lastActionSignature: String?
     /// How many times in a row the same action signature has been seen.
     private var consecutiveActionRepeats = 0
+    /// Consecutive action failures where the app could not be re-read — a
+    /// strong signal the target app has closed or stopped responding.
+    private var consecutiveUnreadableFailures = 0
 
     /// Note appended after a guarded action repeats its predecessor once.
     private static let repeatedActionNote = """
@@ -89,6 +92,9 @@ public actor AgentSession {
 
     /// Steps remaining at or below which the model is warned to wrap up.
     private static let budgetWarningThreshold = 5
+
+    /// Consecutive unreadable-app failures at which a run gives up.
+    private static let unreadableFailureLimit = 2
 
     /// Tools where repeating the identical call signals a stuck loop.
     /// Traversal tools such as scroll and press_key are intentionally excluded,
@@ -158,6 +164,13 @@ public actor AgentSession {
 
         for stepIndex in 0..<configuration.maxSteps {
             if Task.isCancelled { return stop() }
+            if consecutiveUnreadableFailures >= Self.unreadableFailureLimit {
+                return fail("""
+                Lost contact with \(computer.appName) after \
+                \(consecutiveUnreadableFailures) failed attempts to read it — \
+                it may have closed or stopped responding.
+                """)
+            }
             emit(.thinking)
             transcript.compact()
 
@@ -432,6 +445,10 @@ public actor AgentSession {
             let failure = await failureText(reason: reason)
             if failure.embeddedTree {
                 transcript.recordObservation(toolUseID: use.id)
+            } else {
+                // The app could not be re-read after the failure — track it,
+                // so a closed or hung app ends the run instead of flailing.
+                consecutiveUnreadableFailures += 1
             }
             results.append(.toolResult(ToolResult(
                 toolUseID: use.id,
@@ -612,6 +629,8 @@ public actor AgentSession {
     private func observeState(includeScreenshot: Bool) async throws -> ComputerAppState {
         let state = try await computer.getAppState(includeScreenshot: includeScreenshot)
         latestSnapshot = state.snapshot
+        // A successful read means the app is reachable again.
+        consecutiveUnreadableFailures = 0
         emit(.observedTree(elementCount: state.snapshot.root.flattened.count))
         return state
     }

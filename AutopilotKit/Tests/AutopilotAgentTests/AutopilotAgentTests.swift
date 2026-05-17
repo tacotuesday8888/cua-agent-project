@@ -588,6 +588,24 @@ struct AgentSessionTests {
         #expect(outcome.summary == "Stopped by the user.")
     }
 
+    @Test func unreadableAppEndsTheRunWithLostContact() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "t1", tool: "click", input: ["element_index": 2]),
+            toolResponse(id: "t2", tool: "scroll", input: ["direction": "down"])
+        ])
+        let session = AgentSession(
+            llm: llm,
+            computer: VanishingComputer(),
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory()
+        )
+
+        let outcome = await session.run(task: "do something")
+        #expect(outcome.status == .failed)
+        #expect(outcome.summary.contains("Lost contact with Ghost"))
+    }
+
     private func allText(in request: LLMRequest) -> String {
         request.messages.flatMap { message in
             message.content.flatMap { block -> [String] in
@@ -857,6 +875,32 @@ actor SlowLLMProvider: LLMProvider {
             usage: .init(inputTokens: 0, outputTokens: 0)
         )
     }
+}
+
+/// A `ComputerControl` that reads once, then fails every read — simulating a
+/// target app that closes or stops responding mid-run.
+actor VanishingComputer: ComputerControl {
+    nonisolated let appName = "Ghost"
+    private var captures = 0
+
+    func captureTree() async throws -> UITreeSnapshot {
+        captures += 1
+        guard captures == 1 else {
+            throw AgentError.computer("\(appName)'s window can no longer be read")
+        }
+        return UITreeSnapshot(
+            appName: appName,
+            root: UIElement(id: "e1", role: "AXWindow", children: [
+                UIElement(id: "e2", role: "AXButton", label: "Go")
+            ])
+        )
+    }
+
+    func click(elementID: String) async throws {}
+    func setValue(elementID: String, value: String) async throws {}
+    func scroll(elementID: String?, direction: ScrollDirection, amount: Int) async throws {}
+    func pressKey(_ key: KeyPress) async throws {}
+    func captureScreenshot() async throws -> Data { Data() }
 }
 
 /// A thread-safe sink that records emitted `AgentEvent`s for assertions.
