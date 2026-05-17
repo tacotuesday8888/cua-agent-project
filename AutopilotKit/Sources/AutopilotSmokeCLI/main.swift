@@ -17,6 +17,7 @@ struct AutopilotSmokeCLI {
         let target = value(after: "--app", in: arguments) ?? "AutopilotFixtureApp"
         let includeScreenshot = arguments.contains("--include-screenshot")
         let runAgentLoop = arguments.contains("--agent-loop")
+        let liveProvider = liveProvider(from: arguments)
         let app = await MainActor.run {
             AppLocator().runningApp(matching: target)
         }
@@ -37,6 +38,15 @@ struct AutopilotSmokeCLI {
         printDiagnostics(diagnostics)
         guard diagnostics.isReady else {
             exit(2)
+        }
+
+        if let liveProvider {
+            let passed = await runLiveLLMSmoke(
+                computer: computer,
+                provider: liveProvider,
+                arguments: arguments
+            )
+            exit(passed ? 0 : 1)
         }
 
         if runAgentLoop {
@@ -66,6 +76,78 @@ struct AutopilotSmokeCLI {
         exit(report.passed ? 0 : 1)
     }
 
+    private static func runLiveLLMSmoke(
+        computer: MacComputer,
+        provider: LiveProvider,
+        arguments: [String]
+    ) async -> Bool {
+        let apiKeyEnvironment = value(after: "--api-key-env", in: arguments)
+            ?? provider.defaultAPIKeyEnvironment
+        guard
+            let apiKey = ProcessInfo.processInfo.environment[apiKeyEnvironment],
+            !apiKey.isEmpty
+        else {
+            fflush(stdout)
+            fputs(
+                "Missing API key. Set \(apiKeyEnvironment), or pass --api-key-env NAME.\n",
+                stderr
+            )
+            return false
+        }
+
+        let model = value(after: "--model", in: arguments) ?? provider.defaultModel
+        let task = value(after: "--task", in: arguments) ?? Self.defaultLiveLLMTask
+        let maxSteps = value(after: "--max-steps", in: arguments).flatMap(Int.init) ?? 15
+        let expectedText = value(after: "--expect-text", in: arguments) ?? "live smoke value"
+
+        print("")
+        print("Running live \(provider.displayName) AgentSession smoke loop...")
+        print("- model: \(model)")
+        print("- api key env: \(apiKeyEnvironment)")
+        print("- task: \(task)")
+
+        let recorder = AgentSmokeEventRecorder()
+        let session = AgentSession(
+            llm: provider.makeProvider(apiKey: apiKey),
+            computer: computer,
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: model, maxSteps: maxSteps),
+            eventHandler: { event in
+                recorder.append(event)
+                if let line = formatAgentEvent(event) {
+                    print(line)
+                }
+            }
+        )
+
+        let outcome = await session.run(task: task)
+        let expectationPassed = await stateContains(
+            expectedText,
+            computer: computer
+        )
+        let passed = outcome.status == .completed && expectationPassed
+
+        print("")
+        print("Live LLM outcome: \(outcome.status) - \(outcome.summary)")
+        print(
+            expectationPassed
+                ? "Expectation passed: final app state contains \"\(expectedText)\"."
+                : "Expectation failed: final app state does not contain \"\(expectedText)\"."
+        )
+
+        if !passed {
+            let performedTools = recorder.performedTools().map(\.rawValue)
+            print("Performed tools: \(performedTools.joined(separator: ", "))")
+        }
+
+        return passed
+    }
+
+    private static let defaultLiveLLMTask = """
+    Use the fixture app. Set the Smoke input field to "live smoke value", \
+    click Run, then finish with a short summary.
+    """
+
     private static func runAgentLoopSmoke(
         computer: MacComputer,
         includeScreenshot: Bool
@@ -77,6 +159,7 @@ struct AutopilotSmokeCLI {
                 for: state.snapshot
             )
         } catch {
+            fflush(stdout)
             fputs("Could not resolve fixture smoke plan: \(error.localizedDescription)\n", stderr)
             return false
         }
@@ -223,11 +306,41 @@ struct AutopilotSmokeCLI {
         )
     }
 
+    private static func stateContains(
+        _ expectedText: String,
+        computer: MacComputer
+    ) async -> Bool {
+        guard !expectedText.isEmpty else { return true }
+        do {
+            let state = try await computer.getAppState(includeScreenshot: false)
+            return state.snapshot.root.flattened.contains { element in
+                element.label?.contains(expectedText) == true
+                    || element.value?.contains(expectedText) == true
+            }
+        } catch {
+            return false
+        }
+    }
+
     private static func value(after flag: String, in arguments: [String]) -> String? {
         guard let index = arguments.firstIndex(of: flag) else { return nil }
         let valueIndex = arguments.index(after: index)
         guard arguments.indices.contains(valueIndex) else { return nil }
         return arguments[valueIndex]
+    }
+
+    private static func liveProvider(from arguments: [String]) -> LiveProvider? {
+        guard arguments.contains("--live-provider") else { return nil }
+        guard
+            let raw = value(after: "--live-provider", in: arguments),
+            let provider = LiveProvider(rawValue: raw)
+        else {
+            fflush(stdout)
+            fputs("Invalid --live-provider. Use zai or anthropic.\n\n", stderr)
+            printUsage()
+            exit(2)
+        }
+        return provider
     }
 
     private static func printDiagnostics(_ diagnostics: ComputerDiagnostics) {
@@ -246,12 +359,48 @@ struct AutopilotSmokeCLI {
         Usage:
           swift run --package-path AutopilotKit AutopilotFixtureApp
           swift run --package-path AutopilotKit AutopilotSmokeCLI [--app AutopilotFixtureApp] [--include-screenshot] [--agent-loop]
+          swift run --package-path AutopilotKit AutopilotSmokeCLI --live-provider zai [--api-key-env ZAI_API_KEY] [--model glm-4.7-flash] [--task "…"] [--expect-text "live smoke value"] [--max-steps 15]
 
         The fixture app must be running and the smoke runner process must have
         Accessibility permission in System Settings > Privacy & Security.
         """)
     }
 
+}
+
+private enum LiveProvider: String {
+    case zai
+    case anthropic
+
+    var displayName: String {
+        switch self {
+        case .zai: "Z.ai"
+        case .anthropic: "Anthropic"
+        }
+    }
+
+    var defaultModel: String {
+        switch self {
+        case .zai: "glm-4.7-flash"
+        case .anthropic: "claude-sonnet-4-6"
+        }
+    }
+
+    var defaultAPIKeyEnvironment: String {
+        switch self {
+        case .zai: "ZAI_API_KEY"
+        case .anthropic: "ANTHROPIC_API_KEY"
+        }
+    }
+
+    func makeProvider(apiKey: String) -> any LLMProvider {
+        switch self {
+        case .zai:
+            ZAIProvider(apiKey: apiKey)
+        case .anthropic:
+            AnthropicProvider(apiKey: apiKey)
+        }
+    }
 }
 
 private final class AgentSmokeEventRecorder: @unchecked Sendable {
