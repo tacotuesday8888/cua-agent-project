@@ -125,6 +125,166 @@ struct AnthropicProviderTests {
     }
 }
 
+@Suite(.serialized)
+struct ZAIProviderTests {
+    @Test func decodesZAIResponse() async throws {
+        let canned = """
+        {
+          "id": "chatcmpl-1",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": "Hi",
+                "tool_calls": [
+                  {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                      "name": "done",
+                      "arguments": "{\\"summary\\":\\"ok\\"}"
+                    }
+                  }
+                ]
+              },
+              "finish_reason": "tool_calls"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 12,
+            "completion_tokens": 7,
+            "total_tokens": 19
+          }
+        }
+        """
+        ZAIStubURLProtocol.responder = { request in
+            let http = HTTPURLResponse(url: request.url!, statusCode: 200,
+                                       httpVersion: nil, headerFields: nil)!
+            return (http, Data(canned.utf8))
+        }
+        defer { ZAIStubURLProtocol.responder = nil }
+
+        let response = try await makeProvider().send(
+            LLMRequest(model: "glm-4.7-flash", system: "sys", messages: [.user("hello")])
+        )
+        #expect(response.stopReason == .toolUse)
+        #expect(response.text == "Hi")
+        #expect(response.toolUses.first?.id == "call_1")
+        #expect(response.toolUses.first?.name == "done")
+        #expect(response.toolUses.first?.input["summary"]?.stringValue == "ok")
+        #expect(response.usage.inputTokens == 12)
+        #expect(response.usage.outputTokens == 7)
+    }
+
+    @Test func encodesOpenAIStyleToolMessages() async throws {
+        let canned = """
+        {
+          "choices": [
+            {
+              "message": {
+                "role": "assistant",
+                "content": "Finished"
+              },
+              "finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1,
+            "completion_tokens": 1,
+            "total_tokens": 2
+          }
+        }
+        """
+        ZAIStubURLProtocol.capturedRequest = nil
+        ZAIStubURLProtocol.capturedBody = nil
+        ZAIStubURLProtocol.responder = { request in
+            let http = HTTPURLResponse(url: request.url!, statusCode: 200,
+                                       httpVersion: nil, headerFields: nil)!
+            return (http, Data(canned.utf8))
+        }
+        defer {
+            ZAIStubURLProtocol.responder = nil
+            ZAIStubURLProtocol.capturedRequest = nil
+            ZAIStubURLProtocol.capturedBody = nil
+        }
+
+        let tool = ToolDefinition(
+            name: "done",
+            description: "Finish the task.",
+            inputSchema: [
+                "type": "object",
+                "properties": [
+                    "summary": ["type": "string"]
+                ],
+                "required": ["summary"]
+            ]
+        )
+        _ = try await makeProvider().send(LLMRequest(
+            model: "glm-4.7-flash",
+            system: "sys",
+            messages: [
+                .user("hello"),
+                LLMMessage(role: .assistant, content: [
+                    .text("I will finish."),
+                    .toolUse(ToolUse(id: "call_1", name: "done", input: ["summary": "ok"]))
+                ]),
+                LLMMessage(role: .user, content: [
+                    .toolResult(ToolResult(toolUseID: "call_1", text: "Done."))
+                ])
+            ],
+            tools: [tool],
+            maxTokens: 128,
+            temperature: 0.5
+        ))
+
+        let request = try #require(ZAIStubURLProtocol.capturedRequest)
+        #expect(request.value(forHTTPHeaderField: "authorization") == "Bearer test-key")
+        let body = try #require(ZAIStubURLProtocol.capturedBody)
+        let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        let payload = try #require(json)
+
+        #expect(payload["model"] as? String == "glm-4.7-flash")
+        #expect(payload["tool_choice"] as? String == "auto")
+        #expect(payload["max_tokens"] as? Int == 128)
+        #expect(payload["temperature"] as? Double == 0.5)
+
+        let messages = try #require(payload["messages"] as? [[String: Any]])
+        #expect(messages.map { $0["role"] as? String } == ["system", "user", "assistant", "tool"])
+        #expect(messages[0]["content"] as? String == "sys")
+        #expect(messages[3]["tool_call_id"] as? String == "call_1")
+        #expect(messages[3]["content"] as? String == "Done.")
+
+        let assistantToolCalls = try #require(messages[2]["tool_calls"] as? [[String: Any]])
+        let function = try #require(assistantToolCalls.first?["function"] as? [String: Any])
+        #expect(function["name"] as? String == "done")
+        #expect(function["arguments"] as? String == #"{"summary":"ok"}"#)
+
+        let tools = try #require(payload["tools"] as? [[String: Any]])
+        let toolFunction = try #require(tools.first?["function"] as? [String: Any])
+        #expect(tools.first?["type"] as? String == "function")
+        #expect(toolFunction["name"] as? String == "done")
+    }
+
+    @Test func missingAPIKeyThrows() async {
+        do {
+            _ = try await ZAIProvider(apiKey: "")
+                .send(LLMRequest(model: "glm-4.7-flash", messages: [.user("x")]))
+            Issue.record("expected a missing-API-key error")
+        } catch {
+            #expect(error as? LLMError == .missingAPIKey)
+        }
+    }
+
+    private func makeProvider() -> ZAIProvider {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ZAIStubURLProtocol.self]
+        return ZAIProvider(apiKey: "test-key",
+                           endpoint: URL(string: "https://unit.test/chat")!,
+                           urlSession: URLSession(configuration: config))
+    }
+}
+
 /// A `URLProtocol` that returns a canned response, for offline provider tests.
 final class StubURLProtocol: URLProtocol {
     nonisolated(unsafe) static var responder: (@Sendable (URLRequest) -> (HTTPURLResponse, Data))?
@@ -144,4 +304,50 @@ final class StubURLProtocol: URLProtocol {
     }
 
     override func stopLoading() {}
+}
+
+/// Separate stub so Z.ai provider tests can run independently from Anthropic tests.
+final class ZAIStubURLProtocol: URLProtocol {
+    nonisolated(unsafe) static var responder: (@Sendable (URLRequest) -> (HTTPURLResponse, Data))?
+    nonisolated(unsafe) static var capturedRequest: URLRequest?
+    nonisolated(unsafe) static var capturedBody: Data?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        Self.capturedRequest = request
+        Self.capturedBody = Self.bodyData(from: request)
+        guard let responder = Self.responder else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+        let (response, data) = responder(request)
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+
+    private static func bodyData(from request: URLRequest) -> Data? {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return nil }
+
+        stream.open()
+        defer { stream.close() }
+
+        var data = Data()
+        let bufferSize = 4096
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        defer { buffer.deallocate() }
+
+        while stream.hasBytesAvailable {
+            let count = stream.read(buffer, maxLength: bufferSize)
+            if count < 0 { return nil }
+            if count == 0 { break }
+            data.append(buffer, count: count)
+        }
+        return data
+    }
 }

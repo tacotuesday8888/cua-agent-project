@@ -14,8 +14,17 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            SecureField("Anthropic API key", text: $model.apiKey)
-                .textFieldStyle(.roundedBorder)
+            HStack {
+                Picker("Model", selection: $model.selectedProvider) {
+                    ForEach(AgentViewModel.Provider.allCases) { provider in
+                        Text(provider.displayName).tag(provider)
+                    }
+                }
+                .frame(maxWidth: 220)
+
+                SecureField(model.apiKeyPlaceholder, text: $model.apiKey)
+                    .textFieldStyle(.roundedBorder)
+            }
 
             HStack {
                 Picker("Target app", selection: $model.selectedAppName) {

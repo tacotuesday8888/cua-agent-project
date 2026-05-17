@@ -33,6 +33,42 @@ public final class AgentViewModel: UserInteraction {
         public let summary: String
     }
 
+    /// Supported LLM backends for the test harness.
+    public enum Provider: String, CaseIterable, Identifiable, Sendable {
+        case zai
+        case anthropic
+
+        public var id: String { rawValue }
+
+        public var displayName: String {
+            switch self {
+            case .zai: "Z.ai GLM-4.7-Flash"
+            case .anthropic: "Anthropic Claude"
+            }
+        }
+
+        var model: String {
+            switch self {
+            case .zai: "glm-4.7-flash"
+            case .anthropic: "claude-sonnet-4-6"
+            }
+        }
+
+        var apiKeyPlaceholder: String {
+            switch self {
+            case .zai: "Z.ai API key"
+            case .anthropic: "Anthropic API key"
+            }
+        }
+
+        var apiKeyDefaultsKey: String {
+            switch self {
+            case .zai: "AutopilotZAIAPIKey"
+            case .anthropic: "AutopilotAnthropicAPIKey"
+            }
+        }
+    }
+
     // MARK: - Observable state
 
     /// The free-text prompt the user is typing.
@@ -49,20 +85,33 @@ public final class AgentViewModel: UserInteraction {
     public var pendingApproval: PendingApproval?
     /// Whether the notch is expanded to its full panel.
     public var isExpanded: Bool = false
-    /// The Anthropic API key (bring-your-own in v1).
+    /// The selected LLM backend for this run.
+    public var selectedProvider: Provider {
+        didSet {
+            guard selectedProvider != oldValue else { return }
+            UserDefaults.standard.set(selectedProvider.rawValue, forKey: Self.providerDefaultsKey)
+            apiKey = Self.savedAPIKey(for: selectedProvider)
+        }
+    }
+    /// The selected provider's API key (bring-your-own in v1).
     public var apiKey: String
+
+    public var apiKeyPlaceholder: String { selectedProvider.apiKeyPlaceholder }
+    public var selectedModelName: String { selectedProvider.model }
 
     // MARK: - Private
 
-    private static let apiKeyDefaultsKey = "AutopilotAnthropicAPIKey"
-    private static let model = "claude-sonnet-4-6"
+    private static let providerDefaultsKey = "AutopilotLLMProvider"
 
     private let locator = AppLocator()
     private var runTask: Task<Void, Never>?
     private var approvalContinuation: CheckedContinuation<Bool, Never>?
 
     public init() {
-        self.apiKey = UserDefaults.standard.string(forKey: Self.apiKeyDefaultsKey) ?? ""
+        let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+            .flatMap(Provider.init(rawValue:)) ?? .zai
+        self.selectedProvider = savedProvider
+        self.apiKey = Self.savedAPIKey(for: savedProvider)
     }
 
     // MARK: - Actions
@@ -80,7 +129,7 @@ public final class AgentViewModel: UserInteraction {
         let task = promptText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !task.isEmpty, phase != .running else { return }
         guard !apiKey.isEmpty else {
-            phase = .failed("Add your Anthropic API key to get started.")
+            phase = .failed("Add your \(selectedProvider.displayName) API key to get started.")
             return
         }
         let appName = selectedAppName.trimmingCharacters(in: .whitespaces)
@@ -88,20 +137,22 @@ public final class AgentViewModel: UserInteraction {
             phase = .failed("Pick the app you want me to operate.")
             return
         }
-        UserDefaults.standard.set(apiKey, forKey: Self.apiKeyDefaultsKey)
+        let provider = selectedProvider
+        let apiKey = apiKey
+        UserDefaults.standard.set(apiKey, forKey: provider.apiKeyDefaultsKey)
 
         feed = []
         phase = .running
 
         let session = AgentSession(
-            llm: AnthropicProvider(apiKey: apiKey),
+            llm: Self.makeLLMProvider(provider: provider, apiKey: apiKey),
             computer: MacComputer(
                 pid: target.processID,
                 appName: target.name,
                 bundleIdentifier: target.bundleIdentifier
             ),
             interaction: self,
-            configuration: AgentConfiguration(model: Self.model),
+            configuration: AgentConfiguration(model: provider.model),
             eventHandler: { [weak self] event in
                 Task { @MainActor in self?.ingest(event) }
             }
@@ -192,5 +243,18 @@ public final class AgentViewModel: UserInteraction {
 
     private func append(_ text: String, isError: Bool = false) {
         feed.append(FeedItem(text: text, isError: isError))
+    }
+
+    private static func savedAPIKey(for provider: Provider) -> String {
+        UserDefaults.standard.string(forKey: provider.apiKeyDefaultsKey) ?? ""
+    }
+
+    private static func makeLLMProvider(provider: Provider, apiKey: String) -> any LLMProvider {
+        switch provider {
+        case .zai:
+            ZAIProvider(apiKey: apiKey)
+        case .anthropic:
+            AnthropicProvider(apiKey: apiKey)
+        }
     }
 }
