@@ -88,6 +88,31 @@ struct RiskClassifierTests {
         #expect(risk == .destructive)
     }
 
+    @Test func commandCloseAndQuitKeyPressesAreDestructive() {
+        // ⌘W closes a window or tab, losing unsaved work; ⌘Q quits the app.
+        let classifier = RiskClassifier()
+        #expect(classifier.assess(
+            tool: .pressKey,
+            input: ["key": "w", "modifiers": ["command"]],
+            snapshot: nil
+        ) == .destructive)
+        #expect(classifier.assess(
+            tool: .pressKey,
+            input: ["key": "q", "modifiers": ["command"]],
+            snapshot: nil
+        ) == .destructive)
+    }
+
+    @Test func closeKeyWithoutCommandIsWrite() {
+        // Without Command, "w" is just an ordinary typed character.
+        let risk = RiskClassifier().assess(
+            tool: .pressKey,
+            input: ["key": "w"],
+            snapshot: nil
+        )
+        #expect(risk == .write)
+    }
+
     @Test func plainKeyPressIsWrite() {
         let risk = RiskClassifier().assess(
             tool: .pressKey,

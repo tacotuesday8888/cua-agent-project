@@ -19,9 +19,11 @@ public struct RiskClassifier: Sendable {
         "sign out", "log out", "unsubscribe", "cancel subscription"
     ]
 
-    /// Key names that delete content when pressed together with Command.
-    private static let destructiveDeleteKeys: Set<String> = [
-        "delete", "backspace", "forwarddelete"
+    /// Keys that, pressed with Command, do something consequential and hard to
+    /// undo: ⌘⌫ and its variants delete content; ⌘W closes a window or tab,
+    /// discarding unsaved work; ⌘Q quits the app.
+    private static let destructiveCommandKeys: Set<String> = [
+        "delete", "backspace", "forwarddelete", "w", "q"
     ]
 
     /// Assess the approval tier of a tool call against the current UI snapshot.
@@ -86,7 +88,8 @@ public struct RiskClassifier: Sendable {
         return !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// Whether a key press deletes content, e.g. ⌘⌫.
+    /// Whether a key press is consequential and hard to undo, e.g. ⌘⌫ to
+    /// delete, ⌘W to close, or ⌘Q to quit.
     private func isDestructiveKeyPress(_ input: JSONValue) -> Bool {
         let key = (input["key"]?.stringValue ?? "").lowercased()
         let modifiers = Set(
@@ -94,7 +97,7 @@ public struct RiskClassifier: Sendable {
                 .compactMap(\.stringValue)
                 .map { $0.lowercased() }
         )
-        return modifiers.contains("command") && Self.destructiveDeleteKeys.contains(key)
+        return modifiers.contains("command") && Self.destructiveCommandKeys.contains(key)
     }
 
     private func elementID(from input: JSONValue) -> String? {
