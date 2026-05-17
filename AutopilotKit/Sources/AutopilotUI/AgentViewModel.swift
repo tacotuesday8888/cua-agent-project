@@ -138,6 +138,10 @@ public final class AgentViewModel: UserInteraction {
     public private(set) var recentRuns: [RunRecord] = []
     /// Everything the agent currently remembers about the user, newest first.
     public private(set) var storedMemories: [StoredMemory] = []
+    /// Whether the app currently holds Accessibility permission.
+    public private(set) var accessibilityTrusted = false
+    /// Whether the app currently holds Screen Recording permission.
+    public private(set) var screenRecordingTrusted = false
     /// Apps the user trusts permanently for write actions; persisted.
     public var permanentlyTrustedApps: [String] {
         didSet {
@@ -207,6 +211,7 @@ public final class AgentViewModel: UserInteraction {
         self.apiKey = Self.savedAPIKey(for: savedProvider)
         self.permanentlyTrustedApps = UserDefaults.standard
             .stringArray(forKey: Self.trustedAppsDefaultsKey) ?? []
+        refreshPermissions()
         Task { [weak self] in
             await self?.loadRecentRuns()
             await self?.loadMemories()
@@ -356,6 +361,36 @@ public final class AgentViewModel: UserInteraction {
     /// Whether `app` is on the permanent-trust list.
     public func isPermanentlyTrusted(_ app: String) -> Bool {
         permanentlyTrustedApps.contains { $0.caseInsensitiveCompare(app) == .orderedSame }
+    }
+
+    // MARK: - Permissions
+
+    /// Re-read the current Accessibility and Screen Recording permission state.
+    public func refreshPermissions() {
+        accessibilityTrusted = SystemPermissions.accessibilityTrusted
+        screenRecordingTrusted = SystemPermissions.screenRecordingTrusted
+    }
+
+    /// Prompt for Accessibility permission, then re-read the state.
+    public func requestAccessibility() {
+        SystemPermissions.requestAccessibility()
+        refreshPermissions()
+    }
+
+    /// Open the Accessibility pane of System Settings.
+    public func openAccessibilitySettings() {
+        SystemPermissions.openAccessibilitySettings()
+    }
+
+    /// Prompt for Screen Recording permission, then re-read the state.
+    public func requestScreenRecording() {
+        SystemPermissions.requestScreenRecording()
+        refreshPermissions()
+    }
+
+    /// Open the Screen Recording pane of System Settings.
+    public func openScreenRecordingSettings() {
+        SystemPermissions.openScreenRecordingSettings()
     }
 
     // MARK: - UserInteraction

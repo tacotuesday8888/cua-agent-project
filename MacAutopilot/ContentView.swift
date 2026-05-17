@@ -14,6 +14,8 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            permissionsView
+
             HStack {
                 Picker("Model", selection: $model.selectedProvider) {
                     ForEach(AgentViewModel.Provider.allCases) { provider in
@@ -75,7 +77,54 @@ struct ContentView: View {
         .padding()
         .frame(width: 480)
         .frame(minHeight: 440, alignment: .top)
-        .onAppear { model.refreshApps() }
+        .onAppear {
+            model.refreshApps()
+            model.refreshPermissions()
+        }
+    }
+
+    @ViewBuilder
+    private var permissionsView: some View {
+        if !model.accessibilityTrusted || !model.screenRecordingTrusted {
+            VStack(alignment: .leading, spacing: 6) {
+                if !model.accessibilityTrusted {
+                    permissionRow(
+                        message: "Accessibility access is required to read and control apps.",
+                        grant: { model.requestAccessibility() },
+                        openSettings: { model.openAccessibilitySettings() }
+                    )
+                }
+                if !model.screenRecordingTrusted {
+                    permissionRow(
+                        message: "Screen Recording is optional — it backs screenshot fallback.",
+                        grant: { model.requestScreenRecording() },
+                        openSettings: { model.openScreenRecordingSettings() }
+                    )
+                }
+                Button("Re-check permissions") { model.refreshPermissions() }
+                    .controlSize(.small)
+            }
+            .padding(8)
+            .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private func permissionRow(
+        message: String,
+        grant: @escaping () -> Void,
+        openSettings: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.shield.fill")
+                .foregroundStyle(.orange)
+            Text(message)
+                .font(.caption)
+            Spacer(minLength: 4)
+            Button("Grant", action: grant)
+                .controlSize(.small)
+            Button("Settings", action: openSettings)
+                .controlSize(.small)
+        }
     }
 
     @ViewBuilder

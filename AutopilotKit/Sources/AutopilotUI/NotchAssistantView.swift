@@ -41,6 +41,7 @@ public struct NotchAssistantView: View {
         .animation(.snappy(duration: 0.22), value: model.isExpanded)
         .onAppear {
             model.refreshApps()
+            model.refreshPermissions()
             onExpansionChange(model.isExpanded)
         }
         .onChange(of: model.isExpanded) { _, expanded in
@@ -83,6 +84,7 @@ public struct NotchAssistantView: View {
 
     private var expandedPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
+            permissionBanner
             controls
             promptRow
             pendingInteraction
@@ -92,6 +94,32 @@ public struct NotchAssistantView: View {
         }
         .padding(.horizontal, 14)
         .padding(.bottom, 14)
+    }
+
+    /// Shown when Accessibility is missing — without it no task can run.
+    @ViewBuilder
+    private var permissionBanner: some View {
+        if !model.accessibilityTrusted {
+            Button {
+                model.requestAccessibility()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.shield.fill")
+                        .foregroundStyle(.orange)
+                    Text("Grant Accessibility access to run tasks")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white)
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white.opacity(0.5))
+                }
+                .padding(8)
+                .background(.orange.opacity(0.2), in: RoundedRectangle(cornerRadius: 8))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     private var controls: some View {
