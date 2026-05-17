@@ -39,8 +39,15 @@ public struct AppLocator {
     /// Find a running app whose name or bundle id matches `query`
     /// (case-insensitive). An exact name match is preferred over a substring.
     public func runningApp(matching query: String) -> RunningApp? {
-        let apps = runningApps()
-        let needle = query.lowercased()
+        Self.match(query, in: runningApps())
+    }
+
+    /// Resolve `query` against `apps`: an exact, case-insensitive name match
+    /// wins; otherwise the first app whose name or bundle id contains the
+    /// query. An empty query matches nothing, rather than the first app.
+    nonisolated static func match(_ query: String, in apps: [RunningApp]) -> RunningApp? {
+        let needle = query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return nil }
         if let exact = apps.first(where: { $0.name.lowercased() == needle }) {
             return exact
         }

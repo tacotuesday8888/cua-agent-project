@@ -72,6 +72,44 @@ struct MacComputerTests {
     }
 }
 
+struct AppLocatorMatchTests {
+    private let apps = [
+        AppLocator.RunningApp(name: "Safari", bundleIdentifier: "com.apple.Safari", processID: 1),
+        AppLocator.RunningApp(
+            name: "Google Chrome",
+            bundleIdentifier: "com.google.Chrome",
+            processID: 2
+        ),
+        AppLocator.RunningApp(name: "Notes", bundleIdentifier: "com.apple.Notes", processID: 3)
+    ]
+
+    @Test func exactNameMatchWins() {
+        #expect(AppLocator.match("Safari", in: apps)?.processID == 1)
+    }
+
+    @Test func matchIsCaseInsensitive() {
+        #expect(AppLocator.match("safari", in: apps)?.processID == 1)
+    }
+
+    @Test func substringMatchesAppName() {
+        // "@chrome" should resolve to "Google Chrome".
+        #expect(AppLocator.match("chrome", in: apps)?.processID == 2)
+    }
+
+    @Test func substringMatchesBundleIdentifier() {
+        #expect(AppLocator.match("google", in: apps)?.processID == 2)
+    }
+
+    @Test func emptyQueryMatchesNothing() {
+        #expect(AppLocator.match("", in: apps) == nil)
+        #expect(AppLocator.match("   ", in: apps) == nil)
+    }
+
+    @Test func unknownQueryMatchesNothing() {
+        #expect(AppLocator.match("Xcode", in: apps) == nil)
+    }
+}
+
 /// Records which pids `MacComputerEnvironment.activateTarget` was asked to
 /// bring forward, for activation tests.
 private actor ActivationRecorder {
