@@ -319,9 +319,17 @@ public struct NotchAssistantView: View {
     private var recentRunsSection: some View {
         if !model.recentRuns.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
-                Text("RECENT")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.4))
+                HStack {
+                    Text("RECENT")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.4))
+                    Spacer()
+                    Button("Clear") { model.clearHistory() }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.4))
+                        .help("Clear run history")
+                }
                 ForEach(model.recentRuns.prefix(3)) { run in
                     runRow(run)
                 }

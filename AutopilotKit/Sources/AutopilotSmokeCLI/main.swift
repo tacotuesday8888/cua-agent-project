@@ -19,6 +19,7 @@ struct AutopilotSmokeCLI {
         let target = value(after: "--app", in: arguments) ?? "AutopilotFixtureApp"
         let includeScreenshot = arguments.contains("--include-screenshot")
         let runAgentLoop = arguments.contains("--agent-loop")
+        let dumpTree = arguments.contains("--dump-tree")
         let liveProvider = liveProvider(from: arguments)
         let app = await MainActor.run {
             AppLocator().runningApp(matching: target)
@@ -40,6 +41,11 @@ struct AutopilotSmokeCLI {
         printDiagnostics(diagnostics)
         guard diagnostics.isReady else {
             exit(2)
+        }
+
+        if dumpTree {
+            await dumpAccessibilityTree(computer: computer, includeScreenshot: includeScreenshot)
+            exit(0)
         }
 
         if let liveProvider {
@@ -154,6 +160,26 @@ struct AutopilotSmokeCLI {
     Use the fixture app. Set the Smoke input field to "live smoke value", \
     click Run, then finish with a short summary.
     """
+
+    /// Print the accessibility tree of the target app — the same compact text
+    /// the agent reasons over — as a debugging aid for real-world validation.
+    private static func dumpAccessibilityTree(
+        computer: MacComputer,
+        includeScreenshot: Bool
+    ) async {
+        print("")
+        do {
+            let state = try await computer.getAppState(includeScreenshot: includeScreenshot)
+            print(UITreeRenderer.compactText(state.snapshot))
+            if includeScreenshot, let screenshot = state.screenshot {
+                print("")
+                print("Screenshot: \(screenshot.count) PNG byte(s).")
+            }
+        } catch {
+            fflush(stdout)
+            fputs("Could not read \(computer.appName): \(String(describing: error))\n", stderr)
+        }
+    }
 
     private static func runAgentLoopSmoke(
         computer: MacComputer,
@@ -399,7 +425,11 @@ struct AutopilotSmokeCLI {
         Usage:
           swift run --package-path AutopilotKit AutopilotFixtureApp
           swift run --package-path AutopilotKit AutopilotSmokeCLI [--app AutopilotFixtureApp] [--include-screenshot] [--agent-loop]
+          swift run --package-path AutopilotKit AutopilotSmokeCLI --app Safari --dump-tree
           swift run --package-path AutopilotKit AutopilotSmokeCLI --live-provider zai [--api-key-env ZAI_API_KEY] [--model glm-4.7-flash] [--task "…"] [--expect-text "live smoke value"] [--max-steps 15]
+
+        --dump-tree prints the accessibility tree the agent would see for any
+        running app, after the readiness checks pass.
 
         The fixture app must be running and the smoke runner process must have
         Accessibility permission in System Settings > Privacy & Security.

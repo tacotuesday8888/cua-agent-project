@@ -50,6 +50,13 @@ swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureAp
 swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp --include-screenshot
 ```
 
+To inspect what the agent would see for any running app, dump its
+accessibility tree:
+
+```sh
+swift run --package-path AutopilotKit AutopilotSmokeCLI --app Safari --dump-tree
+```
+
 ## GLM 4.7 Flash
 
 The default Z.AI provider is `glm-4.7-flash` on Z.AI's OpenAI-compatible chat
