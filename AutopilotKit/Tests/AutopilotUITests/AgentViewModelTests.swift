@@ -133,8 +133,8 @@ struct AgentViewModelWorkflowTests {
     @Test func saveRunAsWorkflowUsesTaskAsGoal() async {
         let (model, store) = makeModel()
         let run = RunRecord(
-            task: "Archive read mail in {{folder}}",
-            appName: "Mail",
+            task: "  Archive read mail in {{folder}}  ",
+            appName: " Mail ",
             model: "test-model",
             status: .completed,
             summary: "Done.",
@@ -150,6 +150,45 @@ struct AgentViewModelWorkflowTests {
         #expect(stored?.variableNames == ["folder"])
         #expect(stored?.source == .savedFromRun)
         #expect(stored?.sourceRunID == run.id)
+    }
+
+    @Test func saveRunAsWorkflowNeedsNameTaskAndApp() async {
+        let (model, store) = makeModel()
+        let completeRun = RunRecord(
+            task: "do it",
+            appName: "Mail",
+            model: "test-model",
+            status: .completed,
+            summary: "Done.",
+            startedAt: Date(),
+            finishedAt: Date()
+        )
+        let missingTask = RunRecord(
+            task: " ",
+            appName: "Mail",
+            model: "test-model",
+            status: .completed,
+            summary: "Done.",
+            startedAt: Date(),
+            finishedAt: Date()
+        )
+        let missingApp = RunRecord(
+            task: "do it",
+            appName: "",
+            model: "test-model",
+            status: .completed,
+            summary: "Done.",
+            startedAt: Date(),
+            finishedAt: Date()
+        )
+
+        model.saveRunAsWorkflow(completeRun, name: " ")
+        model.saveRunAsWorkflow(missingTask, name: "Missing task")
+        model.saveRunAsWorkflow(missingApp, name: "Missing app")
+        // Give any (incorrectly) spawned writes a chance to land before asserting.
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        #expect(await store.all().isEmpty)
     }
 
     @Test func duplicateWorkflowNameWarnsInFeed() async {

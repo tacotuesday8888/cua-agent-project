@@ -5,6 +5,7 @@ public enum WorkflowWriteResult: Sendable, Equatable {
     case updated
     case duplicate
     case cleared
+    case invalid(String)
     case failed(String)
 }
 
@@ -46,7 +47,7 @@ public actor WorkflowStore {
 
     /// The workflow with the given name, case-insensitively, if any.
     public func get(name: String) -> Workflow? {
-        let needle = name.lowercased()
+        let needle = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return loaded().first { $0.name.lowercased() == needle }
     }
 
@@ -59,6 +60,10 @@ public actor WorkflowStore {
 
     /// Store `workflow` and report duplicate/write-failure cases separately.
     public func addReporting(_ workflow: Workflow) -> WorkflowWriteResult {
+        let workflow = Self.normalized(workflow)
+        guard Self.isValidForStorage(workflow) else {
+            return .invalid(Self.invalidWorkflowMessage)
+        }
         var items = loaded()
         let name = workflow.name.lowercased()
         guard !items.contains(where: { $0.name.lowercased() == name }) else {
@@ -77,6 +82,10 @@ public actor WorkflowStore {
     /// name would collide with another workflow.
     @discardableResult
     public func update(_ workflow: Workflow) -> WorkflowWriteResult {
+        let workflow = Self.normalized(workflow)
+        guard Self.isValidForStorage(workflow) else {
+            return .invalid(Self.invalidWorkflowMessage)
+        }
         var items = loaded()
         guard let index = items.firstIndex(where: { $0.id == workflow.id }) else {
             return .duplicate
@@ -171,7 +180,9 @@ public actor WorkflowStore {
 
     private static func readItems(from url: URL) -> [Workflow] {
         guard let data = try? Data(contentsOf: url) else { return [] }
-        return (try? JSONDecoder().decode([Workflow].self, from: data)) ?? []
+        return (try? JSONDecoder().decode([Workflow].self, from: data))?
+            .map(normalized)
+            .filter(isValidForStorage) ?? []
     }
 
     private static func backUpExistingFile(at url: URL) throws {
@@ -183,6 +194,46 @@ public actor WorkflowStore {
             try fileManager.removeItem(at: backupURL)
         }
         try fileManager.copyItem(at: url, to: backupURL)
+    }
+
+    private static let invalidWorkflowMessage = "Workflow name, app, and goal are required."
+
+    private static func isValidForStorage(_ workflow: Workflow) -> Bool {
+        !workflow.name.isEmpty
+            && !workflow.appName.isEmpty
+            && !workflow.goalTemplate.isEmpty
+    }
+
+    private static func normalized(_ workflow: Workflow) -> Workflow {
+        Workflow(
+            id: workflow.id,
+            name: workflow.name.trimmingCharacters(in: .whitespacesAndNewlines),
+            appName: workflow.appName.trimmingCharacters(in: .whitespacesAndNewlines),
+            goalTemplate: workflow.goalTemplate.trimmingCharacters(in: .whitespacesAndNewlines),
+            recipe: workflow.recipe,
+            variables: normalizedVariables(workflow.variables),
+            source: workflow.source,
+            sourceRunID: workflow.sourceRunID,
+            createdAt: workflow.createdAt,
+            updatedAt: workflow.updatedAt,
+            runCount: workflow.runCount,
+            successCount: workflow.successCount
+        )
+    }
+
+    private static func normalizedVariables(_ variables: [WorkflowVariable]) -> [WorkflowVariable] {
+        var seen = Set<String>()
+        var normalized: [WorkflowVariable] = []
+        for variable in variables {
+            let name = variable.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, seen.insert(name).inserted else { continue }
+            normalized.append(WorkflowVariable(
+                name: name,
+                description: variable.description.trimmingCharacters(in: .whitespacesAndNewlines),
+                defaultValue: variable.defaultValue
+            ))
+        }
+        return normalized
     }
 
     private static func defaultDirectory() -> URL {

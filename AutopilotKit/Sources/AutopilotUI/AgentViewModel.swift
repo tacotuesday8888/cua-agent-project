@@ -692,13 +692,15 @@ public final class AgentViewModel: UserInteraction {
     /// its app the target. The user can add `{{slot}}` variables by editing.
     public func saveRunAsWorkflow(_ record: RunRecord, name: String) {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else { return }
-        let variables = WorkflowRenderer.slotNames(in: record.task)
+        let trimmedGoal = record.task.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedApp = record.appName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty, !trimmedGoal.isEmpty, !trimmedApp.isEmpty else { return }
+        let variables = WorkflowRenderer.slotNames(in: trimmedGoal)
             .map { WorkflowVariable(name: $0) }
         storeWorkflow(Workflow(
             name: trimmedName,
-            appName: record.appName,
-            goalTemplate: record.task,
+            appName: trimmedApp,
+            goalTemplate: trimmedGoal,
             variables: variables,
             source: .savedFromRun,
             sourceRunID: record.id
@@ -733,6 +735,8 @@ public final class AgentViewModel: UserInteraction {
                 break
             case .duplicate:
                 self.append("A workflow named \"\(workflow.name)\" already exists.", isError: true)
+            case .invalid(let message):
+                self.append("Workflow warning — \(message)", isError: true)
             case .failed(let message):
                 self.append("Storage warning — \(message)", isError: true)
             }

@@ -203,7 +203,7 @@ struct WorkflowStoreTests {
     @Test func getByNameIsCaseInsensitive() async {
         let store = WorkflowStore(directory: tempDirectory())
         await store.add(makeWorkflow(name: "Weekly Report"))
-        #expect(await store.get(name: "weekly report")?.name == "Weekly Report")
+        #expect(await store.get(name: " weekly report ")?.name == "Weekly Report")
     }
 
     @Test func duplicateNameIsRejectedCaseInsensitively() async {
@@ -213,6 +213,49 @@ struct WorkflowStoreTests {
         #expect(first == .stored)
         #expect(second == .duplicate)
         #expect(await store.all().count == 1)
+    }
+
+    @Test func addReportingRejectsMissingRequiredFields() async {
+        let store = WorkflowStore(directory: tempDirectory())
+        let invalidWorkflows = [
+            makeWorkflow(name: " "),
+            makeWorkflow(appName: "\n"),
+            makeWorkflow(goalTemplate: "   ")
+        ]
+
+        for workflow in invalidWorkflows {
+            guard case .invalid(let message) = await store.addReporting(workflow) else {
+                Issue.record("expected invalid workflow to be rejected")
+                continue
+            }
+            #expect(message.contains("name, app, and goal"))
+        }
+        #expect(await store.all().isEmpty)
+    }
+
+    @Test func addReportingNormalizesBeforeStorage() async {
+        let store = WorkflowStore(directory: tempDirectory())
+        let workflow = Workflow(
+            name: "  Weekly report  ",
+            appName: "\nMail ",
+            goalTemplate: " Email {{ recipient }} ",
+            variables: [
+                WorkflowVariable(name: " recipient ", description: " Who to email "),
+                WorkflowVariable(name: " "),
+                WorkflowVariable(name: "recipient", description: "duplicate")
+            ],
+            source: .manual
+        )
+
+        #expect(await store.addReporting(workflow) == .stored)
+
+        let stored = await store.all().first
+        #expect(stored?.name == "Weekly report")
+        #expect(stored?.appName == "Mail")
+        #expect(stored?.goalTemplate == "Email {{ recipient }}")
+        #expect(stored?.variables == [
+            WorkflowVariable(name: "recipient", description: "Who to email")
+        ])
     }
 
     @Test func updateReplacesWorkflow() async {
@@ -253,6 +296,26 @@ struct WorkflowStoreTests {
     @Test func updateMissingWorkflowReturnsDuplicate() async {
         let store = WorkflowStore(directory: tempDirectory())
         #expect(await store.update(makeWorkflow(name: "ghost")) == .duplicate)
+    }
+
+    @Test func updateRejectsMissingRequiredFields() async {
+        let store = WorkflowStore(directory: tempDirectory())
+        let workflow = makeWorkflow(name: "Editable")
+        await store.add(workflow)
+        let invalid = Workflow(
+            id: workflow.id,
+            name: " ",
+            appName: workflow.appName,
+            goalTemplate: workflow.goalTemplate,
+            source: workflow.source
+        )
+
+        guard case .invalid(let message) = await store.update(invalid) else {
+            Issue.record("expected invalid update to be rejected")
+            return
+        }
+        #expect(message.contains("name, app, and goal"))
+        #expect(await store.get(id: workflow.id)?.name == "Editable")
     }
 
     @Test func recordRunBumpsRunAndSuccessCounts() async {
@@ -337,6 +400,22 @@ struct WorkflowStoreTests {
 
         let store = WorkflowStore(directory: directory)
         #expect(await store.all().isEmpty)
+    }
+
+    @Test func persistedWorkflowsAreNormalizedAndInvalidRecordsAreSkipped() async throws {
+        let directory = tempDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let raw = [
+            makeWorkflow(name: "  Saved  ", appName: " Mail ", goalTemplate: " do {{ x }} "),
+            makeWorkflow(name: " ", appName: "Mail", goalTemplate: "do it")
+        ]
+        try JSONEncoder().encode(raw)
+            .write(to: directory.appending(path: "workflows.json"))
+
+        let store = WorkflowStore(directory: directory)
+        #expect(await store.all().map(\.name) == ["Saved"])
+        #expect(await store.all().first?.appName == "Mail")
+        #expect(await store.all().first?.goalTemplate == "do {{ x }}")
     }
 
     @Test func overwriteKeepsBackupOfPreviousFile() async throws {

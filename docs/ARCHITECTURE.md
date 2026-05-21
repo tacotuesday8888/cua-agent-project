@@ -119,6 +119,10 @@ Scope and guarantees for the current phase:
   Application Support and store a goal template, variable names, and (later) a
   recipe — never typed values or passwords. Variable values entered at run time
   are used transiently and never persisted.
+- **Store-guarded.** The workflow store trims simple boundary whitespace, drops
+  invalid records read from disk, and rejects writes missing a name, app, or
+  goal. The UI still validates early for a nicer user flow, but persistence is
+  the final integrity boundary.
 - **Capture.** This phase captures workflows by hand or by saving a finished run
   (`AgentViewModel.createWorkflow` / `saveRunAsWorkflow`). A later phase adds an
   agent-proposed `propose_workflow` tool and a learned recipe injected on re-runs.
