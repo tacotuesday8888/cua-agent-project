@@ -253,6 +253,7 @@ public struct ComputerUseSmokeRunner: Sendable {
     ) async -> ComputerUseSmokeReport {
         var steps: [ComputerUseSmokeStepResult] = []
         var plan = initialPlan
+        var latestSnapshot: UITreeSnapshot?
 
         var step = await record("list_apps", {
             let apps = try await computer.listApps()
@@ -268,6 +269,7 @@ public struct ComputerUseSmokeRunner: Sendable {
 
         step = await record("get_app_state", {
             let state = try await computer.getAppState(includeScreenshot: includeScreenshot)
+            latestSnapshot = state.snapshot
             let count = state.snapshot.root.flattened.count
             guard count > 0 else {
                 throw AgentError.computer("get_app_state returned an empty tree")
@@ -302,16 +304,24 @@ public struct ComputerUseSmokeRunner: Sendable {
             return ComputerUseSmokeReport(appName: computer.appName, steps: steps)
         }
 
-        step = await record("click", {
+        // The seven driver actions run unconditionally and each result is
+        // collected, so one validation run reports the full pass/fail matrix for
+        // the tool surface rather than stopping at the first failure — which
+        // matters most on a real Mac, where each run needs manual setup.
+        steps.append(await record(
+            "click",
+            target: activePlan.elementID(activePlan.clickElementIndex),
+            snapshot: latestSnapshot
+        ) {
             try await computer.click(elementID: activePlan.elementID(activePlan.clickElementIndex))
             return "Clicked element \(activePlan.clickElementIndex)."
         })
-        steps.append(step)
-        guard step.status == .passed else {
-            return ComputerUseSmokeReport(appName: computer.appName, steps: steps)
-        }
 
-        step = await record("scroll", {
+        steps.append(await record(
+            "scroll",
+            target: activePlan.scrollElementIndex.map { activePlan.elementID($0) },
+            snapshot: latestSnapshot
+        ) {
             try await computer.scroll(
                 elementID: activePlan.scrollElementIndex.map { activePlan.elementID($0) },
                 direction: activePlan.scrollDirection,
@@ -319,17 +329,18 @@ public struct ComputerUseSmokeRunner: Sendable {
             )
             return "Scrolled \(activePlan.scrollDirection.rawValue)."
         })
-        steps.append(step)
-        guard step.status == .passed else {
-            return ComputerUseSmokeReport(appName: computer.appName, steps: steps)
-        }
 
-        step = await record("set_value", {
+        steps.append(await record(
+            "set_value",
+            target: activePlan.elementID(activePlan.textElementIndex),
+            snapshot: latestSnapshot
+        ) {
             try await computer.setValue(
                 elementID: activePlan.elementID(activePlan.textElementIndex),
                 value: activePlan.setValue
             )
             let state = try await computer.getAppState(includeScreenshot: false)
+            latestSnapshot = state.snapshot
             if let planResolver {
                 activePlan = try planResolver(state)
             }
@@ -344,58 +355,55 @@ public struct ComputerUseSmokeRunner: Sendable {
             }
             return "Set and verified element \(activePlan.textElementIndex)."
         })
-        steps.append(step)
-        guard step.status == .passed else {
-            return ComputerUseSmokeReport(appName: computer.appName, steps: steps)
-        }
 
-        step = await record("type_text", {
+        steps.append(await record(
+            "type_text",
+            target: activePlan.elementID(activePlan.textElementIndex),
+            snapshot: latestSnapshot
+        ) {
             try await computer.typeText(
                 activePlan.typeText,
                 into: activePlan.elementID(activePlan.textElementIndex)
             )
             return "Typed \(activePlan.typeText.count) character(s)."
         })
-        steps.append(step)
-        guard step.status == .passed else {
-            return ComputerUseSmokeReport(appName: computer.appName, steps: steps)
-        }
 
-        step = await record("press_key", {
+        steps.append(await record("press_key", snapshot: latestSnapshot) {
             try await computer.pressKey(activePlan.keyPress)
             return "Pressed \(activePlan.keyPress.key)."
         })
-        steps.append(step)
-        guard step.status == .passed else {
-            return ComputerUseSmokeReport(appName: computer.appName, steps: steps)
-        }
 
-        step = await record("drag", {
+        steps.append(await record(
+            "drag",
+            target: activePlan.elementID(activePlan.dragFromElementIndex),
+            snapshot: latestSnapshot
+        ) {
             try await computer.drag(
                 fromElementID: activePlan.elementID(activePlan.dragFromElementIndex),
                 toElementID: activePlan.elementID(activePlan.dragToElementIndex)
             )
             return "Dragged \(activePlan.dragFromElementIndex) to \(activePlan.dragToElementIndex)."
         })
-        steps.append(step)
-        guard step.status == .passed else {
-            return ComputerUseSmokeReport(appName: computer.appName, steps: steps)
-        }
 
-        step = await record("perform_secondary_action", {
+        steps.append(await record(
+            "perform_secondary_action",
+            target: activePlan.elementID(activePlan.secondaryElementIndex),
+            snapshot: latestSnapshot
+        ) {
             try await computer.performSecondaryAction(
                 elementID: activePlan.elementID(activePlan.secondaryElementIndex),
                 action: activePlan.secondaryAction
             )
             return "Performed \(activePlan.secondaryAction)."
         })
-        steps.append(step)
 
         return ComputerUseSmokeReport(appName: computer.appName, steps: steps)
     }
 
     private func record(
         _ toolName: String,
+        target: String? = nil,
+        snapshot: UITreeSnapshot? = nil,
         _ operation: () async throws -> String
     ) async -> ComputerUseSmokeStepResult {
         do {
@@ -409,9 +417,28 @@ public struct ComputerUseSmokeRunner: Sendable {
             return ComputerUseSmokeStepResult(
                 toolName: toolName,
                 status: .failed,
-                detail: describe(error)
+                detail: failureDetail(describe(error), target: target, snapshot: snapshot)
             )
         }
+    }
+
+    /// Append the targeted element's id, role, and label (when resolvable) to a
+    /// failure message, so a smoke failure on a real app is self-explanatory
+    /// rather than a bare AX error.
+    private func failureDetail(
+        _ message: String,
+        target: String?,
+        snapshot: UITreeSnapshot?
+    ) -> String {
+        guard let target else { return message }
+        guard let element = snapshot?.element(id: target) else {
+            return "\(message) [target \(target)]"
+        }
+        var parts = [element.id, element.role]
+        if let label = element.label, !label.isEmpty {
+            parts.append("\"\(label)\"")
+        }
+        return "\(message) [target \(parts.joined(separator: " "))]"
     }
 
     private func describe(_ error: Error) -> String {

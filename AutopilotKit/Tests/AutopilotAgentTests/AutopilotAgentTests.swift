@@ -1184,23 +1184,57 @@ struct ComputerUseSmokeRunnerTests {
         ])
     }
 
-    @Test func smokeRunnerStopsOnFirstFailedTool() async {
+    @Test func smokeRunnerRunsEveryDriverStepAndReportsEachResult() async {
         let computer = fixtureComputer()
         let report = await ComputerUseSmokeRunner().run(
             computer: computer,
             plan: fixturePlan(clickElementIndex: 99)
         )
 
+        // A failing click no longer aborts the run: every tool is still
+        // exercised, so one validation run shows the full pass/fail matrix.
         #expect(!report.passed)
         #expect(report.steps.map(\.toolName) == [
             "list_apps",
             "get_app_state",
-            "click"
+            "click",
+            "scroll",
+            "set_value",
+            "type_text",
+            "press_key",
+            "drag",
+            "perform_secondary_action"
         ])
-        #expect(report.steps.last?.detail.contains("No element e99") == true)
+        let click = report.steps.first { $0.toolName == "click" }
+        #expect(click?.status == .failed)
+        #expect(click?.detail.contains("No element e99") == true)
+        // Only the bad step failed; the other six driver tools ran and passed.
+        #expect(report.steps.filter { $0.status == .failed }.map(\.toolName) == ["click"])
 
         let actions = await computer.performedActions
-        #expect(actions.isEmpty)
+        #expect(actions == [
+            "scroll:down:2",
+            "setValue:e2=direct value",
+            "typeText:e2:typed value",
+            "key:return",
+            "drag:e2->e3",
+            "secondary:e3:AXShowMenu"
+        ])
+    }
+
+    @Test func smokeRunnerFailedStepNamesTheTargetElement() async {
+        let computer = fixtureComputer()
+        var plan = fixturePlan()
+        plan.secondaryAction = "AXBogus"  // not advertised on the target element
+        let report = await ComputerUseSmokeRunner().run(computer: computer, plan: plan)
+
+        #expect(!report.passed)
+        let secondary = report.steps.first { $0.toolName == "perform_secondary_action" }
+        #expect(secondary?.status == .failed)
+        // The failure names the targeted element (id, role, label) for debugging.
+        #expect(secondary?.detail.contains("e3") == true)
+        #expect(secondary?.detail.contains("AXButton") == true)
+        #expect(secondary?.detail.contains("Run") == true)
     }
 
     @Test func fixturePlanResolvesAccessibilityIdentifiers() throws {
