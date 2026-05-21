@@ -10,6 +10,7 @@ let package = Package(
         .library(name: "AutopilotCore", targets: ["AutopilotCore"]),
         .library(name: "AutopilotMemory", targets: ["AutopilotMemory"]),
         .library(name: "AutopilotHistory", targets: ["AutopilotHistory"]),
+        .library(name: "AutopilotWorkflows", targets: ["AutopilotWorkflows"]),
         .library(name: "AutopilotLLM", targets: ["AutopilotLLM"]),
         .library(name: "AutopilotAgent", targets: ["AutopilotAgent"]),
         .library(name: "AutopilotPerception", targets: ["AutopilotPerception"]),
@@ -26,6 +27,7 @@ let package = Package(
             dependencies: ["AutopilotCore"]
         ),
         .target(name: "AutopilotHistory"),
+        .target(name: "AutopilotWorkflows"),
         .target(
             name: "AutopilotLLM",
             dependencies: ["AutopilotCore"]
@@ -57,6 +59,7 @@ let package = Package(
                 "AutopilotCore",
                 "AutopilotMemory",
                 "AutopilotHistory",
+                "AutopilotWorkflows",
                 "AutopilotLLM",
                 "AutopilotAgent",
                 "AutopilotMac"
@@ -86,6 +89,10 @@ let package = Package(
         .testTarget(
             name: "AutopilotHistoryTests",
             dependencies: ["AutopilotHistory"]
+        ),
+        .testTarget(
+            name: "AutopilotWorkflowsTests",
+            dependencies: ["AutopilotWorkflows"]
         ),
         .testTarget(
             name: "AutopilotLLMTests",
