@@ -116,6 +116,30 @@ struct AppLocatorMatchTests {
         #expect(AppLocator.match("chrome", in: apps) == nil)
     }
 
+    @Test func resolveReportsAmbiguousMatches() {
+        let apps = [
+            AppLocator.RunningApp(
+                name: "Google Chrome",
+                bundleIdentifier: "com.google.Chrome",
+                processID: 2
+            ),
+            AppLocator.RunningApp(
+                name: "Chrome Canary",
+                bundleIdentifier: "com.google.Chrome.canary",
+                processID: 4
+            )
+        ]
+        guard case .ambiguous(let matches) = AppLocator.resolve("chrome", in: apps) else {
+            Issue.record("expected ambiguous app resolution")
+            return
+        }
+        #expect(matches.map(\.processID).sorted() == [2, 4])
+    }
+
+    @Test func resolveReportsNotFound() {
+        #expect(AppLocator.resolve("Xcode", in: apps) == .notFound)
+    }
+
     @Test func exactBundleIdentifierWinsBeforeFuzzyAmbiguity() {
         let apps = [
             AppLocator.RunningApp(

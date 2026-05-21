@@ -203,6 +203,13 @@ public final class AgentViewModel: UserInteraction {
         value < 1000 ? "\(value)" : String(format: "%.1fk", Double(value) / 1000)
     }
 
+    private static func appList(_ apps: [AppLocator.RunningApp]) -> String {
+        let names = apps.map(\.name).sorted()
+        let shown = names.prefix(3).joined(separator: ", ")
+        guard names.count > 3 else { return shown }
+        return "\(shown), and \(names.count - 3) more"
+    }
+
     // MARK: - Private
 
     private static let providerDefaultsKey = "AutopilotLLMProvider"
@@ -292,14 +299,39 @@ public final class AgentViewModel: UserInteraction {
         }
         // An "@app" mention in the task picks the target, overriding the picker.
         var note: String?
-        if let mention = promptParser.appMention(in: task),
-           let resolved = locator.runningApp(matching: mention) {
-            selectedAppName = resolved.name
-            note = "Targeting \(resolved.name) — named with @ in the task."
+        if let mention = promptParser.appMention(in: task) {
+            switch locator.resolveRunningApp(matching: mention) {
+            case .matched(let resolved):
+                selectedAppName = resolved.name
+                note = "Targeting \(resolved.name) — named with @ in the task."
+            case .notFound:
+                phase = .failed("No running app matched @\(mention). Open that app, then try again.")
+                return
+            case .ambiguous(let apps):
+                phase = .failed(
+                    "@\(mention) matches more than one running app: "
+                        + "\(Self.appList(apps)). Pick the exact app, then try again."
+                )
+                return
+            }
         }
         let appName = selectedAppName.trimmingCharacters(in: .whitespaces)
-        guard !appName.isEmpty, let target = locator.runningApp(matching: appName) else {
+        guard !appName.isEmpty else {
             phase = .failed("Pick the app you want me to operate, or name it with @.")
+            return
+        }
+        let target: AppLocator.RunningApp
+        switch locator.resolveRunningApp(matching: appName) {
+        case .matched(let resolved):
+            target = resolved
+        case .notFound:
+            phase = .failed("Open \(appName), then try again.")
+            return
+        case .ambiguous(let apps):
+            phase = .failed(
+                "\(appName) matches more than one running app: "
+                    + "\(Self.appList(apps)). Pick the exact app, then try again."
+            )
             return
         }
         activeWorkflowID = nil
@@ -333,9 +365,19 @@ public final class AgentViewModel: UserInteraction {
                 self.phase = .failed("Fill workflow fields: \(labels).")
                 return
             }
-            guard let target = self.locator.runningApp(matching: workflow.appName) else {
+            let target: AppLocator.RunningApp
+            switch self.locator.resolveRunningApp(matching: workflow.appName) {
+            case .matched(let resolved):
+                target = resolved
+            case .notFound:
                 self.phase = .failed(
                     "\(workflow.appName) is not running. Open it, then run this workflow."
+                )
+                return
+            case .ambiguous(let apps):
+                self.phase = .failed(
+                    "\(workflow.appName) matches more than one running app: "
+                        + "\(Self.appList(apps)). Use a more specific workflow target."
                 )
                 return
             }

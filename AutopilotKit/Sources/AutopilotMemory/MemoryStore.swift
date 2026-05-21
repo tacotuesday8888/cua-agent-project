@@ -138,6 +138,7 @@ public actor MemoryStore {
                 at: fileURL.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
+            try Self.backUpExistingFile(at: fileURL)
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             try encoder.encode(items).write(to: fileURL, options: .atomic)
@@ -151,6 +152,17 @@ public actor MemoryStore {
     private static func readItems(from url: URL) -> [MemoryItem] {
         guard let data = try? Data(contentsOf: url) else { return [] }
         return (try? JSONDecoder().decode([MemoryItem].self, from: data)) ?? []
+    }
+
+    private static func backUpExistingFile(at url: URL) throws {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: url.path) else { return }
+        let backupURL = url.deletingLastPathComponent()
+            .appendingPathComponent(url.lastPathComponent + ".backup", isDirectory: false)
+        if fileManager.fileExists(atPath: backupURL.path) {
+            try fileManager.removeItem(at: backupURL)
+        }
+        try fileManager.copyItem(at: url, to: backupURL)
     }
 
     private static func defaultDirectory() -> URL {

@@ -48,6 +48,10 @@ That product shape implies a few hard technical seams:
   compatibility but is unused for now (a later phase injects it as a prompt
   prior). The module depends only on Foundation, and only `AutopilotUI` consumes
   it — the agent loop is untouched by single-app workflows.
+- Local JSON stores write atomically and keep a `.backup` sibling of the
+  previous file before overwriting existing memory, history, or workflow state.
+  If a corrupt file is later replaced, the corrupt bytes are still retained for
+  manual recovery instead of being silently lost.
 
 ## GLM 4.7 Flash
 
@@ -160,7 +164,7 @@ rather than making the agent loop depend on a server.
 - First low-risk live GLM run against a normal third-party app.
 - Better prompt/tool-choice recovery for stale or missing AX elements.
 - More robust driver diagnostics for permission and target-window failures.
-- Target-app selection logic for the future `@app` picker.
+- App-picker polish around duplicate app names and saved workflow target edits.
 - Redesigning `NotchAssistantView` behind the existing `AgentViewModel` and
   `NotchController` contracts.
 - More safety tests around destructive labels, overwrites, and app trust.

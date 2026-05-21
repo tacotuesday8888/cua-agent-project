@@ -21,12 +21,20 @@ struct AutopilotSmokeCLI {
         let runAgentLoop = arguments.contains("--agent-loop")
         let dumpTree = arguments.contains("--dump-tree")
         let liveProvider = liveProvider(from: arguments)
-        let app = await MainActor.run {
-            AppLocator().runningApp(matching: target)
+        let resolution = await MainActor.run {
+            AppLocator().resolveRunningApp(matching: target)
         }
-
-        guard let app else {
+        let app: AppLocator.RunningApp
+        switch resolution {
+        case .matched(let resolved):
+            app = resolved
+        case .notFound:
             fputs("No running app matched '\(target)'.\n\n", stderr)
+            printUsage()
+            exit(2)
+        case .ambiguous(let apps):
+            let names = apps.map(\.name).sorted().joined(separator: ", ")
+            fputs("'\(target)' matched more than one running app: \(names).\n\n", stderr)
             printUsage()
             exit(2)
         }

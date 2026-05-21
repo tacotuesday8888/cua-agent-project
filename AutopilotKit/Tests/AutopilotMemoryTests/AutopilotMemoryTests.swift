@@ -113,6 +113,44 @@ struct MemoryStoreTests {
         #expect(await store.all().isEmpty)
     }
 
+    @Test func overwriteKeepsBackupOfPreviousFile() async throws {
+        let directory = tempDirectory()
+        let fileURL = directory.appending(path: "memory.json")
+        let backupURL = directory.appending(path: "memory.json.backup")
+        let store = MemoryStore(directory: directory)
+
+        #expect(await store.addReporting(MemoryItem(
+            text: "first memory",
+            source: .explicit,
+            createdAt: Date(timeIntervalSince1970: 1)
+        )) == .stored)
+        let originalData = try Data(contentsOf: fileURL)
+        #expect(!FileManager.default.fileExists(atPath: backupURL.path))
+
+        #expect(await store.addReporting(MemoryItem(
+            text: "second memory",
+            source: .explicit,
+            createdAt: Date(timeIntervalSince1970: 2)
+        )) == .stored)
+
+        #expect(try Data(contentsOf: backupURL) == originalData)
+        let persisted = try JSONDecoder().decode([MemoryItem].self, from: Data(contentsOf: fileURL))
+        #expect(Set(persisted.map(\.text)) == Set(["first memory", "second memory"]))
+    }
+
+    @Test func corruptFileIsBackedUpBeforeNextWrite() async throws {
+        let directory = tempDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("not valid json".utf8).write(to: directory.appending(path: "memory.json"))
+
+        let store = MemoryStore(directory: directory)
+        #expect(await store.addReporting(MemoryItem(text: "fresh", source: .explicit)) == .stored)
+
+        let backup = String(decoding: try Data(contentsOf: directory.appending(path: "memory.json.backup")), as: UTF8.self)
+        #expect(backup == "not valid json")
+        #expect(await store.all().map(\.text) == ["fresh"])
+    }
+
     @Test func deDuplicatesIdenticalMemory() async {
         let store = MemoryStore(directory: tempDirectory())
         let first = await store.add(MemoryItem(text: "same", scope: .global, source: .explicit))

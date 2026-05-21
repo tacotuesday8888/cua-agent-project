@@ -338,6 +338,44 @@ struct WorkflowStoreTests {
         let store = WorkflowStore(directory: directory)
         #expect(await store.all().isEmpty)
     }
+
+    @Test func overwriteKeepsBackupOfPreviousFile() async throws {
+        let directory = tempDirectory()
+        let fileURL = directory.appending(path: "workflows.json")
+        let backupURL = directory.appending(path: "workflows.json.backup")
+        let store = WorkflowStore(directory: directory)
+        let base = Date(timeIntervalSince1970: 1_000_000)
+
+        #expect(await store.addReporting(makeWorkflow(name: "First", updatedAt: base)) == .stored)
+        let originalData = try Data(contentsOf: fileURL)
+        #expect(!FileManager.default.fileExists(atPath: backupURL.path))
+
+        #expect(await store.addReporting(makeWorkflow(
+            name: "Second",
+            updatedAt: base.addingTimeInterval(60)
+        )) == .stored)
+
+        #expect(try Data(contentsOf: backupURL) == originalData)
+        let persisted = try JSONDecoder().decode([Workflow].self, from: Data(contentsOf: fileURL))
+        #expect(persisted.map(\.name) == ["First", "Second"])
+    }
+
+    @Test func corruptFileIsBackedUpBeforeNextWrite() async throws {
+        let directory = tempDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("not valid json".utf8)
+            .write(to: directory.appending(path: "workflows.json"))
+
+        let store = WorkflowStore(directory: directory)
+        #expect(await store.addReporting(makeWorkflow(name: "Fresh")) == .stored)
+
+        let backup = String(
+            decoding: try Data(contentsOf: directory.appending(path: "workflows.json.backup")),
+            as: UTF8.self
+        )
+        #expect(backup == "not valid json")
+        #expect(await store.all().map(\.name) == ["Fresh"])
+    }
 }
 
 /// Build a `Workflow` with sensible defaults for tests.

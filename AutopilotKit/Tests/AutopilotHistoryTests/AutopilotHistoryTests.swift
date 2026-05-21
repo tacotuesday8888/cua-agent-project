@@ -143,6 +143,44 @@ struct RunHistoryStoreTests {
         let store = RunHistoryStore(directory: directory)
         #expect(await store.all().isEmpty)
     }
+
+    @Test func overwriteKeepsBackupOfPreviousFile() async throws {
+        let directory = tempDirectory()
+        let fileURL = directory.appending(path: "run-history.json")
+        let backupURL = directory.appending(path: "run-history.json.backup")
+        let store = RunHistoryStore(directory: directory)
+        let base = Date(timeIntervalSince1970: 1_000_000)
+
+        #expect(await store.recordReporting(makeRecord(task: "first run", startedAt: base)) == .recorded)
+        let originalData = try Data(contentsOf: fileURL)
+        #expect(!FileManager.default.fileExists(atPath: backupURL.path))
+
+        #expect(await store.recordReporting(makeRecord(
+            task: "second run",
+            startedAt: base.addingTimeInterval(60)
+        )) == .recorded)
+
+        #expect(try Data(contentsOf: backupURL) == originalData)
+        let persisted = try JSONDecoder().decode([RunRecord].self, from: Data(contentsOf: fileURL))
+        #expect(persisted.map(\.task) == ["second run", "first run"])
+    }
+
+    @Test func corruptFileIsBackedUpBeforeNextWrite() async throws {
+        let directory = tempDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("not valid json".utf8)
+            .write(to: directory.appending(path: "run-history.json"))
+
+        let store = RunHistoryStore(directory: directory)
+        #expect(await store.recordReporting(makeRecord(task: "fresh run")) == .recorded)
+
+        let backup = String(
+            decoding: try Data(contentsOf: directory.appending(path: "run-history.json.backup")),
+            as: UTF8.self
+        )
+        #expect(backup == "not valid json")
+        #expect(await store.all().map(\.task) == ["fresh run"])
+    }
 }
 
 /// Build a `RunRecord` with sensible defaults for tests.
