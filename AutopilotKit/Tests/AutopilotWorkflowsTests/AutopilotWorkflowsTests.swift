@@ -231,6 +231,25 @@ struct WorkflowStoreTests {
         #expect(await store.get(id: workflow.id)?.goalTemplate == "do {{x}} carefully")
     }
 
+    @Test func updateRejectsNameCollision() async {
+        let store = WorkflowStore(directory: tempDirectory())
+        let first = makeWorkflow(name: "Morning report")
+        let second = makeWorkflow(name: "Evening report")
+        await store.add(first)
+        await store.add(second)
+
+        let renamedSecond = Workflow(
+            id: second.id,
+            name: "morning report",
+            appName: second.appName,
+            goalTemplate: second.goalTemplate,
+            source: second.source
+        )
+
+        #expect(await store.update(renamedSecond) == .duplicate)
+        #expect(await store.all().map(\.name).sorted() == ["Evening report", "Morning report"])
+    }
+
     @Test func updateMissingWorkflowReturnsDuplicate() async {
         let store = WorkflowStore(directory: tempDirectory())
         #expect(await store.update(makeWorkflow(name: "ghost")) == .duplicate)

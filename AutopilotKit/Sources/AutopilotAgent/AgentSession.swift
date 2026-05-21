@@ -101,6 +101,8 @@ public actor AgentSession {
 
     /// Consecutive unreadable-app failures at which a run gives up.
     private static let unreadableFailureLimit = 2
+    private static let defaultScrollAmount = 3
+    private static let maxScrollAmount = 20
 
     /// Tools where repeating the identical call signals a stuck loop.
     /// Traversal tools such as scroll and press_key are intentionally excluded,
@@ -328,7 +330,19 @@ public actor AgentSession {
             return AgentOutcome(status: .completed, summary: summary)
 
         case .askUser:
-            let question = use.input["question"]?.stringValue ?? ""
+            let question = (use.input["question"]?.stringValue ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !question.isEmpty else {
+                appendToolInputError(
+                    AgentError.invalidToolInput(
+                        tool: tool.rawValue,
+                        detail: "question must be a non-empty string"
+                    ),
+                    toolUseID: use.id,
+                    into: &results
+                )
+                return nil
+            }
             let answer = await interaction.askQuestion(question)
             emit(.askedUser(question: question, answer: answer))
             results.append(.toolResult(ToolResult(toolUseID: use.id, text: answer)))
@@ -339,6 +353,13 @@ public actor AgentSession {
             return nil
 
         default:
+            do {
+                try validateInput(tool: tool, input: use.input)
+            } catch {
+                appendToolInputError(error, toolUseID: use.id, into: &results)
+                return nil
+            }
+
             let repeats = registerAction(tool: tool, input: use.input)
             let guarded = Self.loopGuardedTools.contains(tool)
             if guarded, repeats >= 2 {
@@ -350,6 +371,24 @@ public actor AgentSession {
             }
             return nil
         }
+    }
+
+    /// Return a tool-result error for malformed model input before approval
+    /// prompts or macOS actions run. A bad schema call is a model recovery
+    /// problem, not something the user should be asked to approve.
+    private func appendToolInputError(
+        _ error: Error,
+        toolUseID: String,
+        into results: inout [LLMContentBlock]
+    ) {
+        results.append(.toolResult(ToolResult(
+            toolUseID: toolUseID,
+            text: """
+            \(describe(error)) Fix the tool input and try again, or call done \
+            if the task cannot continue.
+            """,
+            isError: true
+        )))
     }
 
     /// Update the repeat tracker and return how many times in a row this exact
@@ -663,26 +702,18 @@ public actor AgentSession {
             return try await observedResult("Typed text.")
 
         case .scroll:
-            let directionRaw = try requireString(input, "direction", tool: tool)
-            guard let direction = ScrollDirection(rawValue: directionRaw) else {
-                throw AgentError.invalidToolInput(
-                    tool: tool.rawValue,
-                    detail: "invalid direction \(directionRaw)"
-                )
-            }
-            let amount = input["amount"]?.intValue ?? 3
+            let direction = try requireScrollDirection(input, tool: tool)
+            let amount = try scrollAmount(input, tool: tool)
             try await computer.scroll(
                 elementID: try optionalElementID(input, primaryKey: "element_index"),
                 direction: direction,
                 amount: amount
             )
-            return try await observedResult("Scrolled \(directionRaw).")
+            return try await observedResult("Scrolled \(direction.rawValue).")
 
         case .pressKey:
             let key = try requireString(input, "key", tool: tool)
-            let modifiers = (input["modifiers"]?.arrayValue ?? [])
-                .compactMap(\.stringValue)
-                .compactMap(KeyPress.Modifier.init(rawValue:))
+            let modifiers = try keyModifiers(input, tool: tool)
             try await computer.pressKey(KeyPress(key: key, modifiers: modifiers))
             return try await observedResult("Pressed \(key).")
 
@@ -759,6 +790,45 @@ public actor AgentSession {
         return String(describing: error)
     }
 
+    /// Validate tool input before approvals/highlights. This keeps malformed
+    /// model calls from surfacing as confusing user approval prompts.
+    private func validateInput(tool: AgentTool, input: JSONValue) throws {
+        switch tool {
+        case .listApps:
+            return
+        case .getAppState:
+            if let raw = input["include_screenshot"], raw.boolValue == nil {
+                throw AgentError.invalidToolInput(
+                    tool: tool.rawValue,
+                    detail: "include_screenshot must be true or false"
+                )
+            }
+        case .click:
+            _ = try requireElementID(input, tool: tool)
+        case .setValue:
+            _ = try requireElementID(input, tool: tool)
+            _ = try requireString(input, "value", tool: tool)
+        case .typeText:
+            _ = try optionalElementID(input, primaryKey: "element_index")
+            _ = try requireString(input, "text", tool: tool)
+        case .scroll:
+            _ = try optionalElementID(input, primaryKey: "element_index")
+            _ = try requireScrollDirection(input, tool: tool)
+            _ = try scrollAmount(input, tool: tool)
+        case .pressKey:
+            _ = try requireString(input, "key", tool: tool)
+            _ = try keyModifiers(input, tool: tool)
+        case .drag:
+            _ = try requireElementID(input, key: "from_element_index", tool: tool)
+            _ = try requireElementID(input, key: "to_element_index", tool: tool)
+        case .performSecondaryAction:
+            _ = try requireElementID(input, tool: tool)
+            _ = try requireString(input, "action", tool: tool)
+        case .askUser, .proposeMemory, .done:
+            return
+        }
+    }
+
     private func requireString(
         _ input: JSONValue,
         _ key: String,
@@ -768,6 +838,75 @@ public actor AgentSession {
             throw AgentError.invalidToolInput(tool: tool.rawValue, detail: "missing \(key)")
         }
         return value
+    }
+
+    private func requireScrollDirection(
+        _ input: JSONValue,
+        tool: AgentTool
+    ) throws -> ScrollDirection {
+        let raw = try requireString(input, "direction", tool: tool)
+        let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard let direction = ScrollDirection(rawValue: normalized) else {
+            throw AgentError.invalidToolInput(
+                tool: tool.rawValue,
+                detail: "direction must be one of up, down, left, or right"
+            )
+        }
+        return direction
+    }
+
+    private func scrollAmount(_ input: JSONValue, tool: AgentTool) throws -> Int {
+        guard let raw = input["amount"] else { return Self.defaultScrollAmount }
+        guard let amount = raw.intValue else {
+            throw AgentError.invalidToolInput(
+                tool: tool.rawValue,
+                detail: "amount must be an integer from 1 to \(Self.maxScrollAmount)"
+            )
+        }
+        guard (1...Self.maxScrollAmount).contains(amount) else {
+            throw AgentError.invalidToolInput(
+                tool: tool.rawValue,
+                detail: "amount must be between 1 and \(Self.maxScrollAmount)"
+            )
+        }
+        return amount
+    }
+
+    private func keyModifiers(
+        _ input: JSONValue,
+        tool: AgentTool
+    ) throws -> [KeyPress.Modifier] {
+        guard let raw = input["modifiers"] else { return [] }
+        guard let values = raw.arrayValue else {
+            throw AgentError.invalidToolInput(
+                tool: tool.rawValue,
+                detail: "modifiers must be an array"
+            )
+        }
+
+        var modifiers: [KeyPress.Modifier] = []
+        for value in values {
+            guard let rawName = value.stringValue else {
+                throw AgentError.invalidToolInput(
+                    tool: tool.rawValue,
+                    detail: "modifiers must contain only strings"
+                )
+            }
+            let normalized = rawName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard let modifier = KeyPress.Modifier(rawValue: normalized) else {
+                throw AgentError.invalidToolInput(
+                    tool: tool.rawValue,
+                    detail: """
+                    unsupported modifier \(rawName). Use command, shift, option, \
+                    control, or function
+                    """
+                )
+            }
+            if !modifiers.contains(modifier) {
+                modifiers.append(modifier)
+            }
+        }
+        return modifiers
     }
 
     private func requireElementID(

@@ -100,6 +100,38 @@ struct AppLocatorMatchTests {
         #expect(AppLocator.match("google", in: apps)?.processID == 2)
     }
 
+    @Test func ambiguousSubstringMatchesNothing() {
+        let apps = [
+            AppLocator.RunningApp(
+                name: "Google Chrome",
+                bundleIdentifier: "com.google.Chrome",
+                processID: 2
+            ),
+            AppLocator.RunningApp(
+                name: "Chrome Canary",
+                bundleIdentifier: "com.google.Chrome.canary",
+                processID: 4
+            )
+        ]
+        #expect(AppLocator.match("chrome", in: apps) == nil)
+    }
+
+    @Test func exactBundleIdentifierWinsBeforeFuzzyAmbiguity() {
+        let apps = [
+            AppLocator.RunningApp(
+                name: "Google Chrome",
+                bundleIdentifier: "com.google.Chrome",
+                processID: 2
+            ),
+            AppLocator.RunningApp(
+                name: "Chrome Canary",
+                bundleIdentifier: "com.google.Chrome.canary",
+                processID: 4
+            )
+        ]
+        #expect(AppLocator.match("com.google.Chrome", in: apps)?.processID == 2)
+    }
+
     @Test func emptyQueryMatchesNothing() {
         #expect(AppLocator.match("", in: apps) == nil)
         #expect(AppLocator.match("   ", in: apps) == nil)

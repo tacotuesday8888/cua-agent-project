@@ -73,11 +73,16 @@ public actor WorkflowStore {
     }
 
     /// Replace the stored workflow sharing `workflow.id` and stamp its updated
-    /// time. Returns `.updated`, or `.duplicate` if no such workflow exists.
+    /// time. Returns `.duplicate` when no such workflow exists, or when the new
+    /// name would collide with another workflow.
     @discardableResult
     public func update(_ workflow: Workflow) -> WorkflowWriteResult {
         var items = loaded()
         guard let index = items.firstIndex(where: { $0.id == workflow.id }) else {
+            return .duplicate
+        }
+        let name = workflow.name.lowercased()
+        guard !items.contains(where: { $0.id != workflow.id && $0.name.lowercased() == name }) else {
             return .duplicate
         }
         var updated = workflow

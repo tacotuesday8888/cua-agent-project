@@ -484,6 +484,83 @@ struct AgentSessionTests {
         #expect(failure?.1.contains("No element e99") == true)
     }
 
+    @Test func malformedWriteToolDoesNotAskForApprovalOrAct() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "t1", tool: "click", input: [:]),
+            toolResponse(id: "t2", tool: "done", input: ["summary": "Stopped."])
+        ])
+        let computer = musicComputer()
+        let interaction = CountingInteraction()
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: interaction,
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory()
+        )
+
+        let outcome = await session.run(task: "click something")
+        #expect(outcome.status == .completed)
+        #expect(interaction.approvalsRequested == 0)
+        #expect(await computer.performedActions.isEmpty)
+
+        let requests = await llm.requests
+        let recoveryText = requests.dropFirst().first.map { allText(in: $0) } ?? ""
+        #expect(recoveryText.contains("Invalid input for click"))
+        #expect(recoveryText.contains("missing element_index"))
+    }
+
+    @Test func invalidKeyModifierIsReturnedAsToolErrorBeforeApproval() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(
+                id: "t1",
+                tool: "press_key",
+                input: ["key": "q", "modifiers": ["cmd"]]
+            ),
+            toolResponse(id: "t2", tool: "done", input: ["summary": "Stopped."])
+        ])
+        let computer = musicComputer()
+        let interaction = CountingInteraction()
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: interaction,
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory()
+        )
+
+        _ = await session.run(task: "quit the app")
+        #expect(interaction.approvalsRequested == 0)
+        #expect(await computer.performedActions.isEmpty)
+
+        let requests = await llm.requests
+        let recoveryText = requests.dropFirst().first.map { allText(in: $0) } ?? ""
+        #expect(recoveryText.contains("unsupported modifier cmd"))
+        #expect(recoveryText.contains("Use command, shift, option, control, or function"))
+    }
+
+    @Test func scrollInputNormalizesDirectionAndUsesBoundedAmount() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(
+                id: "t1",
+                tool: "scroll",
+                input: ["direction": "Down", "amount": 2]
+            ),
+            toolResponse(id: "t2", tool: "done", input: ["summary": "Done."])
+        ])
+        let computer = musicComputer()
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory()
+        )
+
+        _ = await session.run(task: "scroll")
+        #expect(await computer.performedActions == ["scroll:down:2"])
+    }
+
     @Test func failedDiagnosticsStopsBeforeLLMCall() async {
         let llm = ScriptedLLMProvider([
             toolResponse(id: "t1", tool: "done", input: ["summary": "Should not run."])

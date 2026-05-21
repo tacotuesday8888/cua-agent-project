@@ -99,7 +99,7 @@ public struct RiskClassifier: Sendable {
         let modifiers = Set(
             (input["modifiers"]?.arrayValue ?? [])
                 .compactMap(\.stringValue)
-                .map { $0.lowercased() }
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
         )
         return modifiers.contains("command") && Self.destructiveCommandKeys.contains(key)
     }
