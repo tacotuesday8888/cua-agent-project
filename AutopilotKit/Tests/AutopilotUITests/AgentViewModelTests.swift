@@ -207,6 +207,72 @@ struct AgentViewModelWorkflowTests {
         #expect(reason.contains("API key"))
     }
 
+    @Test func runWorkflowWithMissingBindingsFailsBeforeAppLookup() async {
+        let (model, store) = makeModel()
+        model.apiKey = "test-key"
+        let workflow = Workflow(
+            name: "Needs field",
+            appName: "NoSuchApp9X8Y7Z",
+            goalTemplate: "Email {{recipient}}",
+            variables: [WorkflowVariable(name: "recipient")],
+            source: .manual
+        )
+        await store.add(workflow)
+
+        model.runWorkflow(id: workflow.id, bindings: [:])
+        await waitUntil {
+            if case .failed = model.phase { return true }
+            return false
+        }
+
+        guard case .failed(let reason) = model.phase else {
+            Issue.record("expected failure when a workflow field is missing")
+            return
+        }
+        #expect(reason.contains("{{recipient}}"))
+    }
+
+    @Test func runWorkflowMarksPhaseRunningBeforeAsyncLookup() async {
+        let (model, store) = makeModel()
+        model.apiKey = "test-key"
+        let workflow = Workflow(
+            name: "Queued",
+            appName: "NoSuchApp9X8Y7Z",
+            goalTemplate: "Do it",
+            source: .manual
+        )
+        await store.add(workflow)
+
+        model.runWorkflow(id: workflow.id, bindings: [:])
+
+        #expect(model.phase == .running)
+    }
+
+    @Test func runWorkflowAcceptsDefaultBindingsBeforeAppLookup() async {
+        let (model, store) = makeModel()
+        model.apiKey = "test-key"
+        let workflow = Workflow(
+            name: "Has default",
+            appName: "NoSuchApp9X8Y7Z",
+            goalTemplate: "Email {{recipient}}",
+            variables: [WorkflowVariable(name: "recipient", defaultValue: "Maya")],
+            source: .manual
+        )
+        await store.add(workflow)
+
+        model.runWorkflow(id: workflow.id, bindings: [:])
+        await waitUntil {
+            if case .failed = model.phase { return true }
+            return false
+        }
+
+        guard case .failed(let reason) = model.phase else {
+            Issue.record("expected app-running failure after defaults satisfy bindings")
+            return
+        }
+        #expect(reason.contains("not running"))
+    }
+
     @Test func runWorkflowWithAppNotRunningFails() async {
         let (model, store) = makeModel()
         model.apiKey = "test-key"

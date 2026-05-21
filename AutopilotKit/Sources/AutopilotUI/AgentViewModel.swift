@@ -311,14 +311,26 @@ public final class AgentViewModel: UserInteraction {
     /// automatically — it goes through the same approval gate as any task.
     public func runWorkflow(id: UUID, bindings: [String: String]) {
         guard phase != .running else { return }
+        activeWorkflowID = nil
         guard !apiKey.isEmpty else {
             phase = .failed("Add your \(selectedProvider.displayName) API key to get started.")
             return
         }
+        phase = .running
         Task { @MainActor [weak self] in
             guard let self else { return }
             guard let workflow = await self.workflows.get(id: id) else {
                 self.phase = .failed("That workflow could not be found.")
+                return
+            }
+            let missingSlots = WorkflowRenderer.missingSlotNames(
+                in: workflow.goalTemplate,
+                variables: workflow.variables,
+                bindings: bindings
+            )
+            guard missingSlots.isEmpty else {
+                let labels = missingSlots.map { "{{\($0)}}" }.joined(separator: ", ")
+                self.phase = .failed("Fill workflow fields: \(labels).")
                 return
             }
             guard let target = self.locator.runningApp(matching: workflow.appName) else {
@@ -327,9 +339,13 @@ public final class AgentViewModel: UserInteraction {
                 )
                 return
             }
+            let resolvedBindings = WorkflowRenderer.resolvedBindings(
+                variables: workflow.variables,
+                bindings: bindings
+            )
             let goal = WorkflowRenderer.resolveGoal(
                 template: workflow.goalTemplate,
-                bindings: bindings
+                bindings: resolvedBindings
             )
             self.selectedAppName = workflow.appName
             self.activeWorkflowID = workflow.id

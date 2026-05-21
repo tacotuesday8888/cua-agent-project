@@ -3,6 +3,38 @@ import Foundation
 /// Pure helpers for turning a stored workflow into something runnable or
 /// displayable. Kept side-effect-free so it is trivially testable.
 public enum WorkflowRenderer {
+    /// Merge stored default values with the values supplied for a specific run.
+    /// Explicit run bindings win over defaults, even when the explicit value is
+    /// empty, so the caller can decide whether that should block execution.
+    public static func resolvedBindings(
+        variables: [WorkflowVariable],
+        bindings: [String: String]
+    ) -> [String: String] {
+        var resolved: [String: String] = [:]
+        for variable in variables {
+            if let defaultValue = variable.defaultValue {
+                resolved[variable.name] = defaultValue
+            }
+        }
+        for (key, value) in bindings {
+            resolved[key] = value
+        }
+        return resolved
+    }
+
+    /// Slot names from `template` that still have no non-empty value after
+    /// defaults and run bindings are applied.
+    public static func missingSlotNames(
+        in template: String,
+        variables: [WorkflowVariable],
+        bindings: [String: String]
+    ) -> [String] {
+        let resolved = resolvedBindings(variables: variables, bindings: bindings)
+        return slotNames(in: template).filter { name in
+            (resolved[name] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
     /// Substitute `{{slot}}` tokens in `template` with the matching value from
     /// `bindings`. Unbound tokens are left literal — so a missing value stays
     /// visible to the user and the agent rather than being silently blanked.

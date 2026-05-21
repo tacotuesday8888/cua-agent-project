@@ -1,5 +1,6 @@
 import AppKit
 import AutopilotUI
+import AutopilotWorkflows
 import SwiftUI
 
 /// A minimal test harness for the agent: pick a running app, type a task, and
@@ -8,6 +9,7 @@ struct ContentView: View {
     @State private var model = AgentViewModel()
     @State private var newWorkflowName = ""
     @State private var newWorkflowGoal = ""
+    @State private var workflowBindings: [UUID: [String: String]] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -336,20 +338,40 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 }
                 ForEach(model.savedWorkflows) { workflow in
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(workflow.name)
-                                .font(.caption.weight(.medium))
-                            Text(workflowDetail(workflow))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button("Run") { model.runWorkflow(id: workflow.id, bindings: [:]) }
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(workflow.name)
+                                    .font(.caption.weight(.medium))
+                                Text(workflowDetail(workflow))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("Run") {
+                                model.runWorkflow(
+                                    id: workflow.id,
+                                    bindings: workflowBindings[workflow.id] ?? [:]
+                                )
+                            }
                             .controlSize(.small)
                             .disabled(model.phase == .running)
-                        Button("Delete") { model.deleteWorkflow(id: workflow.id) }
+                            Button("Delete") {
+                                workflowBindings[workflow.id] = nil
+                                model.deleteWorkflow(id: workflow.id)
+                            }
                             .controlSize(.small)
+                        }
+                        ForEach(workflow.variables) { variable in
+                            TextField(
+                                placeholder(for: variable),
+                                text: workflowBinding(workflowID: workflow.id, variable: variable)
+                            )
+                            .textFieldStyle(.roundedBorder)
+                        }
+                    }
+                    .onAppear {
+                        seedWorkflowDefaults(workflow)
                     }
                 }
             }
@@ -357,6 +379,36 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .font(.caption)
+    }
+
+    private func workflowBinding(
+        workflowID: UUID,
+        variable: WorkflowVariable
+    ) -> Binding<String> {
+        Binding(
+            get: {
+                workflowBindings[workflowID]?[variable.name]
+                    ?? variable.defaultValue
+                    ?? ""
+            },
+            set: { value in
+                var bindings = workflowBindings[workflowID] ?? [:]
+                bindings[variable.name] = value
+                workflowBindings[workflowID] = bindings
+            }
+        )
+    }
+
+    private func seedWorkflowDefaults(_ workflow: AgentViewModel.StoredWorkflow) {
+        var bindings = workflowBindings[workflow.id] ?? [:]
+        for variable in workflow.variables where bindings[variable.name] == nil {
+            bindings[variable.name] = variable.defaultValue ?? ""
+        }
+        workflowBindings[workflow.id] = bindings
+    }
+
+    private func placeholder(for variable: WorkflowVariable) -> String {
+        variable.description.isEmpty ? variable.name : variable.description
     }
 
     private func workflowDetail(_ workflow: AgentViewModel.StoredWorkflow) -> String {

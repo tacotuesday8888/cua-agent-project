@@ -106,6 +106,49 @@ struct WorkflowRendererTests {
         )
     }
 
+    @Test func resolvedBindingsUseDefaultsWhenNoRunValueExists() {
+        let bindings = WorkflowRenderer.resolvedBindings(
+            variables: [WorkflowVariable(name: "recipient", defaultValue: "Maya")],
+            bindings: [:]
+        )
+        #expect(bindings["recipient"] == "Maya")
+    }
+
+    @Test func resolvedBindingsPreferRunValuesOverDefaults() {
+        let bindings = WorkflowRenderer.resolvedBindings(
+            variables: [WorkflowVariable(name: "recipient", defaultValue: "Maya")],
+            bindings: ["recipient": "Sam"]
+        )
+        #expect(bindings["recipient"] == "Sam")
+    }
+
+    @Test func missingSlotNamesReportsUnfilledTemplateSlots() {
+        let missing = WorkflowRenderer.missingSlotNames(
+            in: "Email {{recipient}} about {{topic}}",
+            variables: [WorkflowVariable(name: "recipient")],
+            bindings: ["recipient": "Maya"]
+        )
+        #expect(missing == ["topic"])
+    }
+
+    @Test func missingSlotNamesTreatsWhitespaceValuesAsMissing() {
+        let missing = WorkflowRenderer.missingSlotNames(
+            in: "Email {{recipient}}",
+            variables: [WorkflowVariable(name: "recipient")],
+            bindings: ["recipient": "  "]
+        )
+        #expect(missing == ["recipient"])
+    }
+
+    @Test func missingSlotNamesAcceptsDefaults() {
+        let missing = WorkflowRenderer.missingSlotNames(
+            in: "Email {{recipient}}",
+            variables: [WorkflowVariable(name: "recipient", defaultValue: "Maya")],
+            bindings: [:]
+        )
+        #expect(missing.isEmpty)
+    }
+
     @Test func summaryListsVariableSlots() {
         let summary = WorkflowRenderer.summary(for: makeWorkflow(
             name: "Weekly report",
