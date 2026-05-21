@@ -154,7 +154,23 @@ public actor MacComputer: ComputerControl {
     }
 
     public func click(elementID: String) async throws {
-        try actuator.press(element(for: elementID))
+        let element = try element(for: elementID)
+        do {
+            try actuator.press(element)
+        } catch let pressError {
+            // Many real controls — icon-only buttons, Electron, and web views —
+            // advertise no working AX press action, so press throws. Fall back
+            // to a synthesized click at the element's center (the same target
+            // that already passed the risk gate), mirroring the focus → click
+            // fallback used for typing. If the fallback also fails, surface the
+            // original press error, which names the underlying AX failure.
+            guard let point = try? center(of: elementID) else { throw pressError }
+            do {
+                try actuator.click(at: point, pid: pid)
+            } catch {
+                throw pressError
+            }
+        }
     }
 
     public func setValue(elementID: String, value: String) async throws {

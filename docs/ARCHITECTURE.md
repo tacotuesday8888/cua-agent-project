@@ -34,7 +34,11 @@ That product shape implies a few hard technical seams:
   scroll amounts, and invalid memory scopes are returned as recoverable tool
   errors before approval prompts, app actions, or memory writes.
 - `AutopilotMac` implements the real macOS `ComputerControl` driver with AX
-  tree reads, AX actions, synthesized input, and screenshot fallback.
+  tree reads, AX actions, synthesized input, and screenshot fallback. When an
+  element advertises no working AX press (common for icon-only buttons, Electron,
+  and web views), `click` falls back to a synthesized click at the element's
+  center — the same approved target — mirroring the focus → click fallback used
+  for typing.
 - `AutopilotLLM` keeps provider calls behind `LLMProvider`. Token usage carries
   prompt-cache creation and read counts alongside fresh input, and the run's
   cumulative input tally sums all three, so a cached Anthropic run is reported at
