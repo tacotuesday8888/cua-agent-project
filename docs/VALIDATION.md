@@ -69,6 +69,18 @@ Expected result: the fixture input ends with `live smoke value`, the agent calls
 `done`, and the smoke CLI reports success. Z.AI is configured as text-only, so
 screenshot requests must be omitted or explicitly warned about.
 
+To run deterministic fixture checks and one live fixture smoke in a single
+launch/cleanup cycle:
+
+```sh
+./script/validate_fixture.sh --live-provider zai
+./script/validate_fixture.sh --live-provider anthropic --api-key-env ANTHROPIC_API_KEY
+```
+
+The live option is deliberately opt-in because it uses the selected provider's
+real API. It reads the API key from the provider's environment variable first,
+then falls back to the saved MacAutopilot Keychain entry.
+
 ## Safe Real-App Matrix
 
 Use non-destructive tasks only. Do not test send, delete, purchase, sign-out, or

@@ -275,6 +275,23 @@ struct AgentSessionTests {
         #expect(actions == ["setValue:e2=jazz", "click:e3"])
     }
 
+    @Test func emptyDoneSummaryUsesDefault() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "t1", tool: "done", input: ["summary": "   \n  "])
+        ])
+        let session = AgentSession(
+            llm: llm,
+            computer: musicComputer(),
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: "test", maxSteps: 5, highlightDwell: .zero),
+            memory: makeTestMemory()
+        )
+
+        let outcome = await session.run(task: "finish quietly")
+        #expect(outcome.status == .completed)
+        #expect(outcome.summary == "Task complete.")
+    }
+
     @Test func runsComputerUseToolSurface() async {
         let llm = ScriptedLLMProvider([
             toolResponse(id: "t1", tool: "list_apps", input: [:]),

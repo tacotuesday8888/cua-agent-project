@@ -61,6 +61,7 @@ swift run --package-path AutopilotKit AutopilotFixtureApp
 swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp
 swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp --include-screenshot
 ./script/validate_fixture.sh
+./script/validate_fixture.sh --live-provider zai
 ```
 
 To inspect what the agent would see for any running app, dump its
@@ -84,6 +85,11 @@ paths:
 ```sh
 swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp --live-provider zai
 ```
+
+The same live fixture smoke can be run through the validation script with
+`./script/validate_fixture.sh --live-provider zai`; add `--api-key-env NAME`,
+`--model MODEL`, or `--max-steps N` when needed. The live provider path is
+opt-in because it uses a real API key.
 
 The smoke runner process needs Accessibility permission in System Settings >
 Privacy & Security > Accessibility. Add `--include-screenshot` to also require

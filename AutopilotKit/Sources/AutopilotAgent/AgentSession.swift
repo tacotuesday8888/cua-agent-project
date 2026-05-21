@@ -325,7 +325,7 @@ public actor AgentSession {
 
         switch tool {
         case .done:
-            let summary = use.input["summary"]?.stringValue ?? "Task complete."
+            let summary = Self.completionSummary(from: use.input["summary"]?.stringValue)
             emit(.finished(summary: summary))
             return AgentOutcome(status: .completed, summary: summary)
 
@@ -788,6 +788,11 @@ public actor AgentSession {
             return description
         }
         return String(describing: error)
+    }
+
+    private static func completionSummary(from rawSummary: String?) -> String {
+        let summary = (rawSummary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return summary.isEmpty ? "Task complete." : summary
     }
 
     /// Validate tool input before approvals/highlights. This keeps malformed
