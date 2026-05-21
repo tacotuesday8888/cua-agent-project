@@ -105,16 +105,7 @@ public struct RiskClassifier: Sendable {
     }
 
     private func elementID(from input: JSONValue) -> String? {
-        if let elementID = input["element_id"]?.stringValue {
-            return elementID
-        }
-        if let index = input["element_index"]?.intValue {
-            return "e\(index)"
-        }
-        if let index = input["element_index"]?.stringValue {
-            return index.hasPrefix("e") ? index : "e\(index)"
-        }
-        return nil
+        ElementReference.lenientID(from: input)
     }
 
     private static func compacted(_ value: String) -> String {

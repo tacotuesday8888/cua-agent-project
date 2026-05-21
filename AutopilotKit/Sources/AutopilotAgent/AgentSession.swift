@@ -409,9 +409,36 @@ public actor AgentSession {
     private func actionSignature(tool: AgentTool, input: JSONValue) -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        let json = (try? encoder.encode(input))
+        let json = (try? encoder.encode(normalizedActionInput(tool: tool, input: input)))
             .flatMap { String(data: $0, encoding: .utf8) } ?? ""
         return "\(tool.rawValue) \(json)"
+    }
+
+    private func normalizedActionInput(tool: AgentTool, input: JSONValue) -> JSONValue {
+        guard var object = input.objectValue else { return input }
+        func normalize(primaryKey: String, canonicalKey: String = "element_id") {
+            guard let id = try? ElementReference.optionalID(
+                from: input,
+                primaryKey: primaryKey,
+                tool: tool
+            ) else { return }
+            object[canonicalKey] = .string(id)
+            object.removeValue(forKey: primaryKey)
+            if canonicalKey != "element_id" {
+                object.removeValue(forKey: "element_id")
+            }
+        }
+
+        switch tool {
+        case .click, .setValue, .typeText, .scroll, .performSecondaryAction:
+            normalize(primaryKey: "element_index")
+        case .drag:
+            normalize(primaryKey: "from_element_index", canonicalKey: "from_element_id")
+            normalize(primaryKey: "to_element_index", canonicalKey: "to_element_id")
+        case .listApps, .getAppState, .pressKey, .askUser, .proposeMemory, .done:
+            break
+        }
+        return .object(object)
     }
 
     /// End the run because the model is stuck repeating one action.
@@ -635,7 +662,7 @@ public actor AgentSession {
     private func makeActionTarget(tool: AgentTool, input: JSONValue) -> ActionTarget {
         let description = actionSummary(tool: tool, input: input)
         let primaryKey = tool == .drag ? "from_element_index" : "element_index"
-        let elementID = try? optionalElementID(input, primaryKey: primaryKey)
+        let elementID = try? optionalElementID(input, primaryKey: primaryKey, tool: tool)
         if let elementID, let element = latestSnapshot?.element(id: elementID) {
             return ActionTarget(
                 appName: computer.appName,
@@ -696,7 +723,7 @@ public actor AgentSession {
             return try await observedResult("Set \(id) to \"\(value)\".")
 
         case .typeText:
-            let id = try optionalElementID(input, primaryKey: "element_index")
+            let id = try optionalElementID(input, primaryKey: "element_index", tool: tool)
             let text = try requireString(input, "text", tool: tool)
             try await computer.typeText(text, into: id)
             return try await observedResult("Typed text.")
@@ -705,7 +732,7 @@ public actor AgentSession {
             let direction = try requireScrollDirection(input, tool: tool)
             let amount = try scrollAmount(input, tool: tool)
             try await computer.scroll(
-                elementID: try optionalElementID(input, primaryKey: "element_index"),
+                elementID: try optionalElementID(input, primaryKey: "element_index", tool: tool),
                 direction: direction,
                 amount: amount
             )
@@ -814,10 +841,10 @@ public actor AgentSession {
             _ = try requireElementID(input, tool: tool)
             _ = try requireString(input, "value", tool: tool)
         case .typeText:
-            _ = try optionalElementID(input, primaryKey: "element_index")
+            _ = try optionalElementID(input, primaryKey: "element_index", tool: tool)
             _ = try requireString(input, "text", tool: tool)
         case .scroll:
-            _ = try optionalElementID(input, primaryKey: "element_index")
+            _ = try optionalElementID(input, primaryKey: "element_index", tool: tool)
             _ = try requireScrollDirection(input, tool: tool)
             _ = try scrollAmount(input, tool: tool)
         case .pressKey:
@@ -919,27 +946,18 @@ public actor AgentSession {
         key: String = "element_index",
         tool: AgentTool
     ) throws -> String {
-        if let id = try optionalElementID(input, primaryKey: key) {
+        if let id = try optionalElementID(input, primaryKey: key, tool: tool) {
             return id
         }
         throw AgentError.invalidToolInput(tool: tool.rawValue, detail: "missing \(key)")
     }
 
-    private func optionalElementID(_ input: JSONValue, primaryKey: String) throws -> String? {
-        if let explicitID = input["element_id"]?.stringValue {
-            return explicitID
-        }
-        guard let raw = input[primaryKey] else { return nil }
-        if let index = raw.intValue {
-            return "e\(index)"
-        }
-        if let string = raw.stringValue {
-            return string.hasPrefix("e") ? string : "e\(string)"
-        }
-        throw AgentError.invalidToolInput(
-            tool: primaryKey,
-            detail: "\(primaryKey) must be an integer or string"
-        )
+    private func optionalElementID(
+        _ input: JSONValue,
+        primaryKey: String,
+        tool: AgentTool
+    ) throws -> String? {
+        try ElementReference.optionalID(from: input, primaryKey: primaryKey, tool: tool)
     }
 
     private func renderApps(_ apps: [ComputerAppInfo]) -> String {
@@ -963,7 +981,7 @@ public actor AgentSession {
     private func actionSummary(tool: AgentTool, input: JSONValue) -> String {
         switch tool {
         case .click:
-            let id = (try? optionalElementID(input, primaryKey: "element_index")) ?? "?"
+            let id = (try? optionalElementID(input, primaryKey: "element_index", tool: tool)) ?? "?"
             if let label = latestSnapshot?.element(id: id)?.label, !label.isEmpty {
                 return "Click \"\(label)\""
             }

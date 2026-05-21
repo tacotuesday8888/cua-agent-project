@@ -53,6 +53,26 @@ struct RiskClassifierTests {
         #expect(risk == .destructive)
     }
 
+    @Test func destructiveRiskNormalizesElementReferences() {
+        let classifier = RiskClassifier()
+        let snapshot = buttonSnapshot(label: "Delete Playlist")
+        #expect(classifier.assess(
+            tool: .click,
+            input: ["element_index": " 2 "],
+            snapshot: snapshot
+        ) == .destructive)
+        #expect(classifier.assess(
+            tool: .click,
+            input: ["element_id": "2"],
+            snapshot: snapshot
+        ) == .destructive)
+        #expect(classifier.assess(
+            tool: .click,
+            input: ["element_id": " e2 "],
+            snapshot: snapshot
+        ) == .destructive)
+    }
+
     @Test(arguments: [
         "Send",
         "Post",
@@ -527,6 +547,31 @@ struct AgentSessionTests {
         #expect(recoveryText.contains("missing element_index"))
     }
 
+    @Test func malformedElementReferenceDoesNotAskForApprovalOrAct() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "t1", tool: "click", input: ["element_index": "button"]),
+            toolResponse(id: "t2", tool: "done", input: ["summary": "Stopped."])
+        ])
+        let computer = musicComputer()
+        let interaction = CountingInteraction()
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: interaction,
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory()
+        )
+
+        _ = await session.run(task: "click something")
+        #expect(interaction.approvalsRequested == 0)
+        #expect(await computer.performedActions.isEmpty)
+
+        let requests = await llm.requests
+        let recoveryText = requests.dropFirst().first.map { allText(in: $0) } ?? ""
+        #expect(recoveryText.contains("Invalid input for click"))
+        #expect(recoveryText.contains("element_index must be an integer or element id like e12"))
+    }
+
     @Test func invalidKeyModifierIsReturnedAsToolErrorBeforeApproval() async {
         let llm = ScriptedLLMProvider([
             toolResponse(
@@ -834,6 +879,27 @@ struct AgentSessionTests {
         // The third, looping click is blocked — only the first two run.
         let actions = await computer.performedActions
         #expect(actions == ["click:e3", "click:e3"])
+    }
+
+    @Test func repeatedEquivalentElementReferencesStopTheRun() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "c1", tool: "click", input: ["element_index": 3]),
+            toolResponse(id: "c2", tool: "click", input: ["element_index": " 3 "]),
+            toolResponse(id: "c3", tool: "click", input: ["element_id": "e3"])
+        ])
+        let computer = musicComputer()
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory()
+        )
+
+        let outcome = await session.run(task: "click forever")
+        #expect(outcome.status == .failed)
+        #expect(outcome.summary.contains("repeated three times"))
+        #expect(await computer.performedActions == ["click:e3", "click:e3"])
     }
 
     @Test func repeatedActionWarnsBeforeStopping() async {
