@@ -42,11 +42,13 @@ swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureAp
 swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp --include-screenshot
 ```
 
-Expected result: the nine-tool smoke surface passes. The screenshot run also
-requires Screen Recording permission and should report PNG bytes. Screenshots
-are target-window-only; if the fixture window cannot be matched to a
-CoreGraphics window, the smoke run should fail with a screenshot warning rather
-than capturing the full display.
+Expected result: the nine-tool smoke surface passes. Each driver step is
+reported independently — a failure no longer aborts the run, so one run shows
+the full pass/fail matrix, and a failed step also names the targeted element
+(id, role, label). The screenshot run also requires Screen Recording permission
+and should report PNG bytes. Screenshots are target-window-only; if the fixture
+window cannot be matched to a CoreGraphics window, the smoke run should fail with
+a screenshot warning rather than capturing the full display.
 
 The same fixture checks can be run with:
 
@@ -80,6 +82,29 @@ launch/cleanup cycle:
 The live option is deliberately opt-in because it uses the selected provider's
 real API. It reads the API key from the provider's environment variable first,
 then falls back to the saved MacAutopilot Keychain entry.
+
+## Validate Recent Driver And Engine Changes
+
+These behaviors shipped on the current branch and need real-app confirmation
+beyond the deterministic fixture run. Record results with the capture fields in
+the Safe Real-App Matrix below.
+
+- **Click fallback for non-AX-press controls.** Icon-only, Electron, and web
+  controls often advertise no working AX press, so `MacComputer.click` falls back
+  to a synthesized click at the element's center. Validate against such a control
+  (an Electron app like VS Code or Slack, a web button reached through the AX
+  tree, or an icon-only toolbar button): use `--dump-tree` to find it, run a
+  non-destructive task that clicks it, and confirm the control actually
+  activates. Watch for a coordinate-space mismatch on Retina or multi-display
+  setups — if the click lands off-target, the element frame needs converting
+  before the synthesized click.
+- **Prompt-cache token accounting (Anthropic).** Run a multi-step task with the
+  Anthropic provider (prompt caching is on) and confirm the reported input
+  tokens — in the UI and the saved run history — include cache creation and read
+  tokens, not just the uncached remainder.
+- **Secondary-action gating.** Confirm a `perform_secondary_action` whose action
+  name is destructive (for example a context-menu Delete) is surfaced for
+  approval instead of running as a trusted write.
 
 ## Safe Real-App Matrix
 
