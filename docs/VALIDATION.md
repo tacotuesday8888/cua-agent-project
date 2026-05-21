@@ -128,6 +128,43 @@ For each app, capture:
 - tools performed
 - failure summary and recovery text
 
+## Real-World Reliability Validation (hard targets)
+
+The Safe Real-App Matrix above covers easy single-window native apps. These
+harder targets exercise the failure modes most likely to break real-world use;
+run them once the easy matrix passes, capturing the same fields. Each maps to a
+ranked risk in the engineering plan, and each fix is reactive — send the saved
+trace of any failure.
+
+- **Web forms (Safari/Chrome) — AX↔DOM fidelity.** Beyond the local-page smoke:
+  a real multi-field form (search, login on a test account). Set several fields,
+  then submit, and confirm the page actually received every value. Watch for: a
+  field that reports the set value via AX while the page ignored it; a button
+  click that "succeeds" via AX but nothing happens. (Risk #1, action-effect
+  verification — the Safari `set_value` bug class.)
+- **Electron app (VS Code / Slack / Discord) — click reliability.** Custom UI
+  with thin AX. Run a non-destructive task that clicks a control with no working
+  AXPress (exercises the synthesized-click fallback). Watch for: clicks landing
+  off-target (Retina / multi-display coordinate space), or AX "success" with no
+  visible effect. (Risks #1 and #5.)
+- **Large / content-heavy page — perception limits.** Point at a long page and
+  `--dump-tree`. Watch for: multi-second reads, the target control missing
+  because the 1500-element cap truncated it, or the run stalling if the app is
+  briefly unresponsive (no AX messaging timeout yet). (Risks #2 and #3.)
+- **Multi-window app — window selection.** An app with two or more windows open.
+  Confirm the agent reads and acts on the intended window, and that a screenshot
+  matches it. Watch for: actions hitting the wrong window; screenshots matching
+  the wrong window. (Risk #4.)
+- **Longer multi-step task.** A 6–10 step task in one app. Watch for: whether the
+  default 25-step budget is enough, transitional/half-rendered state right after
+  an action (would motivate a settle delay), and a clean `done` finish.
+- **Approval UX in the app (not the CLI).** In the MacAutopilot app, run a task
+  with one write and one destructive action. Confirm the prompt appears, Approve
+  proceeds, and Decline stops the action without a retry. The smoke CLI
+  auto-approves, so this is the only way to validate the safety gate. (Risk #6.)
+- **Anthropic live.** One live run on the Anthropic provider (only Z.AI has been
+  exercised), confirming image input and prompt caching work end to end.
+
 ## Permission Checks
 
 Apple documents Accessibility trust through
