@@ -10,6 +10,7 @@ import SwiftUI
 public final class NotchController {
     private let model: AgentViewModel
     private var window: NotchWindow?
+    private let actionHighlight = ActionHighlightController()
     private var screenObserver: NSObjectProtocol?
 
     public init(model: AgentViewModel = AgentViewModel()) {
@@ -26,6 +27,8 @@ public final class NotchController {
         model.refreshApps()
         let rootView = NotchAssistantView(model: model) { [weak self] expanded in
             self?.applyLayout(expanded: expanded, animated: true)
+        } onHighlightChange: { [weak self] target in
+            self?.actionHighlight.show(target)
         }
         let window = NotchWindow(rootView: rootView)
         self.window = window

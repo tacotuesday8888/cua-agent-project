@@ -1,5 +1,11 @@
 import Foundation
 
+public enum RunHistoryWriteResult: Sendable, Equatable {
+    case recorded
+    case cleared
+    case failed(String)
+}
+
 /// The local, on-disk log of finished agent runs.
 ///
 /// History is persisted as a JSON file in the app's Application Support
@@ -27,13 +33,21 @@ public actor RunHistoryStore {
 
     /// Append a finished run, dropping the oldest records past the limit.
     public func record(_ record: RunRecord) {
+        _ = recordReporting(record)
+    }
+
+    /// Append a finished run and report write failures separately.
+    public func recordReporting(_ record: RunRecord) -> RunHistoryWriteResult {
         var items = loaded()
         items.append(record)
         items.sort { $0.startedAt > $1.startedAt }
         if items.count > limit {
             items = Array(items.prefix(limit))
         }
-        commit(items)
+        if let error = commit(items) {
+            return .failed("Could not save run history: \(error)")
+        }
+        return .recorded
     }
 
     /// Every stored run, newest first.
@@ -52,13 +66,21 @@ public actor RunHistoryStore {
         let before = items.count
         items.removeAll { $0.id == id }
         guard items.count != before else { return }
-        commit(items)
+        _ = commit(items)
     }
 
     /// Remove every stored run.
     public func clear() {
-        guard !loaded().isEmpty else { return }
-        commit([])
+        _ = clearReporting()
+    }
+
+    /// Remove every stored run and report write failures separately.
+    public func clearReporting() -> RunHistoryWriteResult {
+        guard !loaded().isEmpty else { return .cleared }
+        if let error = commit([]) {
+            return .failed("Could not clear run history: \(error)")
+        }
+        return .cleared
     }
 
     // MARK: - Persistence
@@ -70,8 +92,7 @@ public actor RunHistoryStore {
         return items
     }
 
-    private func commit(_ items: [RunRecord]) {
-        cache = items
+    private func commit(_ items: [RunRecord]) -> String? {
         do {
             try FileManager.default.createDirectory(
                 at: fileURL.deletingLastPathComponent(),
@@ -80,8 +101,10 @@ public actor RunHistoryStore {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             try encoder.encode(items).write(to: fileURL, options: .atomic)
+            cache = items
+            return nil
         } catch {
-            // History is best-effort: a write failure must never fail a task.
+            return error.localizedDescription
         }
     }
 

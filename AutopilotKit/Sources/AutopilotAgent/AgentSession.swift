@@ -18,19 +18,25 @@ public struct AgentConfiguration: Sendable {
     /// Older ones are replaced with a short placeholder so a long run's context
     /// does not grow with every screen it has ever read.
     public var liveObservationWindow: Int
+    /// Whether the active model/provider can receive screenshot image blocks.
+    /// Text-only providers still get the accessibility tree, but screenshot
+    /// requests are answered with an explicit omission note.
+    public var supportsImageInput: Bool
 
     public init(
         model: String,
         maxSteps: Int = 25,
         maxTokens: Int = 4096,
         highlightDwell: Duration = .milliseconds(400),
-        liveObservationWindow: Int = 3
+        liveObservationWindow: Int = 3,
+        supportsImageInput: Bool = true
     ) {
         self.model = model
         self.maxSteps = maxSteps
         self.maxTokens = maxTokens
         self.highlightDwell = highlightDwell
         self.liveObservationWindow = max(1, liveObservationWindow)
+        self.supportsImageInput = supportsImageInput
     }
 }
 
@@ -275,11 +281,26 @@ public actor AgentSession {
     /// app task to run.
     private func storeExplicitMemories(_ memories: [MemoryItem]) async -> AgentOutcome {
         var stored = 0
-        for item in memories where await memory.add(item) {
-            emit(.memoryStored(item))
-            stored += 1
+        var failures = 0
+        for item in memories {
+            switch await memory.addReporting(item) {
+            case .stored:
+                emit(.memoryStored(item))
+                stored += 1
+            case .duplicate, .cleared:
+                break
+            case .failed(let message):
+                emit(.storageFailed(message))
+                failures += 1
+            }
         }
-        let summary = stored == 0 ? "Already in memory." : "Saved to memory."
+        let summary = if failures > 0 && stored == 0 {
+            "Could not save memory."
+        } else if stored == 0 {
+            "Already in memory."
+        } else {
+            "Saved to memory."
+        }
         emit(.finished(summary: summary))
         return AgentOutcome(status: .completed, summary: summary)
     }
@@ -384,12 +405,26 @@ public actor AgentSession {
 
         if await interaction.confirmMemory(proposal) {
             let item = MemoryItem(text: text, scope: proposal.scope, source: .proposed)
-            await memory.add(item)
-            emit(.memoryStored(item))
-            results.append(.toolResult(ToolResult(
-                toolUseID: use.id,
-                text: "Saved to memory."
-            )))
+            switch await memory.addReporting(item) {
+            case .stored:
+                emit(.memoryStored(item))
+                results.append(.toolResult(ToolResult(
+                    toolUseID: use.id,
+                    text: "Saved to memory."
+                )))
+            case .duplicate, .cleared:
+                results.append(.toolResult(ToolResult(
+                    toolUseID: use.id,
+                    text: "Already in memory."
+                )))
+            case .failed(let message):
+                emit(.storageFailed(message))
+                results.append(.toolResult(ToolResult(
+                    toolUseID: use.id,
+                    text: "\(message) Continue without saved memory.",
+                    isError: true
+                )))
+            }
         } else {
             results.append(.toolResult(ToolResult(
                 toolUseID: use.id,
@@ -451,7 +486,7 @@ public actor AgentSession {
         } catch {
             let reason = describe(error)
             emit(.actionFailed(tool: tool, reason: reason))
-            let failure = await failureText(reason: reason)
+            let failure = await failureText(reason: reason, target: target)
             if failure.embeddedTree {
                 transcript.recordObservation(toolUseID: use.id)
             } else {
@@ -474,18 +509,40 @@ public actor AgentSession {
     /// stale element ids from before the failure. `embeddedTree` reports
     /// whether a re-read tree was appended, so the caller can mark the result
     /// as a prunable observation.
-    private func failureText(reason: String) async -> (text: String, embeddedTree: Bool) {
-        let prefix = "Action failed: \(reason)"
+    private func failureText(
+        reason: String,
+        target: ActionTarget
+    ) async -> (text: String, embeddedTree: Bool) {
+        let prefix = """
+        Action failed: \(reason)
+
+        Failed target: \(targetRecoverySummary(target)). Element ids are \
+        snapshot-local; do not retry an old element_index blindly.
+        """
         guard !Task.isCancelled, let tree = try? await observeTree() else {
             return (prefix, false)
         }
         return ("""
         \(prefix)
 
-        The app state has been re-read — use the element indexes below, not \
-        earlier ones. Current state of \(computer.appName):
+        The app state has been re-read — call get_app_state if you need another \
+        refresh, then choose a current element_index that matches the target's \
+        role, label, identifier, or frame. Current state of \(computer.appName):
         \(UITreeRenderer.compactText(tree))
         """, true)
+    }
+
+    private func targetRecoverySummary(_ target: ActionTarget) -> String {
+        var parts = [target.description]
+        if let elementID = target.elementID { parts.append("old id \(elementID)") }
+        if let role = target.role, !role.isEmpty { parts.append("role \(role)") }
+        if let label = target.label, !label.isEmpty { parts.append("label \"\(label)\"") }
+        if let identifier = target.identifier, !identifier.isEmpty {
+            parts.append("identifier \(identifier)")
+        }
+        if let value = target.value, !value.isEmpty { parts.append("value \"\(value)\"") }
+        if let turn = target.turnIdentifier { parts.append("snapshot turn \(turn)") }
+        return parts.joined(separator: ", ")
     }
 
     /// Apply the approval gate. Returns whether the action may run.
@@ -546,6 +603,9 @@ public actor AgentSession {
                 elementID: elementID,
                 role: element.role,
                 label: element.label,
+                identifier: element.identifier,
+                value: element.value,
+                turnIdentifier: latestSnapshot?.turnIdentifier,
                 description: description,
                 frame: element.frame
             )
@@ -561,11 +621,19 @@ public actor AgentSession {
             return [.text(renderApps(apps))]
 
         case .getAppState:
-            let includeScreenshot = input["include_screenshot"]?.boolValue ?? false
+            let requestedScreenshot = input["include_screenshot"]?.boolValue ?? false
+            let includeScreenshot = requestedScreenshot && configuration.supportsImageInput
             let state = try await observeState(includeScreenshot: includeScreenshot)
             var content: [ToolResult.Content] = [
                 .text(UITreeRenderer.compactText(state.snapshot))
             ]
+            if requestedScreenshot && !configuration.supportsImageInput {
+                content.append(.text("""
+                Screenshot omitted: the selected provider cannot inspect image \
+                input. Use the accessibility tree above, or ask the user for \
+                clarification if the visual state is ambiguous.
+                """))
+            }
             if let screenshot = state.screenshot {
                 content.append(.image(ImageBlock(base64Data: screenshot.base64EncodedString())))
             }

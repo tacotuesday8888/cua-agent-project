@@ -12,6 +12,12 @@ public struct ActionTarget: Sendable, Hashable, Codable {
     public let role: String?
     /// The element's human-readable label.
     public let label: String?
+    /// App-provided accessibility identifier, when available.
+    public let identifier: String?
+    /// The element value at capture time, when useful for stale-target recovery.
+    public let value: String?
+    /// The snapshot turn that produced this element id.
+    public let turnIdentifier: Int?
     /// A one-line description of the action, e.g. Click the "Send" button.
     public let description: String
     /// The element's screen-space frame, for drawing a highlight over it.
@@ -22,6 +28,9 @@ public struct ActionTarget: Sendable, Hashable, Codable {
         elementID: String? = nil,
         role: String? = nil,
         label: String? = nil,
+        identifier: String? = nil,
+        value: String? = nil,
+        turnIdentifier: Int? = nil,
         description: String,
         frame: ElementFrame? = nil
     ) {
@@ -29,6 +38,9 @@ public struct ActionTarget: Sendable, Hashable, Codable {
         self.elementID = elementID
         self.role = role
         self.label = label
+        self.identifier = identifier
+        self.value = value
+        self.turnIdentifier = turnIdentifier
         self.description = description
         self.frame = frame
     }

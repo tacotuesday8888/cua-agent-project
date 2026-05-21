@@ -1,4 +1,7 @@
+import AppKit
 import AutopilotHistory
+import AutopilotCore
+import AutopilotWorkflows
 import SwiftUI
 
 /// Placeholder notch-resident assistant surface.
@@ -12,13 +15,16 @@ public struct NotchAssistantView: View {
 
     @Bindable private var model: AgentViewModel
     private let onExpansionChange: @MainActor (Bool) -> Void
+    private let onHighlightChange: @MainActor (ActionTarget?) -> Void
 
     public init(
         model: AgentViewModel,
-        onExpansionChange: @escaping @MainActor (Bool) -> Void = { _ in }
+        onExpansionChange: @escaping @MainActor (Bool) -> Void = { _ in },
+        onHighlightChange: @escaping @MainActor (ActionTarget?) -> Void = { _ in }
     ) {
         self.model = model
         self.onExpansionChange = onExpansionChange
+        self.onHighlightChange = onHighlightChange
     }
 
     public var body: some View {
@@ -44,8 +50,14 @@ public struct NotchAssistantView: View {
             model.refreshPermissions()
             onExpansionChange(model.isExpanded)
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            model.refreshPermissions()
+        }
         .onChange(of: model.isExpanded) { _, expanded in
             onExpansionChange(expanded)
+        }
+        .onChange(of: model.highlightedTarget) { _, target in
+            onHighlightChange(target)
         }
         .onChange(of: model.pendingApproval?.id) { _, id in
             if id != nil { expand() }
@@ -83,17 +95,21 @@ public struct NotchAssistantView: View {
     }
 
     private var expandedPanel: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            permissionBanner
-            controls
-            promptRow
-            pendingInteraction
-            phaseLine
-            feed
-            recentRunsSection
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                permissionBanner
+                controls
+                providerBanner
+                promptRow
+                pendingInteraction
+                phaseLine
+                feed
+                recentRunsSection
+                WorkflowsPanel(model: model)
+            }
+            .padding(.horizontal, 14)
+            .padding(.bottom, 14)
         }
-        .padding(.horizontal, 14)
-        .padding(.bottom, 14)
     }
 
     /// Shown when Accessibility is missing — without it no task can run.
@@ -149,6 +165,18 @@ public struct NotchAssistantView: View {
             .help("Refresh apps")
         }
         .controlSize(.small)
+    }
+
+    @ViewBuilder
+    private var providerBanner: some View {
+        if let limitation = model.selectedProviderLimitations {
+            Label(limitation, systemImage: "eye.slash.fill")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.yellow)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.yellow.opacity(0.14), in: RoundedRectangle(cornerRadius: 8))
+        }
     }
 
     private var promptRow: some View {
@@ -425,6 +453,213 @@ public struct NotchAssistantView: View {
     private func setExpanded(_ expanded: Bool) {
         withAnimation(.snappy(duration: 0.22)) {
             model.isExpanded = expanded
+        }
+    }
+}
+
+/// The saved-workflows list plus minimal create / save-from-run forms.
+///
+/// Like the rest of this view, the visual language is a placeholder; the data
+/// flow — list, run with variables, save, delete — is what matters.
+private struct WorkflowsPanel: View {
+    let model: AgentViewModel
+    @State private var mode: Mode = .none
+    @State private var draftName = ""
+    @State private var draftGoal = ""
+
+    private enum Mode { case none, create, saveRun }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            header
+            switch mode {
+            case .none:
+                EmptyView()
+            case .create:
+                createForm
+            case .saveRun:
+                saveRunForm
+            }
+            ForEach(model.savedWorkflows.prefix(4)) { workflow in
+                WorkflowRow(model: model, workflow: workflow)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Text("WORKFLOWS")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.white.opacity(0.4))
+            Spacer()
+            headerButton(mode == .create ? "Cancel" : "New") { toggle(.create) }
+            if model.recentRuns.first != nil {
+                headerButton(mode == .saveRun ? "Cancel" : "Save run") { toggle(.saveRun) }
+            }
+            if !model.savedWorkflows.isEmpty {
+                headerButton("Clear") { model.clearWorkflows() }
+            }
+        }
+    }
+
+    private func headerButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.plain)
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.5))
+    }
+
+    private var createForm: some View {
+        VStack(spacing: 6) {
+            field("Workflow name", text: $draftName)
+            field("Goal — use {{slot}} for fill-ins", text: $draftGoal)
+            HStack {
+                Text(model.selectedAppName.isEmpty
+                    ? "Pick a target app above"
+                    : "App · \(model.selectedAppName)")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.4))
+                Spacer()
+                Button("Create") {
+                    model.createWorkflow(
+                        name: draftName,
+                        appName: model.selectedAppName,
+                        goalTemplate: draftGoal
+                    )
+                    toggle(.none)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(!canCreate)
+            }
+        }
+        .padding(8)
+        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private var saveRunForm: some View {
+        if let run = model.recentRuns.first {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Save \"\(run.task)\" (\(run.appName)) as a workflow")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .lineLimit(2)
+                HStack {
+                    field("Workflow name", text: $draftName)
+                    Button("Save") {
+                        model.saveRunAsWorkflow(run, name: draftName)
+                        toggle(.none)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(draftName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .padding(8)
+            .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private func field(_ placeholder: String, text: Binding<String>) -> some View {
+        TextField(placeholder, text: text)
+            .textFieldStyle(.plain)
+            .font(.system(size: 11))
+            .padding(7)
+            .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var canCreate: Bool {
+        !draftName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !draftGoal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !model.selectedAppName.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private func toggle(_ target: Mode) {
+        mode = (mode == target) ? .none : target
+        draftName = ""
+        draftGoal = ""
+    }
+}
+
+/// One saved workflow row: variable fields, Run, and Delete.
+private struct WorkflowRow: View {
+    let model: AgentViewModel
+    let workflow: AgentViewModel.StoredWorkflow
+    @State private var bindings: [String: String] = [:]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Image(systemName: "wand.and.stars")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.teal)
+                Text(workflow.name)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                if workflow.runCount > 0 {
+                    Text("\(workflow.successCount)/\(workflow.runCount)")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white.opacity(0.4))
+                        .help("Successful runs")
+                }
+                Text(workflow.appName)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .lineLimit(1)
+                Button {
+                    model.deleteWorkflow(id: workflow.id)
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 9))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white.opacity(0.4))
+                .help("Delete workflow")
+            }
+            ForEach(workflow.variables) { variable in
+                field(placeholder(for: variable), text: binding(for: variable.name))
+            }
+            HStack {
+                Spacer()
+                Button("Run") {
+                    model.runWorkflow(id: workflow.id, bindings: bindings)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(model.phase == .running)
+            }
+        }
+        .padding(8)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+        .onAppear(perform: seedDefaults)
+    }
+
+    private func field(_ placeholder: String, text: Binding<String>) -> some View {
+        TextField(placeholder, text: text)
+            .textFieldStyle(.plain)
+            .font(.system(size: 10))
+            .padding(6)
+            .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func placeholder(for variable: WorkflowVariable) -> String {
+        variable.description.isEmpty ? variable.name : variable.description
+    }
+
+    private func binding(for name: String) -> Binding<String> {
+        Binding(
+            get: { bindings[name] ?? "" },
+            set: { bindings[name] = $0 }
+        )
+    }
+
+    private func seedDefaults() {
+        for variable in workflow.variables where bindings[variable.name] == nil {
+            bindings[variable.name] = variable.defaultValue ?? ""
         }
     }
 }

@@ -6,8 +6,14 @@ import Testing
 @testable import AutopilotAgent
 
 struct RiskClassifierTests {
-    private func buttonSnapshot(label: String) -> UITreeSnapshot {
-        let button = UIElement(id: "e2", role: "AXButton", label: label)
+    private func buttonSnapshot(label: String? = nil, value: String? = nil, identifier: String? = nil) -> UITreeSnapshot {
+        let button = UIElement(
+            id: "e2",
+            role: "AXButton",
+            identifier: identifier,
+            label: label,
+            value: value
+        )
         let root = UIElement(id: "e1", role: "AXWindow", children: [button])
         return UITreeSnapshot(appName: "App", root: root)
     }
@@ -43,6 +49,52 @@ struct RiskClassifierTests {
             tool: .click,
             input: ["element_index": 2],
             snapshot: buttonSnapshot(label: "Delete Playlist")
+        )
+        #expect(risk == .destructive)
+    }
+
+    @Test(arguments: [
+        "Send",
+        "Post",
+        "Publish",
+        "Share",
+        "Confirm",
+        "Overwrite",
+        "Sign out",
+        "Cancel subscription"
+    ])
+    func consequentialButtonLabelsAreDestructive(label: String) {
+        let risk = RiskClassifier().assess(
+            tool: .click,
+            input: ["element_index": 2],
+            snapshot: buttonSnapshot(label: label)
+        )
+        #expect(risk == .destructive)
+    }
+
+    @Test(arguments: [
+        "sendButton",
+        "postButton",
+        "publishButton",
+        "shareAction",
+        "confirmOrderButton",
+        "signOutButton",
+        "cancelSubscriptionButton"
+    ])
+    func consequentialIdentifiersAreDestructive(identifier: String) {
+        let risk = RiskClassifier().assess(
+            tool: .click,
+            input: ["element_index": 2],
+            snapshot: buttonSnapshot(identifier: identifier)
+        )
+        #expect(risk == .destructive)
+    }
+
+    @Test func consequentialValueIsDestructive() {
+        let risk = RiskClassifier().assess(
+            tool: .performSecondaryAction,
+            input: ["element_index": 2, "action": "AXPress"],
+            snapshot: buttonSnapshot(value: "Place order")
         )
         #expect(risk == .destructive)
     }
@@ -256,6 +308,50 @@ struct AgentSessionTests {
         ])
     }
 
+    @Test func textOnlyProviderOmitScreenshotRequests() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(
+                id: "t1",
+                tool: "get_app_state",
+                input: ["include_screenshot": true]
+            ),
+            toolResponse(id: "t2", tool: "done", input: ["summary": "Done."])
+        ])
+        let computer = musicComputer()
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(
+                model: "test",
+                maxSteps: 5,
+                highlightDwell: .zero,
+                supportsImageInput: false
+            ),
+            memory: makeTestMemory()
+        )
+
+        let outcome = await session.run(task: "inspect the screen")
+        #expect(outcome.status == .completed)
+
+        let actions = await computer.performedActions
+        #expect(!actions.contains("screenshot"))
+
+        let requests = await llm.requests
+        let secondRequestText = requests.dropFirst().first?.messages
+            .flatMap(\.content)
+            .compactMap { block -> String? in
+                guard case .toolResult(let result) = block else { return nil }
+                return result.content.compactMap { content in
+                    guard case .text(let text) = content else { return nil }
+                    return text
+                }
+                .joined(separator: "\n")
+            }
+            .joined(separator: "\n") ?? ""
+        #expect(secondRequestText.contains("Screenshot omitted"))
+    }
+
     @Test func invalidElementReturnsRecoveryInstruction() async {
         let llm = ScriptedLLMProvider([
             toolResponse(id: "t1", tool: "click", input: ["element_index": 99]),
@@ -286,6 +382,8 @@ struct AgentSessionTests {
         }.joined(separator: "\n") ?? ""
         #expect(text.contains("No element e99"))
         #expect(text.contains("Call get_app_state again"))
+        #expect(text.contains("Element ids are snapshot-local"))
+        #expect(text.contains("do not retry an old element_index blindly"))
 
         let actions = await computer.performedActions
         #expect(actions.isEmpty)

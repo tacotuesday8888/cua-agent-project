@@ -1,5 +1,12 @@
 import Foundation
 
+public enum MemoryWriteResult: Sendable, Equatable {
+    case stored
+    case duplicate
+    case cleared
+    case failed(String)
+}
+
 /// The local, on-disk store of everything the agent remembers about the user.
 ///
 /// Memory is persisted as a JSON file in the app's Application Support
@@ -37,17 +44,24 @@ public actor MemoryStore {
     /// Returns whether the item was newly added.
     @discardableResult
     public func add(_ item: MemoryItem) -> Bool {
+        addReporting(item) == .stored
+    }
+
+    /// Store `item` and report duplicate/write-failure cases separately.
+    public func addReporting(_ item: MemoryItem) -> MemoryWriteResult {
         var items = loaded()
         guard !items.contains(where: { $0.text == item.text && $0.scope == item.scope }) else {
-            return false
+            return .duplicate
         }
         items.append(item)
         if items.count > limit {
             // Keep the newest `limit` memories; drop the oldest.
             items = Array(items.sorted { $0.createdAt > $1.createdAt }.prefix(limit))
         }
-        commit(items)
-        return true
+        if let error = commit(items) {
+            return .failed("Could not save memory: \(error)")
+        }
+        return .stored
     }
 
     /// Delete the memory with the given id.
@@ -56,7 +70,21 @@ public actor MemoryStore {
         let before = items.count
         items.removeAll { $0.id == id }
         guard items.count != before else { return }
-        commit(items)
+        _ = commit(items)
+    }
+
+    /// Remove every stored memory.
+    public func clear() {
+        _ = clearReporting()
+    }
+
+    /// Remove every stored memory and report write failures separately.
+    public func clearReporting() -> MemoryWriteResult {
+        guard !loaded().isEmpty else { return .cleared }
+        if let error = commit([]) {
+            return .failed("Could not clear memory: \(error)")
+        }
+        return .cleared
     }
 
     /// The memories relevant to a task: every global memory, the target app's
@@ -104,8 +132,7 @@ public actor MemoryStore {
         return items
     }
 
-    private func commit(_ items: [MemoryItem]) {
-        cache = items
+    private func commit(_ items: [MemoryItem]) -> String? {
         do {
             try FileManager.default.createDirectory(
                 at: fileURL.deletingLastPathComponent(),
@@ -114,8 +141,10 @@ public actor MemoryStore {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             try encoder.encode(items).write(to: fileURL, options: .atomic)
+            cache = items
+            return nil
         } catch {
-            // Memory is best-effort: a write failure must never fail a task.
+            return error.localizedDescription
         }
     }
 

@@ -139,6 +139,9 @@ struct ActionTargetTests {
             elementID: "e3",
             role: "AXButton",
             label: "Play",
+            identifier: "playButton",
+            value: "Ready",
+            turnIdentifier: 4,
             description: "Click \"Play\"",
             frame: ElementFrame(x: 10, y: 20, width: 80, height: 24)
         )
@@ -152,6 +155,8 @@ struct ActionTargetTests {
     @Test func toleratesNoElement() {
         let target = ActionTarget(appName: "Notes", description: "Press return")
         #expect(target.elementID == nil)
+        #expect(target.identifier == nil)
+        #expect(target.turnIdentifier == nil)
         #expect(target.frame == nil)
         #expect(target.description == "Press return")
     }

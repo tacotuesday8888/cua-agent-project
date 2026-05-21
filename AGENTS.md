@@ -1,7 +1,7 @@
-# CLAUDE.md
+# AGENTS.md
 
-Project instructions for Claude Code. Keep shared repo rules in sync with
-`AGENTS.md`.
+Project instructions for Codex and other coding agents. Keep shared repo rules in
+sync with `CLAUDE.md`.
 
 ## Project Direction
 

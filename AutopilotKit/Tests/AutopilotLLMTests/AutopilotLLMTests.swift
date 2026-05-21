@@ -30,6 +30,25 @@ struct LLMResponseTests {
     }
 }
 
+struct LLMProviderDescriptorTests {
+    @Test func knownProviderCapabilitiesAreExplicit() {
+        #expect(LLMProviderDescriptor.zai.identifier == "zai")
+        #expect(LLMProviderDescriptor.zai.defaultModel == "glm-4.7-flash")
+        #expect(LLMProviderDescriptor.zai.supportsToolCalls)
+        #expect(!LLMProviderDescriptor.zai.supportsImageInput)
+        #expect(!LLMProviderDescriptor.zai.supportsPromptCaching)
+        #expect(LLMProviderDescriptor.zai.apiKeyEnvironment == "ZAI_API_KEY")
+        #expect(LLMProviderDescriptor.zai.keychainAccount == "AutopilotZAIAPIKey")
+
+        #expect(LLMProviderDescriptor.anthropic.identifier == "anthropic")
+        #expect(LLMProviderDescriptor.anthropic.supportsToolCalls)
+        #expect(LLMProviderDescriptor.anthropic.supportsImageInput)
+        #expect(LLMProviderDescriptor.anthropic.supportsPromptCaching)
+        #expect(LLMProviderDescriptor.anthropic.apiKeyEnvironment == "ANTHROPIC_API_KEY")
+        #expect(LLMProviderDescriptor.anthropic.keychainAccount == "AutopilotAnthropicAPIKey")
+    }
+}
+
 struct ScriptedLLMProviderTests {
     @Test func returnsResponsesInOrderAndRecordsRequests() async throws {
         let one = LLMResponse(content: [.text("one")], stopReason: .endTurn,

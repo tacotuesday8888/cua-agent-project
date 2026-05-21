@@ -11,6 +11,7 @@
 		D1E2F3A4B5C6D7E8F9A0B1C2 /* AutopilotUI in Frameworks */ = {isa = PBXBuildFile; productRef = C2B1A0F9E8D7C6B5A4F3E2D1 /* AutopilotUI */; };
 		A5D7F6E0EF733CE249BBEE96 /* AutopilotCore in Frameworks */ = {isa = PBXBuildFile; productRef = 8FF2EC3426FF996A35B951FF /* AutopilotCore */; };
 		B18B37A2430BA4993177A607 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D8FF34B626C1F73BBCB7465 /* ContentView.swift */; };
+		C40A9F4B7F9F4F6E9D0C1001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C40A9F4B7F9F4F6E9D0C1000 /* Assets.xcassets */; };
 		CB4671DB015FAA38964052DC /* MacAutopilotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D0BF057B2091CE0320A5958 /* MacAutopilotTests.swift */; };
 		CE9A5658CB90F9C2375E368C /* MacAutopilotApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E7DB48C234ECB4F9FD5A111 /* MacAutopilotApp.swift */; };
 		D8372C345B3276B9AE06800B /* AutopilotLLM in Frameworks */ = {isa = PBXBuildFile; productRef = 4C6C024C9585F7102B43F33D /* AutopilotLLM */; };
@@ -34,6 +35,7 @@
 		8715E2D30943EF6543CEAB25 /* AutopilotKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = AutopilotKit; path = AutopilotKit; sourceTree = SOURCE_ROOT; };
 		A646B4FE57A1CE79B5371FE0 /* MacAutopilotTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MacAutopilotTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		BE75A44D29DB0A0EBA24C4E8 /* MacAutopilot.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MacAutopilot.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C40A9F4B7F9F4F6E9D0C1000 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -54,6 +56,7 @@
 		5F29DE82AFCC8BFFCE35C514 /* MacAutopilot */ = {
 			isa = PBXGroup;
 			children = (
+				C40A9F4B7F9F4F6E9D0C1000 /* Assets.xcassets */,
 				5D8FF34B626C1F73BBCB7465 /* ContentView.swift */,
 				36D00CB693ECB52CB13153DC /* MacAutopilot.entitlements */,
 				7E7DB48C234ECB4F9FD5A111 /* MacAutopilotApp.swift */,
@@ -105,6 +108,7 @@
 			buildPhases = (
 				3A203D4BCA017563B6558516 /* Sources */,
 				B4D51C9951D6BAEC189E4168 /* Frameworks */,
+				C40A9F4B7F9F4F6E9D0C1002 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -178,6 +182,17 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		C40A9F4B7F9F4F6E9D0C1002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C40A9F4B7F9F4F6E9D0C1001 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		3A203D4BCA017563B6558516 /* Sources */ = {
@@ -270,6 +285,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -314,6 +330,7 @@
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

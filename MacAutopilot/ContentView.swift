@@ -1,3 +1,4 @@
+import AppKit
 import AutopilotUI
 import SwiftUI
 
@@ -5,6 +6,8 @@ import SwiftUI
 /// watch the live feed. The notch UI replaces this once the engine is proven.
 struct ContentView: View {
     @State private var model = AgentViewModel()
+    @State private var newWorkflowName = ""
+    @State private var newWorkflowGoal = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -72,6 +75,8 @@ struct ContentView: View {
 
             memoryView
 
+            workflowsView
+
             Spacer(minLength: 0)
         }
         .padding()
@@ -79,6 +84,9 @@ struct ContentView: View {
         .frame(minHeight: 440, alignment: .top)
         .onAppear {
             model.refreshApps()
+            model.refreshPermissions()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             model.refreshPermissions()
         }
     }
@@ -251,6 +259,15 @@ struct ContentView: View {
     private var memoryView: some View {
         DisclosureGroup("Memory (\(model.storedMemories.count))") {
             VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Local memory")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Clear All") { model.clearMemories() }
+                        .controlSize(.small)
+                        .disabled(model.storedMemories.isEmpty)
+                }
                 if model.storedMemories.isEmpty {
                     Text("Nothing remembered yet. Say \"remember: …\" or approve a suggestion.")
                         .font(.caption)
@@ -275,6 +292,83 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .font(.caption)
+    }
+
+    private var workflowsView: some View {
+        DisclosureGroup("Workflows (\(model.savedWorkflows.count))") {
+            VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("Workflow name", text: $newWorkflowName)
+                        .textFieldStyle(.roundedBorder)
+                    TextField("Goal — use {{slot}} for fill-ins", text: $newWorkflowGoal)
+                        .textFieldStyle(.roundedBorder)
+                    HStack {
+                        Text(model.selectedAppName.isEmpty
+                            ? "Pick a target app"
+                            : "App · \(model.selectedAppName)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        if let run = model.recentRuns.first {
+                            Button("Save last run") {
+                                model.saveRunAsWorkflow(run, name: newWorkflowName)
+                                newWorkflowName = ""
+                            }
+                            .controlSize(.small)
+                            .disabled(newWorkflowName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                        Button("Create") {
+                            model.createWorkflow(
+                                name: newWorkflowName,
+                                appName: model.selectedAppName,
+                                goalTemplate: newWorkflowGoal
+                            )
+                            newWorkflowName = ""
+                            newWorkflowGoal = ""
+                        }
+                        .controlSize(.small)
+                        .disabled(!canCreateWorkflow)
+                    }
+                }
+                if model.savedWorkflows.isEmpty {
+                    Text("No workflows yet. Create one above, or save a finished run.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(model.savedWorkflows) { workflow in
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(workflow.name)
+                                .font(.caption.weight(.medium))
+                            Text(workflowDetail(workflow))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Run") { model.runWorkflow(id: workflow.id, bindings: [:]) }
+                            .controlSize(.small)
+                            .disabled(model.phase == .running)
+                        Button("Delete") { model.deleteWorkflow(id: workflow.id) }
+                            .controlSize(.small)
+                    }
+                }
+            }
+            .padding(.top, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .font(.caption)
+    }
+
+    private func workflowDetail(_ workflow: AgentViewModel.StoredWorkflow) -> String {
+        workflow.runCount > 0
+            ? "\(workflow.appName) · \(workflow.successCount)/\(workflow.runCount) ok"
+            : workflow.appName
+    }
+
+    private var canCreateWorkflow: Bool {
+        !newWorkflowName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !newWorkflowGoal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !model.selectedAppName.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     private var trustView: some View {

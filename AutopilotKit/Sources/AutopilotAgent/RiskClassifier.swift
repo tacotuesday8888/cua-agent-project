@@ -14,6 +14,7 @@ public struct RiskClassifier: Sendable {
     private static let destructiveKeywords: [String] = [
         "delete", "remove", "trash", "discard", "erase",
         "send", "submit", "post", "publish", "share",
+        "overwrite",
         "buy", "purchase", "pay", "checkout", "place order", "order now",
         "subscribe", "confirm", "permanently",
         "sign out", "log out", "unsubscribe", "cancel subscription"
@@ -71,7 +72,10 @@ public struct RiskClassifier: Sendable {
             .compactMap { $0 }
             .joined(separator: " ")
             .lowercased()
-        return Self.destructiveKeywords.contains(where: haystack.contains)
+        let compactHaystack = Self.compacted(haystack)
+        return Self.destructiveKeywords.contains { keyword in
+            haystack.contains(keyword) || compactHaystack.contains(Self.compacted(keyword))
+        }
     }
 
     /// Whether `set_value` would replace a field that already has content.
@@ -111,5 +115,9 @@ public struct RiskClassifier: Sendable {
             return index.hasPrefix("e") ? index : "e\(index)"
         }
         return nil
+    }
+
+    private static func compacted(_ value: String) -> String {
+        value.filter { $0.isLetter || $0.isNumber }.lowercased()
     }
 }

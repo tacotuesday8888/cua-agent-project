@@ -66,6 +66,14 @@ struct MemoryStoreTests {
         #expect(await store.all().isEmpty)
     }
 
+    @Test func clearRemovesEveryMemory() async {
+        let store = MemoryStore(directory: tempDirectory())
+        await store.add(MemoryItem(text: "one", source: .explicit))
+        await store.add(MemoryItem(text: "two", source: .explicit))
+        await store.clear()
+        #expect(await store.all().isEmpty)
+    }
+
     @Test func relevantFiltersByScope() async {
         let store = MemoryStore(directory: tempDirectory())
         await store.add(MemoryItem(text: "global fact", scope: .global, source: .explicit))
@@ -111,6 +119,39 @@ struct MemoryStoreTests {
         let second = await store.add(MemoryItem(text: "same", scope: .global, source: .explicit))
         #expect(first)
         #expect(!second)
+        #expect(await store.all().count == 1)
+    }
+
+    @Test func addReportingSurfacesWriteFailures() async throws {
+        let notADirectory = tempDirectory()
+        try Data("file, not directory".utf8).write(to: notADirectory)
+        defer { try? FileManager.default.removeItem(at: notADirectory) }
+
+        let store = MemoryStore(directory: notADirectory)
+        let result = await store.addReporting(MemoryItem(text: "cannot persist", source: .explicit))
+
+        guard case .failed(let message) = result else {
+            Issue.record("expected addReporting to fail")
+            return
+        }
+        #expect(message.contains("Could not save memory"))
+        #expect(await store.all().isEmpty)
+    }
+
+    @Test func clearReportingSurfacesWriteFailures() async throws {
+        let directory = tempDirectory()
+        let store = MemoryStore(directory: directory)
+        await store.add(MemoryItem(text: "persisted", source: .explicit))
+        try FileManager.default.removeItem(at: directory)
+        try Data("file, not directory".utf8).write(to: directory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let result = await store.clearReporting()
+        guard case .failed(let message) = result else {
+            Issue.record("expected clearReporting to fail")
+            return
+        }
+        #expect(message.contains("Could not clear memory"))
         #expect(await store.all().count == 1)
     }
 

@@ -113,6 +113,22 @@ struct RunHistoryStoreTests {
         #expect(await store.all().isEmpty)
     }
 
+    @Test func recordReportingSurfacesWriteFailures() async throws {
+        let notADirectory = tempDirectory()
+        try Data("file, not directory".utf8).write(to: notADirectory)
+        defer { try? FileManager.default.removeItem(at: notADirectory) }
+
+        let store = RunHistoryStore(directory: notADirectory)
+        let result = await store.recordReporting(makeRecord(task: "cannot persist"))
+
+        guard case .failed(let message) = result else {
+            Issue.record("expected recordReporting to fail")
+            return
+        }
+        #expect(message.contains("Could not save run history"))
+        #expect(await store.all().isEmpty)
+    }
+
     @Test func missingFileYieldsEmpty() async {
         let store = RunHistoryStore(directory: tempDirectory())
         #expect(await store.all().isEmpty)

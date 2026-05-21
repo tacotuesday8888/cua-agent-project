@@ -36,6 +36,8 @@ public enum AgentEvent: Sendable {
     case memoryProposed(MemoryProposal)
     /// A memory was saved to the local store.
     case memoryStored(MemoryItem)
+    /// A local persistence operation failed, but the run can continue.
+    case storageFailed(String)
     /// The run finished successfully.
     case finished(summary: String)
     /// The run failed.

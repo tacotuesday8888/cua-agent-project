@@ -42,6 +42,12 @@ That product shape implies a few hard technical seams:
   secrets.
 - `AutopilotHistory` persists a redacted log of finished runs (`RunRecord`)
   under Application Support, capped to the most recent entries.
+- `AutopilotWorkflows` persists reusable workflows (`Workflow`) under Application
+  Support, capped and secrets-free. A workflow is a goal template plus the
+  variables that fill it; a `recipe` field exists on the model for forward
+  compatibility but is unused for now (a later phase injects it as a prompt
+  prior). The module depends only on Foundation, and only `AutopilotUI` consumes
+  it — the agent loop is untouched by single-app workflows.
 
 ## GLM 4.7 Flash
 
@@ -51,6 +57,8 @@ The Z.AI provider uses the OpenAI-compatible chat-completions shape:
 - Model: `glm-4.7-flash`
 - Tool calling: function tools with `tool_choice: auto`
 - Key handling: `Authorization: Bearer <api-key>`
+- Capability metadata: tool calls are enabled, image input is disabled, prompt
+  caching is disabled.
 
 Official references:
 
@@ -63,6 +71,10 @@ The app should never store provider keys in source, `UserDefaults`, logs, test
 fixtures, or commits. The temporary harness stores the Z.AI key in Keychain when
 the user runs a task. The smoke CLI can read `ZAI_API_KEY` from the environment
 for one-off validation, then falls back to the same Keychain account.
+
+Provider capabilities live in `AutopilotLLM.LLMProviderDescriptor`. UI and smoke
+tooling must use those descriptors instead of duplicating model names, keychain
+accounts, or screenshot assumptions.
 
 ## Safety Model
 
@@ -77,6 +89,35 @@ The current approval tiers are intentionally simple:
 The notch UI should surface approvals inline with the action summary, app name,
 risk tier, and target frame when available. Declined actions must return a tool
 result telling the model not to retry the same action.
+
+## Workflows
+
+A workflow turns a successful one-off task into something repeatable. It is a
+saved goal template with `{{slot}}` variables (for example,
+`Email {{recipient}} the weekly report`), scoped to a single app. Running a
+workflow fills the slots with the user's values and feeds the resolved goal back
+through the normal perceive → decide → act → verify loop, so the agent re-reads
+the live screen and reasons again rather than replaying recorded steps. That is
+the core difference from rule-based automation (Shortcuts, Automator, macros):
+the recipe is guidance, the live loop is the source of truth, so a workflow
+adapts to UI and edge-case changes instead of breaking.
+
+Scope and guarantees for the current phase:
+
+- **Single-app only.** A workflow runs exactly one app; cross-app workflows are a
+  later phase. The `Workflow` model isolates the app name so that change needs no
+  data migration.
+- **On-demand only.** Workflows run when the user triggers them; scheduling and
+  unattended runs are out of scope.
+- **Not auto-trusted.** A re-run goes through the same risk gate as any task —
+  destructive steps still ask for approval.
+- **Local and secrets-free.** Workflows live in `workflows.json` under
+  Application Support and store a goal template, variable names, and (later) a
+  recipe — never typed values or passwords. Variable values entered at run time
+  are used transiently and never persisted.
+- **Capture.** This phase captures workflows by hand or by saving a finished run
+  (`AgentViewModel.createWorkflow` / `saveRunAsWorkflow`). A later phase adds an
+  agent-proposed `propose_workflow` tool and a learned recipe injected on re-runs.
 
 ## Session State
 

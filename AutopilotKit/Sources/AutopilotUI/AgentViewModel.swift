@@ -4,6 +4,7 @@ import AutopilotHistory
 import AutopilotLLM
 import AutopilotMac
 import AutopilotMemory
+import AutopilotWorkflows
 import Foundation
 import Observation
 import Security
@@ -65,6 +66,24 @@ public final class AgentViewModel: UserInteraction {
         public let source: String
     }
 
+    /// A saved workflow shown in the workflows list.
+    public struct StoredWorkflow: Sendable, Identifiable {
+        /// The underlying `Workflow` id, used to run or delete it.
+        public let id: UUID
+        /// The user-facing name.
+        public let name: String
+        /// The app the workflow operates.
+        public let appName: String
+        /// The goal, with `{{slot}}` tokens for its variables.
+        public let goalTemplate: String
+        /// The variables the user fills in before a run.
+        public let variables: [WorkflowVariable]
+        /// How many times it has been run.
+        public let runCount: Int
+        /// How many of those runs succeeded.
+        public let successCount: Int
+    }
+
     /// A clarifying question from the agent, awaiting a user answer.
     public struct PendingQuestion: Sendable, Identifiable {
         public let id = UUID()
@@ -79,18 +98,19 @@ public final class AgentViewModel: UserInteraction {
 
         public var id: String { rawValue }
 
-        public var displayName: String {
+        public var descriptor: LLMProviderDescriptor {
             switch self {
-            case .zai: "Z.ai GLM-4.7-Flash"
-            case .anthropic: "Anthropic Claude"
+            case .zai: .zai
+            case .anthropic: .anthropic
             }
         }
 
+        public var displayName: String {
+            descriptor.displayName
+        }
+
         var model: String {
-            switch self {
-            case .zai: "glm-4.7-flash"
-            case .anthropic: "claude-sonnet-4-6"
-            }
+            descriptor.defaultModel
         }
 
         var apiKeyPlaceholder: String {
@@ -101,10 +121,13 @@ public final class AgentViewModel: UserInteraction {
         }
 
         var apiKeyDefaultsKey: String {
-            switch self {
-            case .zai: "AutopilotZAIAPIKey"
-            case .anthropic: "AutopilotAnthropicAPIKey"
-            }
+            descriptor.keychainAccount
+        }
+
+        var providerLimitations: String? {
+            descriptor.supportsImageInput
+                ? nil
+                : "Screenshots are disabled for this text-only provider."
         }
     }
 
@@ -134,10 +157,14 @@ public final class AgentViewModel: UserInteraction {
     public var questionAnswerText: String = ""
     /// Whether the notch is expanded to its full panel.
     public var isExpanded: Bool = false
+    /// The current action target being previewed/highlighted, if any.
+    public private(set) var highlightedTarget: ActionTarget?
     /// Recent finished runs, newest first, from the local history store.
     public private(set) var recentRuns: [RunRecord] = []
     /// Everything the agent currently remembers about the user, newest first.
     public private(set) var storedMemories: [StoredMemory] = []
+    /// The saved workflows, most-recently-updated first.
+    public private(set) var savedWorkflows: [StoredWorkflow] = []
     /// Whether the app currently holds Accessibility permission.
     public private(set) var accessibilityTrusted = false
     /// Whether the app currently holds Screen Recording permission.
@@ -161,6 +188,8 @@ public final class AgentViewModel: UserInteraction {
 
     public var apiKeyPlaceholder: String { selectedProvider.apiKeyPlaceholder }
     public var selectedModelName: String { selectedProvider.model }
+    public var selectedProviderDescriptor: LLMProviderDescriptor { selectedProvider.descriptor }
+    public var selectedProviderLimitations: String? { selectedProvider.providerLimitations }
 
     /// A compact "1.2k in · 0.3k out" token-usage label, or `nil` before any
     /// tokens have been reported.
@@ -188,13 +217,18 @@ public final class AgentViewModel: UserInteraction {
     private let locator = AppLocator()
     /// The local, persistent memory store, shared with the agent and the
     /// (future) memory-management UI.
-    private let memory = MemoryStore()
+    private let memory: MemoryStore
     /// The local, persistent log of finished runs.
-    private let history = RunHistoryStore()
+    private let history: RunHistoryStore
+    /// The local, persistent store of reusable workflows.
+    private let workflows: WorkflowStore
     private let promptParser = PromptParser()
     private var runTask: Task<Void, Never>?
     /// Metadata accumulated for the in-flight run, finalized on completion.
     private var pendingRun: PendingRun?
+    /// The workflow this run was started from, if any, so its run/success
+    /// counts can be updated when the run finishes.
+    private var activeWorkflowID: UUID?
     private var approvalContinuation: CheckedContinuation<Bool, Never>?
     private var memoryContinuation: CheckedContinuation<Bool, Never>?
     private var questionContinuation: CheckedContinuation<String, Never>?
@@ -208,7 +242,14 @@ public final class AgentViewModel: UserInteraction {
         var performedTools: [String] = []
     }
 
-    public init() {
+    public init(
+        memory: MemoryStore = MemoryStore(),
+        history: RunHistoryStore = RunHistoryStore(),
+        workflows: WorkflowStore = WorkflowStore()
+    ) {
+        self.memory = memory
+        self.history = history
+        self.workflows = workflows
         let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
             .flatMap(Provider.init(rawValue:)) ?? .zai
         self.selectedProvider = savedProvider
@@ -219,6 +260,7 @@ public final class AgentViewModel: UserInteraction {
         Task { [weak self] in
             await self?.loadRecentRuns()
             await self?.loadMemories()
+            await self?.loadWorkflows()
         }
     }
 
@@ -249,17 +291,55 @@ public final class AgentViewModel: UserInteraction {
             return
         }
         // An "@app" mention in the task picks the target, overriding the picker.
-        var mentionedApp: String?
+        var note: String?
         if let mention = promptParser.appMention(in: task),
            let resolved = locator.runningApp(matching: mention) {
             selectedAppName = resolved.name
-            mentionedApp = resolved.name
+            note = "Targeting \(resolved.name) — named with @ in the task."
         }
         let appName = selectedAppName.trimmingCharacters(in: .whitespaces)
         guard !appName.isEmpty, let target = locator.runningApp(matching: appName) else {
             phase = .failed("Pick the app you want me to operate, or name it with @.")
             return
         }
+        activeWorkflowID = nil
+        startRun(task: task, target: target, note: note)
+    }
+
+    /// Run a saved workflow: fill its variables into the goal, then run it
+    /// through the normal single-app agent loop. A re-run is not trusted
+    /// automatically — it goes through the same approval gate as any task.
+    public func runWorkflow(id: UUID, bindings: [String: String]) {
+        guard phase != .running else { return }
+        guard !apiKey.isEmpty else {
+            phase = .failed("Add your \(selectedProvider.displayName) API key to get started.")
+            return
+        }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard let workflow = await self.workflows.get(id: id) else {
+                self.phase = .failed("That workflow could not be found.")
+                return
+            }
+            guard let target = self.locator.runningApp(matching: workflow.appName) else {
+                self.phase = .failed(
+                    "\(workflow.appName) is not running. Open it, then run this workflow."
+                )
+                return
+            }
+            let goal = WorkflowRenderer.resolveGoal(
+                template: workflow.goalTemplate,
+                bindings: bindings
+            )
+            self.selectedAppName = workflow.appName
+            self.activeWorkflowID = workflow.id
+            self.startRun(task: goal, target: target, note: "Workflow — \(workflow.name)")
+        }
+    }
+
+    /// Build and start an `AgentSession` for `task` against `target`, resetting
+    /// the run UI state. Shared by direct prompts and workflow re-runs.
+    private func startRun(task: String, target: AppLocator.RunningApp, note: String? = nil) {
         let provider = selectedProvider
         let apiKey = apiKey
         do {
@@ -273,12 +353,16 @@ public final class AgentViewModel: UserInteraction {
         runInputTokens = 0
         runOutputTokens = 0
         append("Model — \(provider.displayName) (\(provider.model))")
-        if let mentionedApp {
-            append("Targeting \(mentionedApp) — named with @ in the task.")
+        if let limitation = provider.providerLimitations {
+            append(limitation)
+        }
+        if let note {
+            append(note)
         }
         pendingApproval = nil
         pendingMemory = nil
         pendingQuestion = nil
+        highlightedTarget = nil
         questionAnswerText = ""
         phase = .running
         pendingRun = PendingRun(
@@ -296,7 +380,10 @@ public final class AgentViewModel: UserInteraction {
                 bundleIdentifier: target.bundleIdentifier
             ),
             interaction: self,
-            configuration: AgentConfiguration(model: provider.model),
+            configuration: AgentConfiguration(
+                model: provider.model,
+                supportsImageInput: provider.descriptor.supportsImageInput
+            ),
             memory: memory,
             permanentlyTrustedApps: Set(permanentlyTrustedApps),
             eventHandler: { [weak self] event in
@@ -313,6 +400,7 @@ public final class AgentViewModel: UserInteraction {
     /// Stop a running task.
     public func stop() {
         runTask?.cancel()
+        highlightedTarget = nil
         if let continuation = approvalContinuation {
             approvalContinuation = nil
             pendingApproval = nil
@@ -461,6 +549,17 @@ public final class AgentViewModel: UserInteraction {
         }
     }
 
+    /// Erase every stored memory from the local memory file.
+    public func clearMemories() {
+        Task { [weak self] in
+            guard let self else { return }
+            if case .failed(let message) = await self.memory.clearReporting() {
+                self.append("Storage warning — \(message)", isError: true)
+            }
+            await self.loadMemories()
+        }
+    }
+
     /// Store the memories from a "remember:" prompt and report it in the feed.
     private func captureExplicitMemories(_ memories: [MemoryItem]) {
         promptText = ""
@@ -469,20 +568,130 @@ public final class AgentViewModel: UserInteraction {
         Task { @MainActor [weak self] in
             guard let self else { return }
             var stored = 0
-            for item in memories where await self.memory.add(item) {
-                self.append("Saved to memory: \(item.text)")
-                stored += 1
+            var failures = 0
+            for item in memories {
+                switch await self.memory.addReporting(item) {
+                case .stored:
+                    self.append("Saved to memory: \(item.text)")
+                    stored += 1
+                case .duplicate, .cleared:
+                    break
+                case .failed(let message):
+                    self.append("Storage warning — \(message)", isError: true)
+                    failures += 1
+                }
             }
             await self.loadMemories()
-            self.phase = .finished(stored == 0 ? "Already in memory." : "Saved to memory.")
+            if failures > 0 && stored == 0 {
+                self.phase = .failed("Could not save memory.")
+            } else {
+                self.phase = .finished(stored == 0 ? "Already in memory." : "Saved to memory.")
+            }
+        }
+    }
+
+    // MARK: - Workflows
+
+    /// Refresh the saved-workflow list from the local store.
+    public func loadWorkflows() async {
+        savedWorkflows = await workflows.all().map { workflow in
+            StoredWorkflow(
+                id: workflow.id,
+                name: workflow.name,
+                appName: workflow.appName,
+                goalTemplate: workflow.goalTemplate,
+                variables: workflow.variables,
+                runCount: workflow.runCount,
+                successCount: workflow.successCount
+            )
+        }
+    }
+
+    /// Save a new workflow built by hand.
+    public func createWorkflow(
+        name: String,
+        appName: String,
+        goalTemplate: String,
+        variables: [WorkflowVariable] = []
+    ) {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedGoal = goalTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedApp = appName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty, !trimmedGoal.isEmpty, !trimmedApp.isEmpty else { return }
+        let derived = variables.isEmpty
+            ? WorkflowRenderer.slotNames(in: trimmedGoal).map { WorkflowVariable(name: $0) }
+            : variables
+        storeWorkflow(Workflow(
+            name: trimmedName,
+            appName: trimmedApp,
+            goalTemplate: trimmedGoal,
+            variables: derived,
+            source: .manual
+        ))
+    }
+
+    /// Save a finished run as a reusable workflow: its task becomes the goal and
+    /// its app the target. The user can add `{{slot}}` variables by editing.
+    public func saveRunAsWorkflow(_ record: RunRecord, name: String) {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { return }
+        let variables = WorkflowRenderer.slotNames(in: record.task)
+            .map { WorkflowVariable(name: $0) }
+        storeWorkflow(Workflow(
+            name: trimmedName,
+            appName: record.appName,
+            goalTemplate: record.task,
+            variables: variables,
+            source: .savedFromRun,
+            sourceRunID: record.id
+        ))
+    }
+
+    /// Delete a saved workflow, then refresh the list.
+    public func deleteWorkflow(id: UUID) {
+        Task { [weak self] in
+            await self?.workflows.delete(id: id)
+            await self?.loadWorkflows()
+        }
+    }
+
+    /// Erase every saved workflow.
+    public func clearWorkflows() {
+        Task { [weak self] in
+            guard let self else { return }
+            if case .failed(let message) = await self.workflows.clearReporting() {
+                self.append("Storage warning — \(message)", isError: true)
+            }
+            await self.loadWorkflows()
+        }
+    }
+
+    /// Persist a workflow and surface duplicate/failure outcomes in the feed.
+    private func storeWorkflow(_ workflow: Workflow) {
+        Task { [weak self] in
+            guard let self else { return }
+            switch await self.workflows.addReporting(workflow) {
+            case .stored, .updated, .cleared:
+                break
+            case .duplicate:
+                self.append("A workflow named \"\(workflow.name)\" already exists.", isError: true)
+            case .failed(let message):
+                self.append("Storage warning — \(message)", isError: true)
+            }
+            await self.loadWorkflows()
         }
     }
 
     // MARK: - Agent events
 
+    func ingestForTesting(_ event: AgentEvent) {
+        ingest(event)
+    }
+
     private func ingest(_ event: AgentEvent) {
         switch event {
         case .started:
+            highlightedTarget = nil
             append("Starting…")
         case .prepared(let summary):
             append(summary)
@@ -503,15 +712,19 @@ public final class AgentViewModel: UserInteraction {
         case .memoryRecalled(let items):
             append("Memory in use — \(items.map(\.text).joined(separator: "; "))")
         case .willPerform(_, let target, let tier):
+            highlightedTarget = target
             append(tier == .safe ? target.description : "\(target.description) [\(tier.rawValue)]")
         case .awaitingConfirmation(let request):
             append("Needs approval: \(request.summary)")
         case .confirmationDenied(let summary):
+            highlightedTarget = nil
             append("Skipped: \(summary)", isError: true)
         case .performed(let tool, let summary):
+            highlightedTarget = nil
             pendingRun?.performedTools.append(tool.rawValue)
             append("Done: \(summary)")
         case .actionFailed(let tool, let reason):
+            highlightedTarget = nil
             append("\(tool.rawValue) failed — \(reason)", isError: true)
         case .askedUser(let question, _):
             append("Asked: \(question)")
@@ -520,11 +733,16 @@ public final class AgentViewModel: UserInteraction {
         case .memoryStored(let item):
             append("Saved to memory: \(item.text)")
             Task { [weak self] in await self?.loadMemories() }
+        case .storageFailed(let message):
+            append("Storage warning — \(message)", isError: true)
         case .finished(let summary):
+            highlightedTarget = nil
             append("Finished — \(summary)")
         case .failed(let reason):
+            highlightedTarget = nil
             append(reason, isError: true)
         case .stopped:
+            highlightedTarget = nil
             append("Stopped.", isError: true)
         }
     }
@@ -536,6 +754,14 @@ public final class AgentViewModel: UserInteraction {
         case .failed: phase = .failed(outcome.summary)
         }
         runTask = nil
+        if let workflowID = activeWorkflowID {
+            activeWorkflowID = nil
+            let succeeded = outcome.status == .completed
+            Task { [weak self] in
+                await self?.workflows.recordRun(id: workflowID, succeeded: succeeded)
+                await self?.loadWorkflows()
+            }
+        }
         recordHistory(for: outcome)
     }
 
@@ -549,8 +775,11 @@ public final class AgentViewModel: UserInteraction {
     /// Erase the local run history.
     public func clearHistory() {
         Task { [weak self] in
-            await self?.history.clear()
-            await self?.loadRecentRuns()
+            guard let self else { return }
+            if case .failed(let message) = await self.history.clearReporting() {
+                self.append("Storage warning — \(message)", isError: true)
+            }
+            await self.loadRecentRuns()
         }
     }
 
@@ -571,8 +800,11 @@ public final class AgentViewModel: UserInteraction {
             finishedAt: Date()
         )
         Task { [weak self] in
-            await self?.history.record(record)
-            await self?.loadRecentRuns()
+            guard let self else { return }
+            if case .failed(let message) = await self.history.recordReporting(record) {
+                self.append("Storage warning — \(message)", isError: true)
+            }
+            await self.loadRecentRuns()
         }
     }
 

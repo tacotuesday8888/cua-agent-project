@@ -1,7 +1,10 @@
 # Mac Autopilot
 
-Native macOS app experiment for an Accessibility-tree-first computer-use agent.
-It reads a target app's accessibility tree, decides with an LLM, acts through
+Native macOS AI workflow assistant built on an Accessibility-tree-first
+computer-use agent. Run a one-off task from chat, then save a successful task as
+a reusable **workflow** the agent re-reasons each time it runs — so it adapts to
+messy app state instead of breaking like a recorded macro. Under the hood it
+reads a target app's accessibility tree, decides with an LLM, acts through
 Accessibility actions and synthesized input, then verifies the result — one app
 at a time.
 
@@ -20,9 +23,17 @@ at a time.
   surfaced for the user to approve. Finished runs are kept in a redacted local
   history. API keys live in the Keychain; nothing leaves the machine except the
   chosen LLM provider's calls.
+- A successful task can be saved as a reusable **workflow**: a goal template with
+  `{{slot}}` variables you fill in at run time. Re-running a workflow feeds the
+  resolved goal back through the same agent loop and approval gate — it is not a
+  recorded click-script and is never auto-trusted. Workflows are single-app for
+  now, stored locally in `workflows.json`, and hold no secrets.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the notch-led product
 shape, safety model, local session-state approach, and backend/account plan.
+Use [docs/VALIDATION.md](docs/VALIDATION.md) for repeatable fixture, live
+provider, and safe real-app validation. See [docs/RELEASE.md](docs/RELEASE.md)
+for direct-distribution and App Store readiness notes.
 
 ## Permissions
 
@@ -75,3 +86,7 @@ swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureAp
 The smoke runner process needs Accessibility permission in System Settings >
 Privacy & Security > Accessibility. Add `--include-screenshot` to also require
 Screen Recording and validate target-window screenshot bytes.
+
+Provider capabilities are explicit in code. Z.AI is configured as a text-only
+tool-calling provider, so screenshot image blocks are omitted with a warning;
+Anthropic is configured for image input and prompt caching.

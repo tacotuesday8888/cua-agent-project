@@ -117,13 +117,21 @@ struct AutopilotSmokeCLI {
         print("- model: \(model)")
         print("- api key source: \(apiKeySourceDescription(environment: apiKeyEnvironment, provider: provider))")
         print("- task: \(task)")
+        if arguments.contains("--include-screenshot"), !provider.descriptor.supportsImageInput {
+            print("- screenshots: disabled because \(provider.displayName) is configured as text-only")
+        }
 
         let recorder = AgentSmokeEventRecorder()
         let session = AgentSession(
             llm: provider.makeProvider(apiKey: apiKey),
             computer: computer,
             interaction: AutomaticApproval(),
-            configuration: AgentConfiguration(model: model, maxSteps: maxSteps, highlightDwell: .zero),
+            configuration: AgentConfiguration(
+                model: model,
+                maxSteps: maxSteps,
+                highlightDwell: .zero,
+                supportsImageInput: provider.descriptor.supportsImageInput
+            ),
             memory: smokeMemoryStore(),
             eventHandler: { event in
                 recorder.append(event)
@@ -444,32 +452,27 @@ private enum LiveProvider: String {
     case zai
     case anthropic
 
-    var displayName: String {
+    var descriptor: LLMProviderDescriptor {
         switch self {
-        case .zai: "Z.ai"
-        case .anthropic: "Anthropic"
+        case .zai: .zai
+        case .anthropic: .anthropic
         }
+    }
+
+    var displayName: String {
+        descriptor.displayName
     }
 
     var defaultModel: String {
-        switch self {
-        case .zai: "glm-4.7-flash"
-        case .anthropic: "claude-sonnet-4-6"
-        }
+        descriptor.defaultModel
     }
 
     var defaultAPIKeyEnvironment: String {
-        switch self {
-        case .zai: "ZAI_API_KEY"
-        case .anthropic: "ANTHROPIC_API_KEY"
-        }
+        descriptor.apiKeyEnvironment
     }
 
     var keychainAccount: String {
-        switch self {
-        case .zai: "AutopilotZAIAPIKey"
-        case .anthropic: "AutopilotAnthropicAPIKey"
-        }
+        descriptor.keychainAccount
     }
 
     func makeProvider(apiKey: String) -> any LLMProvider {
@@ -558,6 +561,8 @@ private func formatAgentEvent(_ event: AgentEvent) -> String? {
         return "- memory_proposed: \(proposal.text)"
     case .memoryStored(let item):
         return "- memory_stored: \(item.text)"
+    case .storageFailed(let message):
+        return "- storage_failed: \(message)"
     case .finished(let summary):
         return "- finished: \(summary)"
     case .failed(let reason):
