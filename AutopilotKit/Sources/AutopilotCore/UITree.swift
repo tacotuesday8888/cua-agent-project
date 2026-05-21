@@ -117,6 +117,10 @@ public struct UITreeSnapshot: Sendable, Codable {
     public let windowIdentifier: UInt32?
     public let turnIdentifier: Int?
     public let root: UIElement
+    /// Whether the capture hit the element budget and stopped early, so this
+    /// tree is an incomplete view of the app's UI. Surfaced to the model so it
+    /// knows to scroll or narrow its focus rather than assume it sees everything.
+    public let isTruncated: Bool
     public let capturedAt: Date
 
     public init(
@@ -127,6 +131,7 @@ public struct UITreeSnapshot: Sendable, Codable {
         windowIdentifier: UInt32? = nil,
         turnIdentifier: Int? = nil,
         root: UIElement,
+        isTruncated: Bool = false,
         capturedAt: Date = Date()
     ) {
         self.appName = appName
@@ -136,6 +141,7 @@ public struct UITreeSnapshot: Sendable, Codable {
         self.windowIdentifier = windowIdentifier
         self.turnIdentifier = turnIdentifier
         self.root = root
+        self.isTruncated = isTruncated
         self.capturedAt = capturedAt
     }
 

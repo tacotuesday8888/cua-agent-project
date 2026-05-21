@@ -49,6 +49,13 @@ public enum UITreeRenderer {
         if truncated {
             lines.append("… (tree truncated at \(maxElements) elements)")
         }
+        if snapshot.isTruncated {
+            lines.append("""
+            Note: this app exposes more UI than was captured, so some controls \
+            may be missing here. Scroll or focus a smaller area, then re-read, to \
+            reach them.
+            """)
+        }
         return lines.joined(separator: "\n")
     }
 

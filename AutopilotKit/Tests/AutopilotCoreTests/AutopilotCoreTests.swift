@@ -130,6 +130,17 @@ struct UITreeRendererTests {
         let text = UITreeRenderer.compactText(snapshot, maxElements: 10)
         #expect(text.contains("truncated"))
     }
+
+    @Test func compactTextNotesIncompleteCapture() {
+        let root = UIElement(id: "e1", role: "AXWindow", children: [
+            UIElement(id: "e2", role: "AXButton", label: "Go")
+        ])
+        let complete = UITreeSnapshot(appName: "App", root: root)
+        #expect(!UITreeRenderer.compactText(complete).contains("more UI than was captured"))
+
+        let cut = UITreeSnapshot(appName: "App", root: root, isTruncated: true)
+        #expect(UITreeRenderer.compactText(cut).contains("more UI than was captured"))
+    }
 }
 
 struct ActionTargetTests {

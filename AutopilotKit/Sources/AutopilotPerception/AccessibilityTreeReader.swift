@@ -24,10 +24,17 @@ public struct AccessibilityTreeReader: Sendable {
     public struct Limits: Sendable {
         public var maxDepth: Int
         public var maxElements: Int
+        /// Per-message accessibility timeout, in seconds, applied to the target
+        /// app. Reading a window makes thousands of synchronous cross-process
+        /// AX calls; without a bound, one unresponsive call hangs the whole run.
+        /// This caps each call so a stuck app fails fast with a clear error
+        /// instead of freezing. `0` keeps the system default.
+        public var messagingTimeout: Double
 
-        public init(maxDepth: Int = 40, maxElements: Int = 1500) {
+        public init(maxDepth: Int = 40, maxElements: Int = 1500, messagingTimeout: Double = 5) {
             self.maxDepth = maxDepth
             self.maxElements = maxElements
+            self.messagingTimeout = messagingTimeout
         }
     }
 
@@ -55,6 +62,12 @@ public struct AccessibilityTreeReader: Sendable {
         guard AXIsProcessTrusted() else { throw ReadError.notTrusted }
 
         let app = AXUIElementCreateApplication(pid)
+        // Bound every AX message to this app so an unresponsive target cannot
+        // hang the read (and the run). Set on the app element, it applies to all
+        // messages to that application, including the elements captured below.
+        if limits.messagingTimeout > 0 {
+            _ = AXUIElementSetMessagingTimeout(app, Float(limits.messagingTimeout))
+        }
         guard let window = focusedWindow(of: app) else { throw ReadError.noWindow }
         let windowTitle = window.stringAttribute(kAXTitleAttribute)
         let windowIdentifier = Self.windowIdentifier(pid: pid, title: windowTitle)
@@ -70,7 +83,8 @@ public struct AccessibilityTreeReader: Sendable {
             windowTitle: windowTitle,
             windowIdentifier: windowIdentifier,
             turnIdentifier: turnIdentifier,
-            root: root
+            root: root,
+            isTruncated: counter >= limits.maxElements
         )
         return WindowScan(
             snapshot: snapshot,
