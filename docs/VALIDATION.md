@@ -15,6 +15,15 @@ xcodebuild -project MacAutopilot.xcodeproj -scheme MacAutopilot -destination 'pl
 
 Expected result: package tests pass and the app target builds.
 
+For local app launch verification, use the project run entrypoint:
+
+```sh
+./script/build_and_run.sh --verify
+```
+
+Expected result: the app builds into `.build/xcode`, launches as
+`MacAutopilot`, and the process is visible to `pgrep`.
+
 ## Fixture Driver Validation
 
 Requires Accessibility permission for the fixture app and the smoke CLI process.
@@ -34,7 +43,17 @@ swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureAp
 ```
 
 Expected result: the nine-tool smoke surface passes. The screenshot run also
-requires Screen Recording permission and should report PNG bytes.
+requires Screen Recording permission and should report PNG bytes. Screenshots
+are target-window-only; if the fixture window cannot be matched to a
+CoreGraphics window, the smoke run should fail with a screenshot warning rather
+than capturing the full display.
+
+The same fixture checks can be run with:
+
+```sh
+./script/validate_fixture.sh
+./script/validate_fixture.sh --include-screenshot
+```
 
 ## Live Provider Validation
 

@@ -273,6 +273,9 @@ public struct ComputerUseSmokeRunner: Sendable {
                 throw AgentError.computer("get_app_state returned an empty tree")
             }
             if includeScreenshot {
+                if let warning = state.screenshotWarning {
+                    throw AgentError.computer(warning)
+                }
                 guard let screenshot = state.screenshot, !screenshot.isEmpty else {
                     throw AgentError.computer("get_app_state did not return screenshot bytes")
                 }

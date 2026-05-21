@@ -48,6 +48,7 @@ smoke CLI process needs the same Accessibility grant.
 swift build --package-path AutopilotKit
 swift test --package-path AutopilotKit
 xcodebuild -project MacAutopilot.xcodeproj -scheme MacAutopilot -destination 'platform=macOS' build
+./script/build_and_run.sh --verify
 ```
 
 ## Real Driver Smoke Test
@@ -59,6 +60,7 @@ exercise the 9-tool driver surface without an LLM:
 swift run --package-path AutopilotKit AutopilotFixtureApp
 swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp
 swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp --include-screenshot
+./script/validate_fixture.sh
 ```
 
 To inspect what the agent would see for any running app, dump its

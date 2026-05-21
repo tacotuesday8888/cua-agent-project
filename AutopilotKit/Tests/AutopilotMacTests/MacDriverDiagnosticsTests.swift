@@ -91,7 +91,9 @@ struct MacDriverDiagnosticsTests {
         let checks = MacDriverDiagnostics.checks(for: inputs(
             window: .readable(elementCount: 8, windowMatched: false)
         ))
-        #expect(check("window-match", in: checks)?.status == .warning)
+        let windowMatch = check("window-match", in: checks)
+        #expect(windowMatch?.status == .warning)
+        #expect(windowMatch?.recovery?.contains("screenshot fallback is disabled") == true)
         #expect(ComputerDiagnostics(appName: "TextEdit", checks: checks).isReady)
     }
 

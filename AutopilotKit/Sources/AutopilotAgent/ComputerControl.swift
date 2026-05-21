@@ -134,10 +134,18 @@ public struct ComputerAppInfo: Sendable, Hashable, Codable {
 public struct ComputerAppState: Sendable {
     public let snapshot: UITreeSnapshot
     public let screenshot: Data?
+    /// Non-fatal reason a requested screenshot could not be returned. The tree
+    /// is still valid and should remain available to the model.
+    public let screenshotWarning: String?
 
-    public init(snapshot: UITreeSnapshot, screenshot: Data? = nil) {
+    public init(
+        snapshot: UITreeSnapshot,
+        screenshot: Data? = nil,
+        screenshotWarning: String? = nil
+    ) {
         self.snapshot = snapshot
         self.screenshot = screenshot
+        self.screenshotWarning = screenshotWarning
     }
 }
 
@@ -224,8 +232,18 @@ public extension ComputerControl {
 
     func getAppState(includeScreenshot: Bool) async throws -> ComputerAppState {
         let snapshot = try await captureTree()
-        let screenshot = includeScreenshot ? try await captureScreenshot() : nil
-        return ComputerAppState(snapshot: snapshot, screenshot: screenshot)
+        guard includeScreenshot else {
+            return ComputerAppState(snapshot: snapshot)
+        }
+
+        do {
+            return ComputerAppState(snapshot: snapshot, screenshot: try await captureScreenshot())
+        } catch {
+            return ComputerAppState(
+                snapshot: snapshot,
+                screenshotWarning: Self.screenshotWarning(for: error)
+            )
+        }
     }
 
     func typeText(_ text: String) async throws {
@@ -245,5 +263,17 @@ public extension ComputerControl {
 
     func performSecondaryAction(elementID: String, action: String) async throws {
         throw ComputerControlError.unsupportedTool("perform_secondary_action")
+    }
+
+    private static func screenshotWarning(for error: Error) -> String {
+        let reason: String
+        if let localized = error as? LocalizedError,
+           let description = localized.errorDescription,
+           !description.isEmpty {
+            reason = description
+        } else {
+            reason = String(describing: error)
+        }
+        return "Screenshot unavailable: \(reason)"
     }
 }

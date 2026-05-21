@@ -634,6 +634,12 @@ public actor AgentSession {
                 clarification if the visual state is ambiguous.
                 """))
             }
+            if let warning = state.screenshotWarning {
+                content.append(.text("""
+                \(warning) The accessibility tree above is still current. Use \
+                it to continue, or ask the user if visual details are required.
+                """))
+            }
             if let screenshot = state.screenshot {
                 content.append(.image(ImageBlock(base64Data: screenshot.base64EncodedString())))
             }

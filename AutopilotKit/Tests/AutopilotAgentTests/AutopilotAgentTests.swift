@@ -352,6 +352,42 @@ struct AgentSessionTests {
         #expect(secondRequestText.contains("Screenshot omitted"))
     }
 
+    @Test func screenshotFailurePreservesTreeAndSurfacesWarning() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(
+                id: "t1",
+                tool: "get_app_state",
+                input: ["include_screenshot": true]
+            ),
+            toolResponse(id: "t2", tool: "done", input: ["summary": "Done."])
+        ])
+        let computer = ScreenshotFailingComputer()
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(
+                model: "test",
+                maxSteps: 5,
+                highlightDwell: .zero,
+                supportsImageInput: true
+            ),
+            memory: makeTestMemory()
+        )
+
+        let outcome = await session.run(task: "inspect the screen")
+        #expect(outcome.status == .completed)
+        #expect(await computer.screenshotAttempts == 1)
+
+        let requests = await llm.requests
+        let secondRequestText = requests.dropFirst().first.map { allText(in: $0) } ?? ""
+        #expect(secondRequestText.contains("App: Preview"))
+        #expect(secondRequestText.contains("\"Save\""))
+        #expect(secondRequestText.contains("Screenshot unavailable"))
+        #expect(secondRequestText.contains("target window not matched"))
+        #expect(secondRequestText.contains("accessibility tree above is still current"))
+    }
+
     @Test func invalidElementReturnsRecoveryInstruction() async {
         let llm = ScriptedLLMProvider([
             toolResponse(id: "t1", tool: "click", input: ["element_index": 99]),
@@ -1142,5 +1178,29 @@ actor UnreadyComputer: ComputerControl {
 
     func captureScreenshot() async throws -> Data {
         throw AgentError.computer("captureScreenshot should not be called")
+    }
+}
+
+actor ScreenshotFailingComputer: ComputerControl {
+    nonisolated let appName = "Preview"
+    private(set) var screenshotAttempts = 0
+
+    func captureTree() async throws -> UITreeSnapshot {
+        UITreeSnapshot(
+            appName: appName,
+            root: UIElement(id: "e1", role: "AXWindow", children: [
+                UIElement(id: "e2", role: "AXButton", label: "Save")
+            ])
+        )
+    }
+
+    func click(elementID: String) async throws {}
+    func setValue(elementID: String, value: String) async throws {}
+    func scroll(elementID: String?, direction: ScrollDirection, amount: Int) async throws {}
+    func pressKey(_ key: KeyPress) async throws {}
+
+    func captureScreenshot() async throws -> Data {
+        screenshotAttempts += 1
+        throw AgentError.computer("target window not matched")
     }
 }

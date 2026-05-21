@@ -9,8 +9,25 @@ import ScreenCaptureKit
 
 /// Errors specific to driving a real macOS app.
 public enum MacComputerError: Error, Sendable {
+    /// The AX window could not be matched to a CoreGraphics window. Falling
+    /// back to the full display would expose unrelated screen content.
+    case targetWindowNotMatched
     /// A screenshot could not be produced.
     case screenshotUnavailable
+}
+
+extension MacComputerError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .targetWindowNotMatched:
+            return """
+            The target app window could not be matched for a private \
+            target-window screenshot.
+            """
+        case .screenshotUnavailable:
+            return "The target-window screenshot could not be produced."
+        }
+    }
 }
 
 /// The production `ComputerControl`: drives a real macOS app by reading its
@@ -188,30 +205,16 @@ public actor MacComputer: ComputerControl {
     }
 
     private static func captureScreenshot(windowIdentifier: UInt32?) async throws -> Data {
-        let content = try await SCShareableContent.current
-        if
-            let windowIdentifier,
-            let window = content.windows.first(where: { $0.windowID == windowIdentifier })
-        {
-            return try await capture(window: window)
+        guard let windowIdentifier else {
+            throw MacComputerError.targetWindowNotMatched
         }
 
-        guard let display = content.displays.first else {
-            throw MacComputerError.screenshotUnavailable
+        let content = try await SCShareableContent.current
+        guard let window = content.windows.first(where: { $0.windowID == windowIdentifier }) else {
+            throw MacComputerError.targetWindowNotMatched
         }
-        let filter = SCContentFilter(display: display, excludingWindows: [])
-        let configuration = SCStreamConfiguration()
-        configuration.width = display.width
-        configuration.height = display.height
-        let image = try await SCScreenshotManager.captureImage(
-            contentFilter: filter,
-            configuration: configuration
-        )
-        guard let png = NSBitmapImageRep(cgImage: image)
-            .representation(using: .png, properties: [:]) else {
-            throw MacComputerError.screenshotUnavailable
-        }
-        return png
+
+        return try await capture(window: window)
     }
 
     /// Resolve an element id from the most recent capture to a live AX element.

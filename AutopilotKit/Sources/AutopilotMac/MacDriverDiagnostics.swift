@@ -131,7 +131,7 @@ enum MacDriverDiagnostics {
                         : "Could not match the AX window to a CoreGraphics window id.",
                     recovery: windowMatched
                         ? nil
-                        : "The driver can still use AX, but screenshot fallback may capture the display instead of the window."
+                        : "The driver can still use AX, but screenshot fallback is disabled until the target window can be matched."
                 )
             ]
         case .noWindow:

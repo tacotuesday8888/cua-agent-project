@@ -179,6 +179,10 @@ struct AutopilotSmokeCLI {
         do {
             let state = try await computer.getAppState(includeScreenshot: includeScreenshot)
             print(UITreeRenderer.compactText(state.snapshot))
+            if includeScreenshot, let warning = state.screenshotWarning {
+                print("")
+                print("Screenshot warning: \(warning)")
+            }
             if includeScreenshot, let screenshot = state.screenshot {
                 print("")
                 print("Screenshot: \(screenshot.count) PNG byte(s).")
