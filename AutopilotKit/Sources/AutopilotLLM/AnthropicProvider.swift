@@ -301,7 +301,9 @@ private struct WireResponse: Decodable {
             stopReason: reason,
             usage: LLMResponse.Usage(
                 inputTokens: usage.inputTokens,
-                outputTokens: usage.outputTokens
+                outputTokens: usage.outputTokens,
+                cacheCreationInputTokens: usage.cacheCreationInputTokens,
+                cacheReadInputTokens: usage.cacheReadInputTokens
             )
         )
     }
@@ -310,10 +312,25 @@ private struct WireResponse: Decodable {
 private struct WireUsage: Decodable {
     let inputTokens: Int
     let outputTokens: Int
+    /// Present only when prompt caching wrote or read tokens; absent otherwise.
+    let cacheCreationInputTokens: Int
+    let cacheReadInputTokens: Int
 
     enum CodingKeys: String, CodingKey {
         case inputTokens = "input_tokens"
         case outputTokens = "output_tokens"
+        case cacheCreationInputTokens = "cache_creation_input_tokens"
+        case cacheReadInputTokens = "cache_read_input_tokens"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        inputTokens = try container.decode(Int.self, forKey: .inputTokens)
+        outputTokens = try container.decode(Int.self, forKey: .outputTokens)
+        cacheCreationInputTokens =
+            try container.decodeIfPresent(Int.self, forKey: .cacheCreationInputTokens) ?? 0
+        cacheReadInputTokens =
+            try container.decodeIfPresent(Int.self, forKey: .cacheReadInputTokens) ?? 0
     }
 }
 

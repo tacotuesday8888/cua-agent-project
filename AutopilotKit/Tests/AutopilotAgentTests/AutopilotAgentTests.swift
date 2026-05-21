@@ -227,6 +227,33 @@ struct RiskClassifierTests {
         )
         #expect(risk == .destructive)
     }
+
+    @Test(arguments: [
+        "delete",
+        "AXDelete",
+        "Move to Trash",
+        "removeRow",
+        "Discard Changes"
+    ])
+    func destructiveSecondaryActionNamesAreDestructive(action: String) {
+        // The action name carries the consequence even when the element it acts
+        // on has a perfectly ordinary label — a context-menu "Delete" on a row.
+        let risk = RiskClassifier().assess(
+            tool: .performSecondaryAction,
+            input: ["element_index": 2, "action": .string(action)],
+            snapshot: buttonSnapshot(label: "Track 3")
+        )
+        #expect(risk == .destructive)
+    }
+
+    @Test func benignSecondaryActionNameStaysWrite() {
+        let risk = RiskClassifier().assess(
+            tool: .performSecondaryAction,
+            input: ["element_index": 2, "action": "AXShowMenu"],
+            snapshot: buttonSnapshot(label: "Track 3")
+        )
+        #expect(risk == .write)
+    }
 }
 
 struct ToolCatalogTests {
@@ -268,6 +295,19 @@ struct AgentSessionTests {
             content: [.toolUse(ToolUse(id: id, name: tool, input: input))],
             stopReason: .toolUse,
             usage: .init(inputTokens: 1, outputTokens: 1)
+        )
+    }
+
+    private func toolResponse(
+        id: String,
+        tool: String,
+        input: JSONValue,
+        usage: LLMResponse.Usage
+    ) -> LLMResponse {
+        LLMResponse(
+            content: [.toolUse(ToolUse(id: id, name: tool, input: input))],
+            stopReason: .toolUse,
+            usage: usage
         )
     }
 
@@ -857,6 +897,41 @@ struct AgentSessionTests {
         #expect(usage.count == 3)
         #expect(usage.map(\.0) == [1, 2, 3])
         #expect(usage.last?.1 == 3)
+    }
+
+    @Test func accumulatesPromptCacheTokensInInputTally() async {
+        // With caching, the provider reports fresh input plus cache creation and
+        // read figures; the run's reported input must include them all, or a
+        // cached run looks far cheaper than it is.
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "t1", tool: "get_app_state", input: [:],
+                         usage: .init(inputTokens: 10, outputTokens: 2,
+                                      cacheCreationInputTokens: 100,
+                                      cacheReadInputTokens: 0)),
+            toolResponse(id: "t2", tool: "done", input: ["summary": "Done."],
+                         usage: .init(inputTokens: 5, outputTokens: 3,
+                                      cacheCreationInputTokens: 0,
+                                      cacheReadInputTokens: 100))
+        ])
+        let collector = EventCollector()
+        let session = AgentSession(
+            llm: llm,
+            computer: musicComputer(),
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory(),
+            eventHandler: { collector.append($0) }
+        )
+
+        _ = await session.run(task: "read then finish")
+
+        let usage = collector.all().compactMap { event -> (Int, Int)? in
+            if case .tokenUsage(let input, let output) = event { return (input, output) }
+            return nil
+        }
+        // Step 1 total input: 10 + 100 = 110. Step 2 adds 5 + 100 = 105 → 215.
+        #expect(usage.map(\.0) == [110, 215])
+        #expect(usage.last?.1 == 5)
     }
 
     @Test func warnsModelWhenStepBudgetRunsLow() async {

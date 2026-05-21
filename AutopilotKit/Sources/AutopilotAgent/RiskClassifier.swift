@@ -42,8 +42,15 @@ public struct RiskClassifier: Sendable {
             return .safe
         case .typeText, .drag:
             return .write
-        case .click, .performSecondaryAction:
+        case .click:
             return targetsDestructiveElement(input, snapshot) ? .destructive : .write
+        case .performSecondaryAction:
+            // A secondary action is destructive if its target carries a
+            // destructive word or the action itself names one — a context-menu
+            // "Delete" run on a plainly-labeled row must still be gated.
+            let destructive = targetsDestructiveElement(input, snapshot)
+                || actionIsDestructive(input)
+            return destructive ? .destructive : .write
         case .setValue:
             return overwritesExistingValue(input, snapshot) ? .destructive : .write
         case .pressKey:
@@ -75,6 +82,23 @@ public struct RiskClassifier: Sendable {
         let compactHaystack = Self.compacted(haystack)
         return Self.destructiveKeywords.contains { keyword in
             haystack.contains(keyword) || compactHaystack.contains(Self.compacted(keyword))
+        }
+    }
+
+    /// Whether a `perform_secondary_action` call invokes a consequential
+    /// action, recognized by a destructive word in the action name itself — for
+    /// example a context-menu "Delete", "Move to Trash", or a custom `AXDelete`
+    /// action. This is checked alongside the element's own labels, so a
+    /// destructive action on an otherwise harmless-looking element is still
+    /// gated. Matching errs toward asking, the safe direction for the gate.
+    private func actionIsDestructive(_ input: JSONValue) -> Bool {
+        let action = (input["action"]?.stringValue ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !action.isEmpty else { return false }
+        let compactAction = Self.compacted(action)
+        return Self.destructiveKeywords.contains { keyword in
+            action.contains(keyword) || compactAction.contains(Self.compacted(keyword))
         }
     }
 

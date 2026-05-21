@@ -35,7 +35,10 @@ That product shape implies a few hard technical seams:
   errors before approval prompts, app actions, or memory writes.
 - `AutopilotMac` implements the real macOS `ComputerControl` driver with AX
   tree reads, AX actions, synthesized input, and screenshot fallback.
-- `AutopilotLLM` keeps provider calls behind `LLMProvider`.
+- `AutopilotLLM` keeps provider calls behind `LLMProvider`. Token usage carries
+  prompt-cache creation and read counts alongside fresh input, and the run's
+  cumulative input tally sums all three, so a cached Anthropic run is reported at
+  its true input cost instead of only its uncached remainder.
 - `AutopilotUI.AgentViewModel` bridges agent events and user interactions for
   both the temporary harness and the notch surface.
 - `AutopilotUI.NotchController` owns the notch panel lifecycle and keeps the
@@ -94,6 +97,11 @@ The current approval tiers are intentionally simple:
   permanently trusted.
 - `destructive`: sends, deletes, pays, overwrites, subscribes, signs out, or
   otherwise creates consequential effects; always ask.
+
+Destructive intent is read from the target element's label, value, and
+accessibility identifier; for `perform_secondary_action` the action name itself
+is also checked, so a context-menu "Delete" or `AXDelete` invoked on a plainly
+labeled row is still gated. Matching errs toward asking.
 
 The notch UI should surface approvals inline with the action summary, app name,
 risk tier, and target frame when available. Declined actions must return a tool

@@ -232,14 +232,20 @@ public actor AgentSession {
         )
     }
 
-    /// Add `usage` to the run total and surface the running tally.
+    /// Add `usage` to the run total and surface the running tally. The emitted
+    /// input figure includes prompt-cache tokens, so a cached run is not
+    /// under-counted once the system prompt and tools are served from cache.
     private func recordUsage(_ usage: LLMResponse.Usage) {
         cumulativeUsage = LLMResponse.Usage(
             inputTokens: cumulativeUsage.inputTokens + usage.inputTokens,
-            outputTokens: cumulativeUsage.outputTokens + usage.outputTokens
+            outputTokens: cumulativeUsage.outputTokens + usage.outputTokens,
+            cacheCreationInputTokens:
+                cumulativeUsage.cacheCreationInputTokens + usage.cacheCreationInputTokens,
+            cacheReadInputTokens:
+                cumulativeUsage.cacheReadInputTokens + usage.cacheReadInputTokens
         )
         emit(.tokenUsage(
-            inputTokens: cumulativeUsage.inputTokens,
+            inputTokens: cumulativeUsage.totalInputTokens,
             outputTokens: cumulativeUsage.outputTokens
         ))
     }

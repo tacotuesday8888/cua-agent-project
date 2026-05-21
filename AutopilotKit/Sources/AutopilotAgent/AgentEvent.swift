@@ -13,7 +13,9 @@ public enum AgentEvent: Sendable {
     case thinking
     /// The agent observed the UI tree (with its element count).
     case observedTree(elementCount: Int)
-    /// Cumulative provider token usage so far in the run.
+    /// Cumulative provider token usage so far in the run. `inputTokens`
+    /// includes any prompt-cache creation and read tokens, so a cached run is
+    /// reported at its true input cost rather than only its uncached remainder.
     case tokenUsage(inputTokens: Int, outputTokens: Int)
     /// The model produced a text message.
     case message(String)

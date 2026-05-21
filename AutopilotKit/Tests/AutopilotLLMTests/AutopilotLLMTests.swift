@@ -28,6 +28,23 @@ struct LLMResponseTests {
         )
         #expect(response.toolUses.isEmpty)
     }
+
+    @Test func totalInputTokensSumsCacheTokens() {
+        let usage = LLMResponse.Usage(
+            inputTokens: 10,
+            outputTokens: 4,
+            cacheCreationInputTokens: 100,
+            cacheReadInputTokens: 250
+        )
+        #expect(usage.totalInputTokens == 360)
+    }
+
+    @Test func totalInputTokensDefaultsToFreshInputWithoutCaching() {
+        let usage = LLMResponse.Usage(inputTokens: 12, outputTokens: 3)
+        #expect(usage.cacheCreationInputTokens == 0)
+        #expect(usage.cacheReadInputTokens == 0)
+        #expect(usage.totalInputTokens == 12)
+    }
 }
 
 struct LLMProviderDescriptorTests {
@@ -108,6 +125,43 @@ struct AnthropicProviderTests {
         #expect(response.toolUses.first?.name == "done")
         #expect(response.usage.inputTokens == 12)
         #expect(response.usage.outputTokens == 7)
+        // A response without cache fields decodes with zeroed cache usage.
+        #expect(response.usage.cacheCreationInputTokens == 0)
+        #expect(response.usage.cacheReadInputTokens == 0)
+        #expect(response.usage.totalInputTokens == 12)
+    }
+
+    @Test func decodesPromptCacheUsage() async throws {
+        let canned = """
+        {
+          "id": "msg_2",
+          "type": "message",
+          "role": "assistant",
+          "content": [{"type": "text", "text": "Hi"}],
+          "stop_reason": "end_turn",
+          "usage": {
+            "input_tokens": 8,
+            "output_tokens": 5,
+            "cache_creation_input_tokens": 200,
+            "cache_read_input_tokens": 1500
+          }
+        }
+        """
+        StubURLProtocol.responder = { request in
+            let http = HTTPURLResponse(url: request.url!, statusCode: 200,
+                                       httpVersion: nil, headerFields: nil)!
+            return (http, Data(canned.utf8))
+        }
+        defer { StubURLProtocol.responder = nil }
+
+        let response = try await makeProvider().send(
+            LLMRequest(model: "claude-test", system: "sys", messages: [.user("hello")])
+        )
+        #expect(response.usage.inputTokens == 8)
+        #expect(response.usage.cacheCreationInputTokens == 200)
+        #expect(response.usage.cacheReadInputTokens == 1500)
+        // The billed input is the fresh tokens plus both cache figures.
+        #expect(response.usage.totalInputTokens == 1708)
     }
 
     @Test func surfacesHTTPErrors() async {
