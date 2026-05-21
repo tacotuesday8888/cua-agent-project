@@ -43,11 +43,11 @@ public actor MacComputer: ComputerControl {
     private let pid: pid_t
     private let bundleIdentifier: String?
     private let reader: AccessibilityTreeReader
-    private let actuator: AccessibilityActuator
     private let environment: MacComputerEnvironment
+    /// Actuation seam: resolves element ids and drives AX / synthesized input.
+    /// `LiveMacActuator` in production; a recording mock in tests.
+    private let mac: any MacActuating
 
-    /// Live AX elements from the most recent `captureTree`, keyed by element id.
-    private var latestElements: [String: AXUIElement] = [:]
     /// Sendable metadata from the most recent capture.
     private var latestSnapshot: UITreeSnapshot?
     /// Monotonic snapshot counter used to detect stale model context.
@@ -65,8 +65,25 @@ public actor MacComputer: ComputerControl {
         self.appName = appName
         self.bundleIdentifier = bundleIdentifier
         self.reader = reader
-        self.actuator = actuator
         self.environment = environment
+        self.mac = LiveMacActuator(actuator: actuator, pid: pid, appName: appName)
+    }
+
+    /// Test seam: inject an actuation double in place of the live AX layer.
+    init(
+        pid: pid_t,
+        appName: String,
+        bundleIdentifier: String? = nil,
+        reader: AccessibilityTreeReader = AccessibilityTreeReader(),
+        environment: MacComputerEnvironment = .live,
+        mac: any MacActuating
+    ) {
+        self.pid = pid
+        self.appName = appName
+        self.bundleIdentifier = bundleIdentifier
+        self.reader = reader
+        self.environment = environment
+        self.mac = mac
     }
 
     public func captureTree() async throws -> UITreeSnapshot {
@@ -78,7 +95,7 @@ public actor MacComputer: ComputerControl {
             bundleIdentifier: bundleIdentifier,
             turnIdentifier: turnIdentifier
         )
-        latestElements = scan.elements
+        mac.updateElements(scan.elements, turnIdentifier: scan.snapshot.turnIdentifier)
         latestSnapshot = scan.snapshot
         return scan.snapshot
     }
@@ -154,19 +171,23 @@ public actor MacComputer: ComputerControl {
     }
 
     public func click(elementID: String) async throws {
-        let element = try element(for: elementID)
         do {
-            try actuator.press(element)
-        } catch let pressError {
+            try mac.press(elementID: elementID)
+        } catch let pressError as AccessibilityActuator.ActuationError {
             // Many real controls — icon-only buttons, Electron, and web views —
             // advertise no working AX press action, so press throws. Fall back
             // to a synthesized click at the element's center (the same target
             // that already passed the risk gate), mirroring the focus → click
             // fallback used for typing. If the fallback also fails, surface the
             // original press error, which names the underlying AX failure.
+            //
+            // Only an actuation failure triggers the fallback. A resolution
+            // failure (no cached state / invalid element) is a
+            // `ComputerControlError` and propagates unchanged — matching the
+            // previous order, where the element was resolved before the press.
             guard let point = try? center(of: elementID) else { throw pressError }
             do {
-                try actuator.click(at: point, pid: pid)
+                try mac.click(at: point)
             } catch {
                 throw pressError
             }
@@ -174,23 +195,25 @@ public actor MacComputer: ComputerControl {
     }
 
     public func setValue(elementID: String, value: String) async throws {
-        try actuator.setValue(element(for: elementID), to: value)
+        try mac.setValue(elementID: elementID, to: value)
     }
 
     public func typeText(_ text: String) async throws {
-        try actuator.typeText(text, pid: pid)
+        try mac.typeText(text)
     }
 
     public func typeText(_ text: String, into elementID: String?) async throws {
         if let elementID {
-            let element = try element(for: elementID)
             do {
-                try actuator.focus(element)
-            } catch {
-                try actuator.click(at: center(of: elementID), pid: pid)
+                try mac.focus(elementID: elementID)
+            } catch is AccessibilityActuator.ActuationError {
+                // The focus action is unsupported on this element; click it to
+                // focus instead. A resolution error is not an ActuationError, so
+                // it propagates rather than triggering this fallback.
+                try mac.click(at: center(of: elementID))
             }
         }
-        try actuator.typeText(text, pid: pid)
+        try mac.typeText(text)
     }
 
     public func scroll(
@@ -199,21 +222,21 @@ public actor MacComputer: ComputerControl {
         amount: Int
     ) async throws {
         let point = try elementID.map { try center(of: $0) }
-        try actuator.scroll(direction: direction, amount: amount, at: point, pid: pid)
+        try mac.scroll(direction: direction, amount: amount, at: point)
     }
 
     public func pressKey(_ key: KeyPress) async throws {
-        try actuator.pressKey(key, pid: pid)
+        try mac.pressKey(key)
     }
 
     public func drag(fromElementID: String, toElementID: String) async throws {
         let start = try center(of: fromElementID)
         let end = try center(of: toElementID)
-        try actuator.drag(from: start, to: end, pid: pid)
+        try mac.drag(from: start, to: end)
     }
 
     public func performSecondaryAction(elementID: String, action: String) async throws {
-        try actuator.perform(action: action, on: element(for: elementID))
+        try mac.perform(action: action, elementID: elementID)
     }
 
     public func captureScreenshot() async throws -> Data {
@@ -233,38 +256,6 @@ public actor MacComputer: ComputerControl {
         return try await capture(window: window)
     }
 
-    /// Resolve an element id from the most recent capture to a live AX element.
-    private func element(for id: String) throws -> AXUIElement {
-        guard !latestElements.isEmpty else {
-            throw ComputerControlError.noCachedState(appName: appName)
-        }
-        guard let element = latestElements[id] else {
-            throw ComputerControlError.invalidElement(
-                elementID: id,
-                appName: appName,
-                turnIdentifier: latestSnapshot?.turnIdentifier
-            )
-        }
-        try validateLiveElement(element, id: id)
-        return element
-    }
-
-    private func validateLiveElement(_ element: AXUIElement, id: String) throws {
-        var raw: CFTypeRef?
-        let status = AXUIElementCopyAttributeValue(
-            element,
-            kAXRoleAttribute as CFString,
-            &raw
-        )
-        guard status == .success else {
-            throw ComputerControlError.invalidElement(
-                elementID: id,
-                appName: appName,
-                turnIdentifier: latestSnapshot?.turnIdentifier
-            )
-        }
-    }
-
     private func center(of id: String) throws -> CGPoint {
         guard latestSnapshot != nil else {
             throw ComputerControlError.noCachedState(appName: appName)
@@ -278,6 +269,15 @@ public actor MacComputer: ComputerControl {
         }
         return element.frame.center
     }
+
+#if DEBUG
+    /// Test seam: load a snapshot and optional live elements without the reader
+    /// or TCC, so action-path tests can exercise `center(of:)` and the seam.
+    func loadForTesting(snapshot: UITreeSnapshot, elements: [String: AXUIElement] = [:]) {
+        latestSnapshot = snapshot
+        mac.updateElements(elements, turnIdentifier: snapshot.turnIdentifier)
+    }
+#endif
 
     private static func capture(window: SCWindow) async throws -> Data {
         let filter = SCContentFilter(desktopIndependentWindow: window)
