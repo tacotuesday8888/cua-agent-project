@@ -12,7 +12,11 @@ import Foundation
 /// orchestration (the fallbacks and turn bookkeeping) stays unit-testable.
 /// Element resolution (`element(for:)` / `validateLiveElement`) is moved here
 /// verbatim from `MacComputer`, so the recovery errors it raises are unchanged.
-final class LiveMacActuator: MacActuating {
+///
+/// `@unchecked Sendable`: its mutable element map is only ever read or written
+/// from inside the `MacComputer` actor's isolation domain (via `captureTree`,
+/// `loadForTesting`, and the actor's action methods), so access is serialized.
+final class LiveMacActuator: MacActuating, @unchecked Sendable {
     private let actuator: AccessibilityActuator
     private let pid: pid_t
     private let appName: String

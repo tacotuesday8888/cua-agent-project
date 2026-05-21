@@ -271,11 +271,13 @@ public actor MacComputer: ComputerControl {
     }
 
 #if DEBUG
-    /// Test seam: load a snapshot and optional live elements without the reader
-    /// or TCC, so action-path tests can exercise `center(of:)` and the seam.
-    func loadForTesting(snapshot: UITreeSnapshot, elements: [String: AXUIElement] = [:]) {
+    /// Test seam: load a snapshot without the reader or TCC, so action-path
+    /// tests can exercise `center(of:)` and the seam. The element map stays
+    /// empty (tests cannot synthesize live `AXUIElement`s); the empty dict is
+    /// built inside the actor so no non-`Sendable` value crosses isolation.
+    func loadForTesting(snapshot: UITreeSnapshot) {
         latestSnapshot = snapshot
-        mac.updateElements(elements, turnIdentifier: snapshot.turnIdentifier)
+        mac.updateElements([:], turnIdentifier: snapshot.turnIdentifier)
     }
 #endif
 

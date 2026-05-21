@@ -217,10 +217,7 @@ struct MacComputerActionTests {
         // plus the snapshot's turn id, so stale-context errors stay consistent.
         let mock = MockActuator()
         let computer = MacComputer(pid: 1, appName: "App", mac: mock)
-        await computer.loadForTesting(
-            snapshot: snapshot([("e1", .zero)], turn: 7),
-            elements: [:]
-        )
+        await computer.loadForTesting(snapshot: snapshot([("e1", .zero)], turn: 7))
         #expect(mock.lastTurnIdentifier == 7)
     }
 }

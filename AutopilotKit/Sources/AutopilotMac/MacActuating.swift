@@ -11,10 +11,11 @@ import Foundation
 /// Accessibility permissions or a running app. `LiveMacActuator` is the
 /// production conformer; tests use a recording mock.
 ///
-/// Class-bound and intentionally **not** `Sendable`: the live conformer stores
-/// non-`Sendable` `AXUIElement` references and is only ever touched from inside
-/// the `MacComputer` actor's isolation domain.
-protocol MacActuating: AnyObject {
+/// `Sendable` so the seam can be injected into the `MacComputer` actor and held
+/// by a test across the actor's `await` boundary. Conformers' mutable AX state is
+/// only ever touched inside the `MacComputer` actor's isolation (or under a lock
+/// in the test mock), so they are `@unchecked Sendable`.
+protocol MacActuating: AnyObject, Sendable {
     /// Replace the live element map and current turn after a capture.
     func updateElements(_ elements: [String: AXUIElement], turnIdentifier: Int?)
 
