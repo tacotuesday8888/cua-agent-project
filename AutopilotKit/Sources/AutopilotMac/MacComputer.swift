@@ -196,6 +196,20 @@ public actor MacComputer: ComputerControl {
 
     public func setValue(elementID: String, value: String) async throws {
         try mac.setValue(elementID: elementID, to: value)
+        guard (try? mac.value(elementID: elementID)) != value else { return }
+
+        // Some web fields accept AXValue writes without updating the page's
+        // DOM value. The direct write succeeded, so this keyboard replacement
+        // is best-effort: it fixes real browser inputs when possible without
+        // turning a successful AX write into an action failure for controls
+        // that cannot be focused.
+        do {
+            try focusOrClick(elementID: elementID)
+            try mac.pressKey(KeyPress(key: "a", modifiers: [.command]))
+            try mac.typeText(value)
+        } catch {
+            return
+        }
     }
 
     public func typeText(_ text: String) async throws {
@@ -204,14 +218,7 @@ public actor MacComputer: ComputerControl {
 
     public func typeText(_ text: String, into elementID: String?) async throws {
         if let elementID {
-            do {
-                try mac.focus(elementID: elementID)
-            } catch is AccessibilityActuator.ActuationError {
-                // The focus action is unsupported on this element; click it to
-                // focus instead. A resolution error is not an ActuationError, so
-                // it propagates rather than triggering this fallback.
-                try mac.click(at: center(of: elementID))
-            }
+            try focusOrClick(elementID: elementID)
         }
         try mac.typeText(text)
     }
@@ -268,6 +275,17 @@ public actor MacComputer: ComputerControl {
             )
         }
         return element.frame.center
+    }
+
+    private func focusOrClick(elementID: String) throws {
+        do {
+            try mac.focus(elementID: elementID)
+        } catch is AccessibilityActuator.ActuationError {
+            // The focus action is unsupported on this element; click it to
+            // focus instead. A resolution error is not an ActuationError, so
+            // it propagates rather than triggering this fallback.
+            try mac.click(at: center(of: elementID))
+        }
     }
 
 #if DEBUG

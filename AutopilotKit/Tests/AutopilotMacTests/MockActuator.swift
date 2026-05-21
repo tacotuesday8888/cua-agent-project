@@ -23,6 +23,7 @@ final class MockActuator: MacActuating, @unchecked Sendable {
     var clickError: Error?
     var setValueError: Error?
     var performError: Error?
+    var values: [String: String] = [:]
     /// A resolution failure (`ComputerControlError`) raised by element-keyed ops
     /// before the AX action, to drive resolution-error tests.
     var resolutionError: Error?
@@ -74,6 +75,12 @@ final class MockActuator: MacActuating, @unchecked Sendable {
         if let setValueError { throw setValueError }
     }
 
+    func value(elementID: String) throws -> String? {
+        record("value:\(elementID)")
+        if let resolutionError { throw resolutionError }
+        return values[elementID]
+    }
+
     func perform(action: String, elementID: String) throws {
         record("perform:\(elementID):\(action)")
         if let resolutionError { throw resolutionError }
@@ -90,7 +97,9 @@ final class MockActuator: MacActuating, @unchecked Sendable {
     }
 
     func pressKey(_ key: KeyPress) throws {
-        record("key:\(key.key)")
+        let prefix = key.modifiers.map(\.rawValue).joined(separator: "+")
+        let name = prefix.isEmpty ? key.key : "\(prefix)+\(key.key)"
+        record("key:\(name)")
     }
 
     func scroll(direction: ScrollDirection, amount: Int, at point: CGPoint?) throws {

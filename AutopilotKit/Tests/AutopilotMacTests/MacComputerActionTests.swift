@@ -131,23 +131,66 @@ struct MacComputerActionTests {
 
     // MARK: - straight delegation
 
-    @Test func setValueDelegatesAndPropagatesErrors() async throws {
+    @Test func setValueSkipsTypingFallbackWhenAXValueSticks() async throws {
         let mock = MockActuator()
+        mock.values["e1"] = "x"
         let computer = MacComputer(pid: 1, appName: "App", mac: mock)
         try await computer.setValue(elementID: "e1", value: "x")
-        #expect(mock.calls == ["setValue:e1=x"])
+        #expect(mock.calls == ["setValue:e1=x", "value:e1"])
+    }
 
+    @Test func setValueFallsBackToKeyboardReplacementWhenAXValueDoesNotStick() async throws {
+        let mock = MockActuator()
+        let computer = MacComputer(pid: 1, appName: "App", mac: mock)
+        await computer.loadForTesting(
+            snapshot: snapshot([("e1", ElementFrame(x: 10, y: 20, width: 100, height: 40))])
+        )
+
+        try await computer.setValue(elementID: "e1", value: "x")
+
+        #expect(mock.calls == [
+            "setValue:e1=x",
+            "value:e1",
+            "focus:e1",
+            "key:command+a",
+            "typeText:x"
+        ])
+    }
+
+    @Test func setValueTypingFallbackUsesClickWhenFocusFails() async throws {
+        let mock = MockActuator()
+        mock.focusError = actuationError("no focus")
+        let computer = MacComputer(pid: 1, appName: "App", mac: mock)
+        await computer.loadForTesting(
+            snapshot: snapshot([("e1", ElementFrame(x: 10, y: 20, width: 100, height: 40))])
+        )
+
+        try await computer.setValue(elementID: "e1", value: "x")
+
+        #expect(mock.calls == [
+            "setValue:e1=x",
+            "value:e1",
+            "focus:e1",
+            "click:60,40",
+            "key:command+a",
+            "typeText:x"
+        ])
+    }
+
+    @Test func setValuePropagatesDirectAXErrors() async {
         let failing = MockActuator()
         failing.setValueError = AccessibilityActuator.ActuationError.attributeNotSettable("AXValue")
-        let computer2 = MacComputer(pid: 1, appName: "App", mac: failing)
+        let computer = MacComputer(pid: 1, appName: "App", mac: failing)
+
         do {
-            try await computer2.setValue(elementID: "e1", value: "x")
+            try await computer.setValue(elementID: "e1", value: "x")
             Issue.record("expected setValue to throw")
         } catch is AccessibilityActuator.ActuationError {
             // expected
         } catch {
             Issue.record("unexpected error type: \(error)")
         }
+        #expect(failing.calls == ["setValue:e1=x"])
     }
 
     @Test func scrollWithElementComputesCenter() async throws {

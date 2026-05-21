@@ -4,6 +4,7 @@ set -euo pipefail
 INCLUDE_SCREENSHOT=false
 LIVE_PROVIDER=""
 LIVE_ARGS=()
+LIVE_ARGS_COUNT=0
 
 usage() {
   cat >&2 <<'USAGE'
@@ -36,6 +37,7 @@ while [ "$#" -gt 0 ]; do
         exit 2
       fi
       LIVE_ARGS+=("$flag" "$1")
+      LIVE_ARGS_COUNT=$((LIVE_ARGS_COUNT + 2))
       ;;
     *)
       usage
@@ -105,8 +107,14 @@ if [ "$INCLUDE_SCREENSHOT" = true ]; then
 fi
 
 if [ -n "$LIVE_PROVIDER" ]; then
-  swift run --package-path "$PACKAGE_PATH" AutopilotSmokeCLI \
-    --app AutopilotFixtureApp \
-    --live-provider "$LIVE_PROVIDER" \
-    "${LIVE_ARGS[@]}"
+  if [ "$LIVE_ARGS_COUNT" -gt 0 ]; then
+    swift run --package-path "$PACKAGE_PATH" AutopilotSmokeCLI \
+      --app AutopilotFixtureApp \
+      --live-provider "$LIVE_PROVIDER" \
+      "${LIVE_ARGS[@]}"
+  else
+    swift run --package-path "$PACKAGE_PATH" AutopilotSmokeCLI \
+      --app AutopilotFixtureApp \
+      --live-provider "$LIVE_PROVIDER"
+  fi
 fi

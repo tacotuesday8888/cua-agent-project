@@ -48,6 +48,18 @@ final class LiveMacActuator: MacActuating, @unchecked Sendable {
         try actuator.setValue(element(for: elementID), to: value)
     }
 
+    func value(elementID: String) throws -> String? {
+        let element = try element(for: elementID)
+        var raw: CFTypeRef?
+        let status = AXUIElementCopyAttributeValue(
+            element,
+            kAXValueAttribute as CFString,
+            &raw
+        )
+        guard status == .success else { return nil }
+        return raw as? String
+    }
+
     func perform(action: String, elementID: String) throws {
         try actuator.perform(action: action, on: element(for: elementID))
     }

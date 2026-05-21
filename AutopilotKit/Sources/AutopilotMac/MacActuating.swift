@@ -25,6 +25,8 @@ protocol MacActuating: AnyObject, Sendable {
     func focus(elementID: String) throws
     /// Replace the text value of the element with the given id.
     func setValue(elementID: String, to value: String) throws
+    /// Read the text value currently exposed by the element with the given id.
+    func value(elementID: String) throws -> String?
     /// Perform a specific advertised AX action on the element with the given id.
     func perform(action: String, elementID: String) throws
 
