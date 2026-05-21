@@ -328,7 +328,10 @@ private struct WireResponseFunctionCall: Decodable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         name = try container.decode(String.self, forKey: .name)
-        arguments = try container.decode(FlexibleArguments.self, forKey: .arguments).value
+        // A tool call may omit `arguments` (or send null) for a no-argument
+        // call; treat that as empty input rather than failing the response.
+        arguments = try container.decodeIfPresent(FlexibleArguments.self, forKey: .arguments)?
+            .value ?? .object([:])
     }
 }
 
@@ -341,9 +344,15 @@ private struct FlexibleArguments: Decodable {
             let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty {
                 value = .object([:])
+            } else if let parsed = try? JSONDecoder().decode(JSONValue.self, from: Data(trimmed.utf8)) {
+                value = parsed
             } else {
-                let data = Data(trimmed.utf8)
-                value = try JSONDecoder().decode(JSONValue.self, from: data)
+                // A model can emit malformed JSON in a tool call's arguments.
+                // Coerce it to empty input instead of failing the whole
+                // response: the agent's tool-input validation then returns a
+                // recoverable error and the model can retry, rather than the
+                // run dying on one bad call.
+                value = .object([:])
             }
         } else {
             value = try container.decode(JSONValue.self)

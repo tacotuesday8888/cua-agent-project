@@ -404,6 +404,76 @@ struct ZAIProviderTests {
         #expect(response.usage.outputTokens == 7)
     }
 
+    @Test func malformedToolArgumentsDecodeAsEmptyInput() async throws {
+        // A smaller model can emit broken JSON in a tool call's arguments. The
+        // call must still decode (with empty input) so the agent can return a
+        // recoverable tool error, instead of the whole run dying on decode.
+        let canned = """
+        {
+          "choices": [{
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": { "name": "click", "arguments": "{ not valid json" }
+              }]
+            },
+            "finish_reason": "tool_calls"
+          }],
+          "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 }
+        }
+        """
+        ZAIStubURLProtocol.responder = { request in
+            let http = HTTPURLResponse(url: request.url!, statusCode: 200,
+                                       httpVersion: nil, headerFields: nil)!
+            return (http, Data(canned.utf8))
+        }
+        defer { ZAIStubURLProtocol.responder = nil }
+
+        let response = try await makeProvider().send(
+            LLMRequest(model: "glm-4.7-flash", messages: [.user("x")])
+        )
+        #expect(response.toolUses.count == 1)
+        #expect(response.toolUses.first?.name == "click")
+        #expect(response.toolUses.first?.input.objectValue?.isEmpty == true)
+    }
+
+    @Test func missingToolArgumentsDecodeAsEmptyInput() async throws {
+        // Some models omit `arguments` entirely for a no-argument tool call.
+        let canned = """
+        {
+          "choices": [{
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": { "name": "list_apps" }
+              }]
+            },
+            "finish_reason": "tool_calls"
+          }],
+          "usage": { "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2 }
+        }
+        """
+        ZAIStubURLProtocol.responder = { request in
+            let http = HTTPURLResponse(url: request.url!, statusCode: 200,
+                                       httpVersion: nil, headerFields: nil)!
+            return (http, Data(canned.utf8))
+        }
+        defer { ZAIStubURLProtocol.responder = nil }
+
+        let response = try await makeProvider().send(
+            LLMRequest(model: "glm-4.7-flash", messages: [.user("x")])
+        )
+        #expect(response.toolUses.count == 1)
+        #expect(response.toolUses.first?.name == "list_apps")
+        #expect(response.toolUses.first?.input.objectValue?.isEmpty == true)
+    }
+
     @Test func encodesOpenAIStyleToolMessages() async throws {
         let canned = """
         {
