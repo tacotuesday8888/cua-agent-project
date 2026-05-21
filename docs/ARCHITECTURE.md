@@ -30,7 +30,9 @@ That product shape implies a few hard technical seams:
   prunes older ones, so a long run's token cost stays bounded.
 - Tool input validation normalizes element references before safety checks,
   loop detection, and execution, so equivalent references like `2`, `"2"`, and
-  `"e2"` target the same captured UI element.
+  `"e2"` target the same captured UI element. Malformed element ids, fractional
+  scroll amounts, and invalid memory scopes are returned as recoverable tool
+  errors before approval prompts, app actions, or memory writes.
 - `AutopilotMac` implements the real macOS `ComputerControl` driver with AX
   tree reads, AX actions, synthesized input, and screenshot fallback.
 - `AutopilotLLM` keeps provider calls behind `LLMProvider`.

@@ -549,7 +549,7 @@ struct AgentSessionTests {
 
     @Test func malformedElementReferenceDoesNotAskForApprovalOrAct() async {
         let llm = ScriptedLLMProvider([
-            toolResponse(id: "t1", tool: "click", input: ["element_index": "button"]),
+            toolResponse(id: "t1", tool: "click", input: ["element_id": "e-button"]),
             toolResponse(id: "t2", tool: "done", input: ["summary": "Stopped."])
         ])
         let computer = musicComputer()
@@ -569,7 +569,30 @@ struct AgentSessionTests {
         let requests = await llm.requests
         let recoveryText = requests.dropFirst().first.map { allText(in: $0) } ?? ""
         #expect(recoveryText.contains("Invalid input for click"))
-        #expect(recoveryText.contains("element_index must be an integer or element id like e12"))
+        #expect(recoveryText.contains("element_id must be an integer or element id like e12"))
+    }
+
+    @Test func fractionalScrollAmountDoesNotAct() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "t1", tool: "scroll", input: ["direction": "down", "amount": 1.5]),
+            toolResponse(id: "t2", tool: "done", input: ["summary": "Stopped."])
+        ])
+        let computer = musicComputer()
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory()
+        )
+
+        _ = await session.run(task: "scroll")
+        #expect(await computer.performedActions.isEmpty)
+
+        let requests = await llm.requests
+        let recoveryText = requests.dropFirst().first.map { allText(in: $0) } ?? ""
+        #expect(recoveryText.contains("Invalid input for scroll"))
+        #expect(recoveryText.contains("amount must be an integer from 1 to 20"))
     }
 
     @Test func invalidKeyModifierIsReturnedAsToolErrorBeforeApproval() async {

@@ -106,7 +106,7 @@ struct MemoryAgentTests {
         #expect(stored.first?.source == .proposed)
     }
 
-    @Test func contactMemoryWithoutContactNameFallsBackToGlobal() async {
+    @Test func contactMemoryWithoutContactNameReturnsToolError() async {
         let memory = makeTestMemory()
         let llm = ScriptedLLMProvider([
             toolResponse(
@@ -126,8 +126,40 @@ struct MemoryAgentTests {
 
         _ = await session.run(task: "play something")
 
-        let stored = await memory.all()
-        #expect(stored.first?.scope == .global)
+        #expect(await memory.all().isEmpty)
+
+        let requests = await llm.requests
+        let recoveryText = requests.dropFirst().first.map { allText(in: $0) } ?? ""
+        #expect(recoveryText.contains("Invalid input for propose_memory"))
+        #expect(recoveryText.contains("scope_value is required when scope is contact"))
+    }
+
+    @Test func invalidMemoryScopeReturnsToolError() async {
+        let memory = makeTestMemory()
+        let llm = ScriptedLLMProvider([
+            toolResponse(
+                id: "t1",
+                tool: "propose_memory",
+                input: ["text": "prefers concise replies", "scope": "workspace"]
+            ),
+            toolResponse(id: "t2", tool: "done", input: ["summary": "Done."])
+        ])
+        let session = AgentSession(
+            llm: llm,
+            computer: musicComputer(),
+            interaction: AcceptingMemoryInteraction(),
+            configuration: config(),
+            memory: memory
+        )
+
+        _ = await session.run(task: "play something")
+
+        #expect(await memory.all().isEmpty)
+
+        let requests = await llm.requests
+        let recoveryText = requests.dropFirst().first.map { allText(in: $0) } ?? ""
+        #expect(recoveryText.contains("Invalid input for propose_memory"))
+        #expect(recoveryText.contains("scope must be global, app, or contact"))
     }
 
     @Test func declinedProposeMemoryIsNotStored() async {
@@ -185,5 +217,24 @@ struct MemoryAgentTests {
             if case .memoryStored = $0 { return true }
             return false
         })
+    }
+
+    private func allText(in request: LLMRequest) -> String {
+        request.messages.flatMap { message in
+            message.content.flatMap { block -> [String] in
+                switch block {
+                case .text(let text):
+                    return [text]
+                case .toolResult(let result):
+                    return result.content.compactMap { content in
+                        if case .text(let text) = content { return text }
+                        return nil
+                    }
+                case .toolUse, .image:
+                    return []
+                }
+            }
+        }
+        .joined(separator: "\n")
     }
 }

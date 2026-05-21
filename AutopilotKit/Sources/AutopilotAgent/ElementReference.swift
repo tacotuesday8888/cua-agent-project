@@ -66,8 +66,8 @@ enum ElementReference {
         if let index = Int(trimmed) {
             return try normalizedIndex(index, key: key, toolName: toolName)
         }
-        if trimmed.hasPrefix("e") {
-            return trimmed
+        if trimmed.hasPrefix("e"), let index = Int(trimmed.dropFirst()) {
+            return try normalizedIndex(index, key: key, toolName: toolName)
         }
         throw invalid(
             key: key,

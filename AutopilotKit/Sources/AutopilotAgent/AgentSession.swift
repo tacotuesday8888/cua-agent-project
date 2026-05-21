@@ -455,22 +455,18 @@ public actor AgentSession {
         _ use: ToolUse,
         into results: inout [LLMContentBlock]
     ) async {
-        let text = (use.input["text"]?.stringValue ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else {
-            results.append(.toolResult(ToolResult(
-                toolUseID: use.id,
-                text: "propose_memory needs non-empty text.",
-                isError: true
-            )))
+        let proposal: MemoryProposal
+        do {
+            proposal = try memoryProposal(from: use.input)
+        } catch {
+            appendToolInputError(error, toolUseID: use.id, into: &results)
             return
         }
 
-        let proposal = MemoryProposal(text: text, scope: memoryScope(from: use.input))
         emit(.memoryProposed(proposal))
 
         if await interaction.confirmMemory(proposal) {
-            let item = MemoryItem(text: text, scope: proposal.scope, source: .proposed)
+            let item = MemoryItem(text: proposal.text, scope: proposal.scope, source: .proposed)
             switch await memory.addReporting(item) {
             case .stored:
                 emit(.memoryStored(item))
@@ -499,18 +495,46 @@ public actor AgentSession {
         }
     }
 
-    /// Resolve the `scope` / `scope_value` inputs of a `propose_memory` call.
-    private func memoryScope(from input: JSONValue) -> MemoryScope {
-        switch input["scope"]?.stringValue {
+    /// Validate and resolve the input of a `propose_memory` call.
+    private func memoryProposal(from input: JSONValue) throws -> MemoryProposal {
+        let text = (input["text"]?.stringValue ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            throw AgentError.invalidToolInput(
+                tool: AgentTool.proposeMemory.rawValue,
+                detail: "text must be a non-empty string"
+            )
+        }
+
+        let rawScope = (input["scope"]?.stringValue ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let scope: MemoryScope
+        switch rawScope {
+        case "global":
+            scope = .global
         case "app":
-            return .app(input["scope_value"]?.stringValue ?? computer.appName)
+            let app = (input["scope_value"]?.stringValue ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            scope = .app(app.isEmpty ? computer.appName : app)
         case "contact":
             let contact = (input["scope_value"]?.stringValue ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            return contact.isEmpty ? .global : .contact(contact)
+            guard !contact.isEmpty else {
+                throw AgentError.invalidToolInput(
+                    tool: AgentTool.proposeMemory.rawValue,
+                    detail: "scope_value is required when scope is contact"
+                )
+            }
+            scope = .contact(contact)
         default:
-            return .global
+            throw AgentError.invalidToolInput(
+                tool: AgentTool.proposeMemory.rawValue,
+                detail: "scope must be global, app, or contact"
+            )
         }
+
+        return MemoryProposal(text: text, scope: scope)
     }
 
     private func performAction(
@@ -889,7 +913,7 @@ public actor AgentSession {
 
     private func scrollAmount(_ input: JSONValue, tool: AgentTool) throws -> Int {
         guard let raw = input["amount"] else { return Self.defaultScrollAmount }
-        guard let amount = raw.intValue else {
+        guard let amount = integerValue(raw) else {
             throw AgentError.invalidToolInput(
                 tool: tool.rawValue,
                 detail: "amount must be an integer from 1 to \(Self.maxScrollAmount)"
@@ -902,6 +926,17 @@ public actor AgentSession {
             )
         }
         return amount
+    }
+
+    private func integerValue(_ raw: JSONValue) -> Int? {
+        switch raw {
+        case .int(let value):
+            return value
+        case .double(let value):
+            return Int(exactly: value)
+        default:
+            return nil
+        }
     }
 
     private func keyModifiers(
