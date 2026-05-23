@@ -361,6 +361,7 @@ public actor AgentSession {
         default:
             do {
                 try validateInput(tool: tool, input: use.input)
+                try preflightAction(tool: tool, input: use.input)
             } catch {
                 appendToolInputError(error, toolUseID: use.id, into: &results)
                 return nil
@@ -889,6 +890,85 @@ public actor AgentSession {
         case .askUser, .proposeMemory, .done:
             return
         }
+    }
+
+    /// Validate references against the latest app state before approvals or
+    /// highlights. This keeps stale but well-formed element ids from producing
+    /// approval prompts for actions that cannot possibly run.
+    private func preflightAction(tool: AgentTool, input: JSONValue) throws {
+        switch tool {
+        case .click:
+            _ = try requireExistingElement(input, key: "element_index", tool: tool)
+        case .setValue:
+            let element = try requireExistingElement(input, key: "element_index", tool: tool)
+            guard element.isValueSettable else {
+                throw AgentError.invalidToolInput(
+                    tool: tool.rawValue,
+                    detail: """
+                    \(element.id) is not marked settable. Use type_text with \
+                    this element_index, or choose an editable element marked settable
+                    """
+                )
+            }
+        case .typeText:
+            _ = try optionalExistingElement(input, key: "element_index", tool: tool)
+        case .scroll:
+            _ = try optionalExistingElement(input, key: "element_index", tool: tool)
+        case .drag:
+            _ = try requireExistingElement(input, key: "from_element_index", tool: tool)
+            _ = try requireExistingElement(input, key: "to_element_index", tool: tool)
+        case .performSecondaryAction:
+            let element = try requireExistingElement(input, key: "element_index", tool: tool)
+            let action = try requireString(input, "action", tool: tool)
+            guard element.actions.contains(action) else {
+                throw ComputerControlError.unavailableAction(
+                    elementID: element.id,
+                    action: action
+                )
+            }
+        case .listApps, .getAppState, .pressKey, .askUser, .proposeMemory, .done:
+            return
+        }
+    }
+
+    private func requireExistingElement(
+        _ input: JSONValue,
+        key: String,
+        tool: AgentTool
+    ) throws -> UIElement {
+        let id = try requireElementID(input, key: key, tool: tool)
+        guard let snapshot = latestSnapshot else {
+            throw ComputerControlError.noCachedState(appName: computer.appName)
+        }
+        guard let element = snapshot.element(id: id) else {
+            throw ComputerControlError.invalidElement(
+                elementID: id,
+                appName: computer.appName,
+                turnIdentifier: snapshot.turnIdentifier
+            )
+        }
+        return element
+    }
+
+    private func optionalExistingElement(
+        _ input: JSONValue,
+        key: String,
+        tool: AgentTool
+    ) throws -> UIElement? {
+        guard let id = try optionalElementID(input, primaryKey: key, tool: tool) else {
+            return nil
+        }
+        guard let snapshot = latestSnapshot else {
+            throw ComputerControlError.noCachedState(appName: computer.appName)
+        }
+        guard let element = snapshot.element(id: id) else {
+            throw ComputerControlError.invalidElement(
+                elementID: id,
+                appName: computer.appName,
+                turnIdentifier: snapshot.turnIdentifier
+            )
+        }
+        return element
     }
 
     private func requireString(

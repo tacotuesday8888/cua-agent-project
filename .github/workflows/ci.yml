@@ -20,5 +20,5 @@ jobs:
       - name: Swift package tests
         run: swift test --package-path AutopilotKit
 
-      - name: macOS app build
-        run: xcodebuild -project MacAutopilot.xcodeproj -scheme MacAutopilot -destination 'platform=macOS' -derivedDataPath .build/xcode build
+      - name: macOS app tests
+        run: xcodebuild test -project MacAutopilot.xcodeproj -scheme MacAutopilot -destination 'platform=macOS' -derivedDataPath .build/xcode
