@@ -283,7 +283,13 @@ struct ToolCatalogTests {
 
 struct AgentSessionTests {
     private func musicComputer() -> MockComputer {
-        let field = UIElement(id: "e2", role: "AXTextField", label: "Search", value: "")
+        let field = UIElement(
+            id: "e2",
+            role: "AXTextField",
+            label: "Search",
+            value: "",
+            isValueSettable: true
+        )
         let button = UIElement(id: "e3", role: "AXButton", label: "Play", actions: ["AXShowMenu"])
         let root = UIElement(id: "e1", role: "AXWindow", label: "Music",
                              children: [field, button])
@@ -465,21 +471,26 @@ struct AgentSessionTests {
         #expect(secondRequestText.contains("accessibility tree above is still current"))
     }
 
-    @Test func invalidElementReturnsRecoveryInstruction() async {
+    @Test func missingElementReturnsToolErrorBeforeApprovalOrAction() async {
         let llm = ScriptedLLMProvider([
             toolResponse(id: "t1", tool: "click", input: ["element_index": 99]),
             toolResponse(id: "t2", tool: "done", input: ["summary": "Stopped."])
         ])
         let computer = musicComputer()
+        let interaction = CountingInteraction()
         let session = AgentSession(
             llm: llm,
             computer: computer,
-            interaction: AutomaticApproval(),
+            interaction: interaction,
             configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
             memory: makeTestMemory()
         )
 
         _ = await session.run(task: "click missing")
+
+        #expect(interaction.approvalsRequested == 0)
+        let actions = await computer.performedActions
+        #expect(actions.isEmpty)
 
         let requests = await llm.requests
         #expect(requests.count == 2)
@@ -495,19 +506,15 @@ struct AgentSessionTests {
         }.joined(separator: "\n") ?? ""
         #expect(text.contains("No element e99"))
         #expect(text.contains("Call get_app_state again"))
-        #expect(text.contains("Element ids are snapshot-local"))
-        #expect(text.contains("do not retry an old element_index blindly"))
-
-        let actions = await computer.performedActions
-        #expect(actions.isEmpty)
+        #expect(text.contains("Fix the tool input and try again"))
     }
 
     @Test func failedActionResultCarriesFreshAppState() async {
         let llm = ScriptedLLMProvider([
-            toolResponse(id: "t1", tool: "click", input: ["element_index": 99]),
+            toolResponse(id: "t1", tool: "click", input: ["element_index": 3]),
             toolResponse(id: "t2", tool: "done", input: ["summary": "Stopped."])
         ])
-        let computer = musicComputer()
+        let computer = FailingClickComputer()
         let session = AgentSession(
             llm: llm,
             computer: computer,
@@ -529,7 +536,7 @@ struct AgentSessionTests {
         }.joined(separator: "\n") ?? ""
 
         #expect(toolResult?.isError == true)
-        #expect(text.contains("No element e99"))
+        #expect(text.contains("synthetic click failure"))
         // A failed action re-reads the app so the model recovers at once,
         // rather than spending a turn calling get_app_state itself.
         #expect(text.contains("Current state of Music"))
@@ -538,13 +545,13 @@ struct AgentSessionTests {
 
     @Test func failedActionEmitsActionFailedEvent() async {
         let llm = ScriptedLLMProvider([
-            toolResponse(id: "t1", tool: "click", input: ["element_index": 99]),
+            toolResponse(id: "t1", tool: "click", input: ["element_index": 3]),
             toolResponse(id: "t2", tool: "done", input: ["summary": "Stopped."])
         ])
         let collector = EventCollector()
         let session = AgentSession(
             llm: llm,
-            computer: musicComputer(),
+            computer: FailingClickComputer(),
             interaction: AutomaticApproval(),
             configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
             memory: makeTestMemory(),
@@ -558,7 +565,7 @@ struct AgentSessionTests {
             return nil
         }.first
         #expect(failure?.0 == .click)
-        #expect(failure?.1.contains("No element e99") == true)
+        #expect(failure?.1.contains("synthetic click failure") == true)
     }
 
     @Test func malformedWriteToolDoesNotAskForApprovalOrAct() async {
@@ -662,6 +669,65 @@ struct AgentSessionTests {
         let recoveryText = requests.dropFirst().first.map { allText(in: $0) } ?? ""
         #expect(recoveryText.contains("unsupported modifier cmd"))
         #expect(recoveryText.contains("Use command, shift, option, control, or function"))
+    }
+
+    @Test func unavailableSecondaryActionDoesNotAskForApprovalOrAct() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(
+                id: "t1",
+                tool: "perform_secondary_action",
+                input: ["element_index": 3, "action": "AXBogus"]
+            ),
+            toolResponse(id: "t2", tool: "done", input: ["summary": "Stopped."])
+        ])
+        let computer = musicComputer()
+        let interaction = CountingInteraction()
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: interaction,
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory()
+        )
+
+        _ = await session.run(task: "show a secondary action")
+        #expect(interaction.approvalsRequested == 0)
+        #expect(await computer.performedActions.isEmpty)
+
+        let requests = await llm.requests
+        let recoveryText = requests.dropFirst().first.map { allText(in: $0) } ?? ""
+        #expect(recoveryText.contains("AXBogus is not available on e3"))
+        #expect(recoveryText.contains("use one of the actions shown"))
+    }
+
+    @Test func setValueOnNonSettableElementDoesNotAskForApprovalOrAct() async {
+        let field = UIElement(id: "e2", role: "AXTextField", label: "Search", value: "")
+        let root = UIElement(id: "e1", role: "AXWindow", label: "Music", children: [field])
+        let computer = MockComputer(appName: "Music", root: root, windowTitle: "Library")
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "t1", tool: "set_value", input: [
+                "element_index": 2,
+                "value": "jazz"
+            ]),
+            toolResponse(id: "t2", tool: "done", input: ["summary": "Stopped."])
+        ])
+        let interaction = CountingInteraction()
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: interaction,
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory()
+        )
+
+        _ = await session.run(task: "set a value")
+        #expect(interaction.approvalsRequested == 0)
+        #expect(await computer.performedActions.isEmpty)
+
+        let requests = await llm.requests
+        let recoveryText = requests.dropFirst().first.map { allText(in: $0) } ?? ""
+        #expect(recoveryText.contains("e2 is not marked settable"))
+        #expect(recoveryText.contains("Use type_text"))
     }
 
     @Test func scrollInputNormalizesDirectionAndUsesBoundedAmount() async {
@@ -1327,6 +1393,45 @@ struct ComputerUseSmokeRunnerTests {
             "drag",
             "perform_secondary_action"
         ])
+    }
+}
+
+/// A `ComputerControl` whose current tree contains the target, but whose
+/// action fails after preflight. This keeps stale-reference preflight tests
+/// separate from real post-approval driver failure recovery.
+actor FailingClickComputer: ComputerControl {
+    nonisolated let appName = "Music"
+
+    private let snapshot: UITreeSnapshot
+
+    init() {
+        let button = UIElement(id: "e3", role: "AXButton", label: "Play")
+        let root = UIElement(id: "e1", role: "AXWindow", label: "Music", children: [button])
+        snapshot = UITreeSnapshot(appName: "Music", windowTitle: "Library", root: root)
+    }
+
+    func captureTree() async throws -> UITreeSnapshot {
+        snapshot
+    }
+
+    func click(elementID: String) async throws {
+        throw AgentError.computer("synthetic click failure")
+    }
+
+    func setValue(elementID: String, value: String) async throws {
+        throw AgentError.computer("unexpected set_value")
+    }
+
+    func scroll(elementID: String?, direction: ScrollDirection, amount: Int) async throws {
+        throw AgentError.computer("unexpected scroll")
+    }
+
+    func pressKey(_ key: KeyPress) async throws {
+        throw AgentError.computer("unexpected press_key")
+    }
+
+    func captureScreenshot() async throws -> Data {
+        Data()
     }
 }
 
