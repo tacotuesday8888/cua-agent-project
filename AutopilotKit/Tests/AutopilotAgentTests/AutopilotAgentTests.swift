@@ -341,6 +341,47 @@ struct AgentSessionTests {
         #expect(actions == ["setValue:e2=jazz", "click:e3"])
     }
 
+    @Test func multipleToolCallsOnlyRunTheFirstTool() async {
+        let llm = ScriptedLLMProvider([
+            LLMResponse(
+                content: [
+                    .toolUse(ToolUse(
+                        id: "t1",
+                        name: "set_value",
+                        input: ["element_index": 2, "value": "jazz"]
+                    )),
+                    .toolUse(ToolUse(
+                        id: "t2",
+                        name: "click",
+                        input: ["element_index": 3]
+                    ))
+                ],
+                stopReason: .toolUse,
+                usage: .init(inputTokens: 1, outputTokens: 1)
+            ),
+            toolResponse(id: "t3", tool: "done", input: ["summary": "Done."])
+        ])
+        let computer = musicComputer()
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory()
+        )
+
+        let outcome = await session.run(task: "set search and click play")
+        #expect(outcome.status == .completed)
+
+        let actions = await computer.performedActions
+        #expect(actions == ["setValue:e2=jazz"])
+
+        let requests = await llm.requests
+        let recoveryText = requests.dropFirst().first.map { allText(in: $0) } ?? ""
+        #expect(recoveryText.contains("Skipped click"))
+        #expect(recoveryText.contains("call exactly one tool per step"))
+    }
+
     @Test func emptyDoneSummaryUsesDefault() async {
         let llm = ScriptedLLMProvider([
             toolResponse(id: "t1", tool: "done", input: ["summary": "   \n  "])

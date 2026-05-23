@@ -214,11 +214,14 @@ public actor AgentSession {
             }
 
             var results: [LLMContentBlock] = []
-            for use in toolUses {
+            if let use = toolUses.first {
                 if Task.isCancelled { return stop() }
                 if let outcome = await dispatch(use, into: &results) {
                     return outcome
                 }
+            }
+            if toolUses.count > 1 {
+                appendSkippedToolUseErrors(Array(toolUses.dropFirst()), into: &results)
             }
             appendBudgetNote(
                 stepsRemaining: configuration.maxSteps - stepIndex - 1,
@@ -377,6 +380,25 @@ public actor AgentSession {
                 appendNote(Self.repeatedActionNote, to: &results)
             }
             return nil
+        }
+    }
+
+    /// Enforce the control loop's one-tool-per-step contract. Extra tool calls
+    /// in one model response are not executed, because the model has not yet
+    /// seen the first tool's updated app state.
+    private func appendSkippedToolUseErrors(
+        _ toolUses: [ToolUse],
+        into results: inout [LLMContentBlock]
+    ) {
+        for use in toolUses {
+            results.append(.toolResult(ToolResult(
+                toolUseID: use.id,
+                text: """
+                Skipped \(use.name): call exactly one tool per step. Review the \
+                first tool's result, then choose the next single tool call.
+                """,
+                isError: true
+            )))
         }
     }
 
