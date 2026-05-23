@@ -730,6 +730,73 @@ struct AgentSessionTests {
         #expect(recoveryText.contains("Use type_text"))
     }
 
+    @Test func disabledClickDoesNotAskForApprovalOrAct() async {
+        let deleteButton = UIElement(
+            id: "e2",
+            role: "AXButton",
+            label: "Delete Playlist",
+            isEnabled: false
+        )
+        let root = UIElement(id: "e1", role: "AXWindow", label: "Music", children: [deleteButton])
+        let computer = MockComputer(appName: "Music", root: root, windowTitle: "Library")
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "t1", tool: "click", input: ["element_index": 2]),
+            toolResponse(id: "t2", tool: "done", input: ["summary": "Stopped."])
+        ])
+        let interaction = CountingInteraction()
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: interaction,
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory()
+        )
+
+        _ = await session.run(task: "delete the playlist")
+        #expect(interaction.approvalsRequested == 0)
+        #expect(await computer.performedActions.isEmpty)
+
+        let requests = await llm.requests
+        let recoveryText = requests.dropFirst().first.map { allText(in: $0) } ?? ""
+        #expect(recoveryText.contains("e2 is disabled"))
+        #expect(recoveryText.contains("Choose an enabled element"))
+    }
+
+    @Test func disabledTypeTargetDoesNotAskForApprovalOrAct() async {
+        let field = UIElement(
+            id: "e2",
+            role: "AXTextField",
+            label: "Search",
+            value: "",
+            isEnabled: false
+        )
+        let root = UIElement(id: "e1", role: "AXWindow", label: "Music", children: [field])
+        let computer = MockComputer(appName: "Music", root: root, windowTitle: "Library")
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "t1", tool: "type_text", input: [
+                "element_index": 2,
+                "text": "jazz"
+            ]),
+            toolResponse(id: "t2", tool: "done", input: ["summary": "Stopped."])
+        ])
+        let interaction = CountingInteraction()
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: interaction,
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory()
+        )
+
+        _ = await session.run(task: "type into the search field")
+        #expect(interaction.approvalsRequested == 0)
+        #expect(await computer.performedActions.isEmpty)
+
+        let requests = await llm.requests
+        let recoveryText = requests.dropFirst().first.map { allText(in: $0) } ?? ""
+        #expect(recoveryText.contains("e2 is disabled"))
+    }
+
     @Test func scrollInputNormalizesDirectionAndUsesBoundedAmount() async {
         let llm = ScriptedLLMProvider([
             toolResponse(

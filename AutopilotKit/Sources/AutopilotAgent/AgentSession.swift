@@ -898,9 +898,9 @@ public actor AgentSession {
     private func preflightAction(tool: AgentTool, input: JSONValue) throws {
         switch tool {
         case .click:
-            _ = try requireExistingElement(input, key: "element_index", tool: tool)
+            _ = try requireEnabledElement(input, key: "element_index", tool: tool)
         case .setValue:
-            let element = try requireExistingElement(input, key: "element_index", tool: tool)
+            let element = try requireEnabledElement(input, key: "element_index", tool: tool)
             guard element.isValueSettable else {
                 throw AgentError.invalidToolInput(
                     tool: tool.rawValue,
@@ -911,14 +911,16 @@ public actor AgentSession {
                 )
             }
         case .typeText:
-            _ = try optionalExistingElement(input, key: "element_index", tool: tool)
+            if let element = try optionalExistingElement(input, key: "element_index", tool: tool) {
+                try ensureEnabled(element, tool: tool)
+            }
         case .scroll:
             _ = try optionalExistingElement(input, key: "element_index", tool: tool)
         case .drag:
-            _ = try requireExistingElement(input, key: "from_element_index", tool: tool)
-            _ = try requireExistingElement(input, key: "to_element_index", tool: tool)
+            _ = try requireEnabledElement(input, key: "from_element_index", tool: tool)
+            _ = try requireEnabledElement(input, key: "to_element_index", tool: tool)
         case .performSecondaryAction:
-            let element = try requireExistingElement(input, key: "element_index", tool: tool)
+            let element = try requireEnabledElement(input, key: "element_index", tool: tool)
             let action = try requireString(input, "action", tool: tool)
             guard element.actions.contains(action) else {
                 throw ComputerControlError.unavailableAction(
@@ -948,6 +950,28 @@ public actor AgentSession {
             )
         }
         return element
+    }
+
+    private func requireEnabledElement(
+        _ input: JSONValue,
+        key: String,
+        tool: AgentTool
+    ) throws -> UIElement {
+        let element = try requireExistingElement(input, key: key, tool: tool)
+        try ensureEnabled(element, tool: tool)
+        return element
+    }
+
+    private func ensureEnabled(_ element: UIElement, tool: AgentTool) throws {
+        guard element.isEnabled else {
+            throw AgentError.invalidToolInput(
+                tool: tool.rawValue,
+                detail: """
+                \(element.id) is disabled. Choose an enabled element from the \
+                current app state, or call done if the required control is unavailable
+                """
+            )
+        }
     }
 
     private func optionalExistingElement(
