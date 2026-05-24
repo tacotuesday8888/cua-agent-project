@@ -58,13 +58,25 @@ keep it:
 3. Relaunch *without* rebuilding so the identity stays the same:
    `./script/build_and_run.sh --launch-only`
 
-After you change code and rebuild, the ad-hoc identity changes, so re-grant (or
-use stable signing, below). If System Settings shows a grant the app does not
-see, clear the stale entry and grant again:
+After you change code and rebuild, the ad-hoc identity changes, so the grant must
+be re-made against the new build (or use stable signing, below).
+
+**Already enabled but still reported missing?** This is the common trap: after an
+ad-hoc rebuild the stored grant stays bound to the *old* build, so System Settings
+keeps showing Mac Autopilot **ON** while the running app sees no access — and
+`--launch-only` cannot repair a grant that is already stale. Reset the stale
+entries, then grant the current build:
 
 ```sh
 tccutil reset Accessibility com.langqi.MacAutopilot
 tccutil reset ScreenCapture com.langqi.MacAutopilot
+```
+
+Then relaunch *without* rebuilding, re-enable both in System Settings > Privacy &
+Security, and click **Re-check permissions**:
+
+```sh
+./script/build_and_run.sh --launch-only
 ```
 
 **Make grants survive rebuilds (optional).** Sign with a stable Apple

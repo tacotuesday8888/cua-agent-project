@@ -62,12 +62,20 @@ struct MacDriverDiagnosticsTests {
             accessibilityTrusted: false,
             window: nil
         ))
-        #expect(check("accessibility", in: checks)?.status == .failed)
+        let accessibility = check("accessibility", in: checks)
+        #expect(accessibility?.status == .failed)
+        // The recovery must cover the stale-grant case: a grant from an earlier
+        // ad-hoc build still shows ON in System Settings but no longer matches the
+        // current cdhash, so the fix is reset + re-grant, not a plain re-grant.
+        #expect(accessibility?.recovery?.contains("tccutil reset Accessibility com.langqi.MacAutopilot") == true)
+        #expect(accessibility?.recovery?.contains("--launch-only") == true)
     }
 
     @Test func missingScreenRecordingIsWarningNotFailure() {
         let checks = MacDriverDiagnostics.checks(for: inputs(screenRecordingTrusted: false))
-        #expect(check("screen-recording", in: checks)?.status == .warning)
+        let screenRecording = check("screen-recording", in: checks)
+        #expect(screenRecording?.status == .warning)
+        #expect(screenRecording?.recovery?.contains("tccutil reset ScreenCapture com.langqi.MacAutopilot") == true)
         // A warning must not block readiness.
         #expect(ComputerDiagnostics(appName: "TextEdit", checks: checks).isReady)
     }
