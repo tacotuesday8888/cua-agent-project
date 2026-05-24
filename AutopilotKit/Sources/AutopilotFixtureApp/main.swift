@@ -48,6 +48,39 @@ final class FixtureAppDelegate: NSObject, NSApplicationDelegate {
         runButton.setAccessibilityIdentifier("autopilot.fixture.run-button")
         runButton.setAccessibilityLabel("Run")
 
+        // A checkbox reports its AXValue as a number (0 / 1), not a string, so it
+        // exercises numeric-value capture in the accessibility reader. Start it
+        // checked so the captured value is a clear "1".
+        let checkbox = NSButton(
+            checkboxWithTitle: "Notify me",
+            target: self,
+            action: #selector(checkboxToggled)
+        )
+        checkbox.state = .on
+        checkbox.setAccessibilityIdentifier("autopilot.fixture.checkbox")
+        checkbox.setAccessibilityLabel("Notify me")
+
+        // An icon-only button has an empty AXTitle and carries its name in
+        // AXDescription (via the accessibility label) — the case that needs the
+        // empty-title → description fallback to stay labeled.
+        let iconButton = NSButton(
+            image: NSImage(systemSymbolName: "info.circle", accessibilityDescription: nil)
+                ?? NSImage(size: NSSize(width: 16, height: 16)),
+            target: self,
+            action: #selector(iconClicked)
+        )
+        iconButton.bezelStyle = .rounded
+        iconButton.imagePosition = .imageOnly
+        iconButton.setAccessibilityIdentifier("autopilot.fixture.icon-button")
+        iconButton.setAccessibilityLabel("Information")
+
+        let controlsRow = NSStackView()
+        controlsRow.orientation = .horizontal
+        controlsRow.spacing = 12
+        controlsRow.alignment = .centerY
+        controlsRow.addArrangedSubview(checkbox)
+        controlsRow.addArrangedSubview(iconButton)
+
         statusLabel.setAccessibilityIdentifier("autopilot.fixture.status")
         statusLabel.setAccessibilityLabel("Status")
 
@@ -84,6 +117,7 @@ final class FixtureAppDelegate: NSObject, NSApplicationDelegate {
         root.addArrangedSubview(title)
         root.addArrangedSubview(inputField)
         root.addArrangedSubview(runButton)
+        root.addArrangedSubview(controlsRow)
         root.addArrangedSubview(statusLabel)
         root.addArrangedSubview(scrollView)
         root.addArrangedSubview(dragRow)
@@ -110,6 +144,14 @@ final class FixtureAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func runClicked() {
         statusLabel.stringValue = "Run clicked: \(inputField.stringValue)"
+    }
+
+    @objc private func checkboxToggled(_ sender: NSButton) {
+        statusLabel.stringValue = "Notify: \(sender.state == .on ? "on" : "off")"
+    }
+
+    @objc private func iconClicked() {
+        statusLabel.stringValue = "Info clicked"
     }
 }
 

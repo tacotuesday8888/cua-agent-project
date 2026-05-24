@@ -58,6 +58,11 @@ public struct ComputerUseSmokeFixtureIdentifiers: Sendable, Hashable {
     public var dragToIdentifier: String
     public var secondaryIdentifier: String
     public var secondaryAction: String
+    /// A checkbox, used to verify the reader captures a numeric `AXValue`.
+    public var checkboxIdentifier: String?
+    /// An icon-only button, used to verify an empty `AXTitle` still resolves a
+    /// label from `AXDescription`.
+    public var iconButtonIdentifier: String?
 
     public init(
         clickIdentifier: String,
@@ -66,7 +71,9 @@ public struct ComputerUseSmokeFixtureIdentifiers: Sendable, Hashable {
         dragFromIdentifier: String,
         dragToIdentifier: String,
         secondaryIdentifier: String,
-        secondaryAction: String
+        secondaryAction: String,
+        checkboxIdentifier: String? = nil,
+        iconButtonIdentifier: String? = nil
     ) {
         self.clickIdentifier = clickIdentifier
         self.scrollIdentifier = scrollIdentifier
@@ -75,6 +82,8 @@ public struct ComputerUseSmokeFixtureIdentifiers: Sendable, Hashable {
         self.dragToIdentifier = dragToIdentifier
         self.secondaryIdentifier = secondaryIdentifier
         self.secondaryAction = secondaryAction
+        self.checkboxIdentifier = checkboxIdentifier
+        self.iconButtonIdentifier = iconButtonIdentifier
     }
 
     public static let autopilotFixture = ComputerUseSmokeFixtureIdentifiers(
@@ -84,7 +93,9 @@ public struct ComputerUseSmokeFixtureIdentifiers: Sendable, Hashable {
         dragFromIdentifier: "autopilot.fixture.drag-source",
         dragToIdentifier: "autopilot.fixture.drop-target",
         secondaryIdentifier: "autopilot.fixture.run-button",
-        secondaryAction: "AXPress"
+        secondaryAction: "AXPress",
+        checkboxIdentifier: "autopilot.fixture.checkbox",
+        iconButtonIdentifier: "autopilot.fixture.icon-button"
     )
 }
 
@@ -222,26 +233,30 @@ public struct ComputerUseSmokeRunner: Sendable {
     public func run(
         computer: any ComputerControl,
         plan: ComputerUseSmokePlan,
-        includeScreenshot: Bool = false
+        includeScreenshot: Bool = false,
+        perceptionIdentifiers: ComputerUseSmokeFixtureIdentifiers? = nil
     ) async -> ComputerUseSmokeReport {
         await run(
             computer: computer,
             initialPlan: plan,
             includeScreenshot: includeScreenshot,
-            planResolver: nil
+            planResolver: nil,
+            perceptionIdentifiers: perceptionIdentifiers
         )
     }
 
     public func run(
         computer: any ComputerControl,
         includeScreenshot: Bool = false,
+        perceptionIdentifiers: ComputerUseSmokeFixtureIdentifiers? = nil,
         planForState planResolver: @escaping @Sendable (ComputerAppState) throws -> ComputerUseSmokePlan
     ) async -> ComputerUseSmokeReport {
         await run(
             computer: computer,
             initialPlan: nil,
             includeScreenshot: includeScreenshot,
-            planResolver: planResolver
+            planResolver: planResolver,
+            perceptionIdentifiers: perceptionIdentifiers
         )
     }
 
@@ -249,7 +264,8 @@ public struct ComputerUseSmokeRunner: Sendable {
         computer: any ComputerControl,
         initialPlan: ComputerUseSmokePlan?,
         includeScreenshot: Bool,
-        planResolver: (@Sendable (ComputerAppState) throws -> ComputerUseSmokePlan)?
+        planResolver: (@Sendable (ComputerAppState) throws -> ComputerUseSmokePlan)?,
+        perceptionIdentifiers: ComputerUseSmokeFixtureIdentifiers?
     ) async -> ComputerUseSmokeReport {
         var steps: [ComputerUseSmokeStepResult] = []
         var plan = initialPlan
@@ -293,6 +309,16 @@ public struct ComputerUseSmokeRunner: Sendable {
         steps.append(step)
         guard step.status == .passed else {
             return ComputerUseSmokeReport(appName: computer.appName, steps: steps)
+        }
+
+        // Verify the reader still captures control state the agent depends on
+        // (numeric checkbox value, icon-button label). Snapshot-only, so it adds
+        // no driver actions; only runs when the fixture identifiers are supplied.
+        if let perceptionIdentifiers, let snapshot = latestSnapshot {
+            steps.append(contentsOf: Self.perceptionVerificationSteps(
+                snapshot: snapshot,
+                identifiers: perceptionIdentifiers
+            ))
         }
 
         guard var activePlan = plan else {
@@ -448,5 +474,94 @@ public struct ComputerUseSmokeRunner: Sendable {
             return description
         }
         return String(describing: error)
+    }
+}
+
+public extension ComputerUseSmokeRunner {
+    /// Verify the accessibility reader still captures the control state the agent
+    /// relies on: a checkbox's numeric `AXValue` (which a string-only cast would
+    /// drop) and an icon-only button's label (which lives in `AXDescription`
+    /// when `AXTitle` is empty). Returns one step per identifier supplied; an
+    /// absent identifier is skipped. Pure and snapshot-only, so it runs in CI
+    /// without Accessibility permission and on a real Mac via the fixture.
+    static func perceptionVerificationSteps(
+        snapshot: UITreeSnapshot,
+        identifiers: ComputerUseSmokeFixtureIdentifiers
+    ) -> [ComputerUseSmokeStepResult] {
+        var results: [ComputerUseSmokeStepResult] = []
+        if let checkboxIdentifier = identifiers.checkboxIdentifier {
+            results.append(verifyNumericValue(
+                snapshot: snapshot,
+                identifier: checkboxIdentifier
+            ))
+        }
+        if let iconButtonIdentifier = identifiers.iconButtonIdentifier {
+            results.append(verifyDescriptionLabel(
+                snapshot: snapshot,
+                identifier: iconButtonIdentifier
+            ))
+        }
+        return results
+    }
+
+    private static func verifyNumericValue(
+        snapshot: UITreeSnapshot,
+        identifier: String
+    ) -> ComputerUseSmokeStepResult {
+        let tool = "verify_checkbox_value"
+        guard let element = element(in: snapshot, identifier: identifier) else {
+            return ComputerUseSmokeStepResult(
+                toolName: tool,
+                status: .failed,
+                detail: "No element with identifier \(identifier)."
+            )
+        }
+        guard let value = element.value, !value.isEmpty else {
+            return ComputerUseSmokeStepResult(
+                toolName: tool,
+                status: .failed,
+                detail: "\(element.id) (\(element.role)) has no captured value — a "
+                    + "numeric AXValue was dropped."
+            )
+        }
+        return ComputerUseSmokeStepResult(
+            toolName: tool,
+            status: .passed,
+            detail: "Captured numeric value \"\(value)\" on \(element.id)."
+        )
+    }
+
+    private static func verifyDescriptionLabel(
+        snapshot: UITreeSnapshot,
+        identifier: String
+    ) -> ComputerUseSmokeStepResult {
+        let tool = "verify_icon_button_label"
+        guard let element = element(in: snapshot, identifier: identifier) else {
+            return ComputerUseSmokeStepResult(
+                toolName: tool,
+                status: .failed,
+                detail: "No element with identifier \(identifier)."
+            )
+        }
+        guard let label = element.label, !label.isEmpty else {
+            return ComputerUseSmokeStepResult(
+                toolName: tool,
+                status: .failed,
+                detail: "\(element.id) (\(element.role)) has no label — an empty "
+                    + "AXTitle did not fall back to AXDescription."
+            )
+        }
+        return ComputerUseSmokeStepResult(
+            toolName: tool,
+            status: .passed,
+            detail: "Resolved label \"\(label)\" on \(element.id)."
+        )
+    }
+
+    private static func element(
+        in snapshot: UITreeSnapshot,
+        identifier: String
+    ) -> UIElement? {
+        snapshot.root.flattened.first { $0.identifier == identifier }
     }
 }

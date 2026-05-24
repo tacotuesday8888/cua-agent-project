@@ -76,6 +76,7 @@ struct AutopilotSmokeCLI {
         let report = await ComputerUseSmokeRunner().run(
             computer: computer,
             includeScreenshot: includeScreenshot,
+            perceptionIdentifiers: .autopilotFixture,
             planForState: { state in
                 try ComputerUseSmokePlan.autopilotFixturePlan(
                     for: state.snapshot
