@@ -121,7 +121,7 @@ public struct AccessibilityTreeReader: Sendable {
         let identifier = element.stringAttribute(kAXIdentifierAttribute)
         let label = element.stringAttribute(kAXTitleAttribute)
             ?? element.stringAttribute(kAXDescriptionAttribute)
-        let value = element.stringAttribute(kAXValueAttribute)
+        let value = element.valueString(kAXValueAttribute)
         let isEnabled = element.attributeValue(kAXEnabledAttribute, as: Bool.self) ?? true
         let isFocused = element.boolAttribute(kAXFocusedAttribute)
         let isValueSettable = element.isAttributeSettable(kAXValueAttribute)
