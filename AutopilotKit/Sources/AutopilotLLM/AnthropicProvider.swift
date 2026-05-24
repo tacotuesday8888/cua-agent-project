@@ -71,6 +71,9 @@ public struct AnthropicProvider: LLMProvider {
                 let retryAfter = http.value(forHTTPHeaderField: "retry-after").flatMap(Double.init)
                 throw LLMError.rateLimited(retryAfter: retryAfter)
             }
+            if http.statusCode == 401 {
+                throw LLMError.authenticationFailed(provider: "Anthropic")
+            }
             let body = String(data: data, encoding: .utf8) ?? "<unreadable body>"
             throw LLMError.http(status: http.statusCode, body: body)
         }
