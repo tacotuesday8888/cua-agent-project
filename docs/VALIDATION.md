@@ -50,6 +50,11 @@ and should report PNG bytes. Screenshots are target-window-only; if the fixture
 window cannot be matched to a CoreGraphics window, the smoke run should fail with
 a screenshot warning rather than capturing the full display.
 
+Run `--include-screenshot` smokes **serially**. Two concurrent screenshot
+processes can trip a ScreenCaptureKit checked-continuation misuse and hang; this
+is a framework-level limit across separate processes (the driver wraps no manual
+continuation of its own), not a driver bug. Serial runs pass.
+
 The run also includes two snapshot-only perception checks that prove the
 accessibility reader captures control state the agent depends on:
 
@@ -194,6 +199,19 @@ Apple documents Accessibility trust through
 - Missing Accessibility blocks runs before the first LLM call.
 - Missing Screen Recording is a warning unless screenshots are requested.
 - Re-checking permissions after returning from System Settings updates the UI.
+
+**Ad-hoc identity and TCC grants.** The local Debug app is ad-hoc signed (no Team
+ID), so macOS keys its grant on the binary's content hash. Verified with
+`codesign -dv --verbose=4`: the CDHash is stable across launches, no-op rebuilds,
+and `build_and_run.sh --launch-only`, but changes when you rebuild after editing
+code — which silently drops the grant while System Settings still shows the app
+enabled. This is why the smoke CLI keeps working (it inherits the Terminal's
+grant) while a freshly rebuilt GUI app reports missing permission. To validate
+the GUI reliably: build once, grant, then relaunch with
+`./script/build_and_run.sh --launch-only` (no rebuild). To make grants survive
+code changes, build with a stable team via `AUTOPILOT_DEV_TEAM=<TeamID>`. Recover
+a stale grant with `tccutil reset Accessibility|ScreenCapture
+com.langqi.MacAutopilot`.
 
 ## Release Gate
 
