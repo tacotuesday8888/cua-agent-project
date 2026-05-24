@@ -81,6 +81,17 @@ extension AXUIElement {
         return size
     }
 
+    /// The element's screen frame (top-left origin) when both position and size
+    /// read successfully. Used to disambiguate windows that share a title from
+    /// the CoreGraphics window list, which AX position/size match by geometry.
+    func frame() -> CGRect? {
+        guard
+            let origin = pointAttribute(kAXPositionAttribute),
+            let size = sizeAttribute(kAXSizeAttribute)
+        else { return nil }
+        return CGRect(origin: origin, size: size)
+    }
+
     /// Accessibility action names advertised by this element.
     func actionNames() -> [String] {
         var raw: CFArray?

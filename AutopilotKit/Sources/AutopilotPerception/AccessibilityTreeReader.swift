@@ -70,7 +70,12 @@ public struct AccessibilityTreeReader: Sendable {
         }
         guard let window = focusedWindow(of: app) else { throw ReadError.noWindow }
         let windowTitle = window.stringAttribute(kAXTitleAttribute)
-        let windowIdentifier = Self.windowIdentifier(pid: pid, title: windowTitle)
+        let windowFrame = window.frame()
+        let windowIdentifier = Self.windowIdentifier(
+            pid: pid,
+            title: windowTitle,
+            frame: windowFrame
+        )
         let isWindowMinimized = window.boolAttribute(kAXMinimizedAttribute)
 
         var counter = 0
@@ -167,11 +172,11 @@ public struct AccessibilityTreeReader: Sendable {
     ///
     /// The Accessibility APIs do not expose CGWindowID directly. Reference
     /// projects use private SPI for an exact mapping; this heuristic keeps the
-    /// production path on public APIs while still enabling targeted screenshots
-    /// for the common single-window case.
-    private static func windowIdentifier(pid: pid_t, title: String?) -> UInt32? {
+    /// production path on public APIs, matching the AX window's frame against the
+    /// CoreGraphics window list so even same-title windows resolve correctly.
+    private static func windowIdentifier(pid: pid_t, title: String?, frame: CGRect?) -> UInt32? {
         for attempt in 0..<3 {
-            if let identifier = windowIdentifierOnce(pid: pid, title: title) {
+            if let identifier = windowIdentifierOnce(pid: pid, title: title, frame: frame) {
                 return identifier
             }
             // Newly-launched windows can be visible to AX just before they show
@@ -183,7 +188,7 @@ public struct AccessibilityTreeReader: Sendable {
         return nil
     }
 
-    private static func windowIdentifierOnce(pid: pid_t, title: String?) -> UInt32? {
+    private static func windowIdentifierOnce(pid: pid_t, title: String?, frame: CGRect?) -> UInt32? {
         guard
             let rawWindows = CGWindowListCopyWindowInfo(
                 [.excludeDesktopElements],
@@ -192,36 +197,127 @@ public struct AccessibilityTreeReader: Sendable {
         else {
             return nil
         }
+        return selectWindowNumber(
+            from: parseWindowList(rawWindows),
+            pid: pid,
+            title: title,
+            frame: frame
+        )
+    }
 
-        let candidates = rawWindows.filter { info in
-            guard let ownerPID = int32Value(info[kCGWindowOwnerPID as String]) else {
-                return false
+    /// A value-typed view of one CoreGraphics window-list entry, holding just
+    /// what window selection needs. Kept free of live state so selection can be
+    /// unit-tested without the real window server.
+    struct CGWindowDescriptor: Equatable, Sendable {
+        var windowNumber: UInt32
+        var ownerPID: pid_t
+        var layer: Int32
+        var title: String?
+        var bounds: CGRect?
+    }
+
+    /// Parse the raw CoreGraphics window list into descriptors, dropping any
+    /// entry without a usable window number (one we could never return anyway).
+    static func parseWindowList(_ rawWindows: [[String: Any]]) -> [CGWindowDescriptor] {
+        rawWindows.compactMap { info in
+            guard
+                let windowNumber = uint32Value(info[kCGWindowNumber as String]),
+                let ownerPID = int32Value(info[kCGWindowOwnerPID as String])
+            else {
+                return nil
             }
-            let layer = int32Value(info[kCGWindowLayer as String]) ?? 0
-            return ownerPID == pid && layer == 0
+            return CGWindowDescriptor(
+                windowNumber: windowNumber,
+                ownerPID: ownerPID,
+                layer: int32Value(info[kCGWindowLayer as String]) ?? 0,
+                title: info[kCGWindowName as String] as? String,
+                bounds: parseBounds(info[kCGWindowBounds as String])
+            )
+        }
+    }
+
+    /// Choose the CoreGraphics window number for the AX window we just read.
+    ///
+    /// Frame match wins over title. Same-title windows are common — two
+    /// documents, two browser windows — and a title-only match resolves them to
+    /// whichever the window list happens to report first, often the wrong one.
+    /// The AX window's screen frame uniquely identifies it, so when a
+    /// candidate's bounds match that frame we trust it; only with no frame match
+    /// do we fall back to exact title, then the first named layer-0 window.
+    static func selectWindowNumber(
+        from descriptors: [CGWindowDescriptor],
+        pid: pid_t,
+        title: String?,
+        frame: CGRect?
+    ) -> UInt32? {
+        let candidates = descriptors.filter { $0.ownerPID == pid && $0.layer == 0 }
+        guard !candidates.isEmpty else { return nil }
+
+        if let frame, frame.width > 0, frame.height > 0 {
+            let closest = candidates
+                .compactMap { candidate -> (number: UInt32, distance: CGFloat)? in
+                    guard let bounds = candidate.bounds else { return nil }
+                    return (candidate.windowNumber, frameDistance(bounds, frame))
+                }
+                .min { $0.distance < $1.distance }
+            if let closest, closest.distance <= frameMatchTolerance {
+                return closest.number
+            }
         }
 
         if
             let title,
             !title.isEmpty,
-            let exact = candidates.first(where: {
-                ($0[kCGWindowName as String] as? String) == title
-            }),
-            let number = uint32Value(exact[kCGWindowNumber as String])
+            let exact = candidates.first(where: { $0.title == title })
         {
-            return number
+            return exact.windowNumber
         }
 
-        if
-            let named = candidates.first(where: {
-                !(($0[kCGWindowName as String] as? String) ?? "").isEmpty
-            }),
-            let number = uint32Value(named[kCGWindowNumber as String])
-        {
-            return number
+        if let named = candidates.first(where: { !($0.title ?? "").isEmpty }) {
+            return named.windowNumber
         }
 
-        return candidates.compactMap { uint32Value($0[kCGWindowNumber as String]) }.first
+        return candidates.first?.windowNumber
+    }
+
+    /// Manhattan distance between two frames over both origin and size. Small
+    /// when two frames describe the same on-screen window, large otherwise.
+    static func frameDistance(_ a: CGRect, _ b: CGRect) -> CGFloat {
+        abs(a.minX - b.minX) + abs(a.minY - b.minY)
+            + abs(a.width - b.width) + abs(a.height - b.height)
+    }
+
+    /// Largest total frame drift (in points) still treated as the same window.
+    /// Generous enough to absorb rounding between AX and CoreGraphics, yet far
+    /// tighter than the gap between distinct windows (macOS cascades by ~22pt).
+    static let frameMatchTolerance: CGFloat = 10
+
+    /// Parse a CoreGraphics bounds dictionary (`X`/`Y`/`Width`/`Height`) into a
+    /// `CGRect`, or nil if any component is missing.
+    private static func parseBounds(_ value: Any?) -> CGRect? {
+        guard let dict = value as? [String: Any] else { return nil }
+        guard
+            let x = doubleValue(dict["X"]),
+            let y = doubleValue(dict["Y"]),
+            let width = doubleValue(dict["Width"]),
+            let height = doubleValue(dict["Height"])
+        else {
+            return nil
+        }
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    private static func doubleValue(_ value: Any?) -> Double? {
+        switch value {
+        case let value as Double:
+            return value
+        case let value as Int:
+            return Double(value)
+        case let value as NSNumber:
+            return value.doubleValue
+        default:
+            return nil
+        }
     }
 
     private static func int32Value(_ value: Any?) -> Int32? {
