@@ -574,6 +574,10 @@ private func formatAgentEvent(_ event: AgentEvent) -> String? {
         return "- memory_proposed: \(proposal.text)"
     case .memoryStored(let item):
         return "- memory_stored: \(item.text)"
+    case .workflowProposed(let proposal):
+        return "- workflow_proposed: \(proposal.name)"
+    case .workflowSaved(let name):
+        return "- workflow_saved: \(name)"
     case .storageFailed(let message):
         return "- storage_failed: \(message)"
     case .finished(let summary):

@@ -445,4 +445,75 @@ struct AgentViewModelWorkflowTests {
         }
         #expect(reason.contains("not running"))
     }
+
+    // MARK: - propose_workflow bridge
+
+    @Test func confirmWorkflowSurfacesAndSavesOnApproval() async {
+        let (model, store) = makeModel()
+        model.selectedAppName = "Mail"
+        let task = Task { @MainActor in
+            await model.confirmWorkflow(WorkflowProposal(
+                name: "Weekly report",
+                goalTemplate: "Email {{recipient}} the report",
+                recipe: "Open Compose first."
+            ))
+        }
+
+        await Task.yield()
+        #expect(model.pendingWorkflow?.name == "Weekly report")
+        #expect(model.pendingWorkflow?.goalTemplate == "Email {{recipient}} the report")
+
+        model.resolveWorkflow(true)
+        let saved = await task.value
+        #expect(saved == true)
+        #expect(model.pendingWorkflow == nil)
+
+        await waitUntil { !(await store.all().isEmpty) }
+        let stored = await store.all().first
+        #expect(stored?.name == "Weekly report")
+        #expect(stored?.appName == "Mail")
+        #expect(stored?.goalTemplate == "Email {{recipient}} the report")
+        #expect(stored?.recipe == "Open Compose first.")
+        #expect(stored?.variableNames == ["recipient"])
+        #expect(stored?.source == .proposed)
+    }
+
+    @Test func confirmWorkflowDeclinedDoesNotSave() async {
+        let (model, store) = makeModel()
+        model.selectedAppName = "Mail"
+        let task = Task { @MainActor in
+            await model.confirmWorkflow(WorkflowProposal(name: "X", goalTemplate: "do {{y}}"))
+        }
+
+        await Task.yield()
+        #expect(model.pendingWorkflow != nil)
+
+        model.resolveWorkflow(false)
+        let saved = await task.value
+        #expect(saved == false)
+        #expect(model.pendingWorkflow == nil)
+
+        // Give any (incorrectly) spawned write a chance to land before asserting.
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        #expect(await store.all().isEmpty)
+    }
+
+    @Test func stopResumesPendingWorkflowAsDeclined() async {
+        let (model, store) = makeModel()
+        model.selectedAppName = "Mail"
+        let task = Task { @MainActor in
+            await model.confirmWorkflow(WorkflowProposal(name: "X", goalTemplate: "do {{y}}"))
+        }
+
+        await Task.yield()
+        #expect(model.pendingWorkflow != nil)
+
+        model.stop()
+        let saved = await task.value
+        #expect(saved == false)
+        #expect(model.pendingWorkflow == nil)
+
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        #expect(await store.all().isEmpty)
+    }
 }

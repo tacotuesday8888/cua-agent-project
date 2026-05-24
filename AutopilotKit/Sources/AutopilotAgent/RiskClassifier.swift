@@ -37,7 +37,7 @@ public struct RiskClassifier: Sendable {
         case .listApps, .getAppState, .scroll:
             // Reading and scrolling change nothing the user cannot undo.
             return .safe
-        case .askUser, .done, .proposeMemory:
+        case .askUser, .done, .proposeMemory, .proposeWorkflow:
             // Orchestration tools never touch the controlled app.
             return .safe
         case .typeText, .drag:

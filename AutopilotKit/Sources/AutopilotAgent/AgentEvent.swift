@@ -38,6 +38,10 @@ public enum AgentEvent: Sendable {
     case memoryProposed(MemoryProposal)
     /// A memory was saved to the local store.
     case memoryStored(MemoryItem)
+    /// The agent proposed saving the task as a reusable workflow.
+    case workflowProposed(WorkflowProposal)
+    /// A workflow was saved for reuse (carries its name).
+    case workflowSaved(String)
     /// A local persistence operation failed, but the run can continue.
     case storageFailed(String)
     /// The run finished successfully.

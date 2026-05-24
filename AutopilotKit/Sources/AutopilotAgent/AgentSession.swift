@@ -22,6 +22,10 @@ public struct AgentConfiguration: Sendable {
     /// Text-only providers still get the accessibility tree, but screenshot
     /// requests are answered with an explicit omission note.
     public var supportsImageInput: Bool
+    /// Optional guidance from a saved workflow ("recipe"), woven into the system
+    /// prompt as hints. The agent still re-reads and verifies the live screen;
+    /// the recipe is a prior, not a script. Empty/nil for ordinary runs.
+    public var recipe: String?
 
     public init(
         model: String,
@@ -29,7 +33,8 @@ public struct AgentConfiguration: Sendable {
         maxTokens: Int = 4096,
         highlightDwell: Duration = .milliseconds(400),
         liveObservationWindow: Int = 3,
-        supportsImageInput: Bool = true
+        supportsImageInput: Bool = true,
+        recipe: String? = nil
     ) {
         self.model = model
         self.maxSteps = maxSteps
@@ -37,6 +42,7 @@ public struct AgentConfiguration: Sendable {
         self.highlightDwell = highlightDwell
         self.liveObservationWindow = max(1, liveObservationWindow)
         self.supportsImageInput = supportsImageInput
+        self.recipe = recipe
     }
 }
 
@@ -361,6 +367,10 @@ public actor AgentSession {
             await handleProposeMemory(use, into: &results)
             return nil
 
+        case .proposeWorkflow:
+            await handleProposeWorkflow(use, into: &results)
+            return nil
+
         default:
             do {
                 try validateInput(tool: tool, input: use.input)
@@ -464,7 +474,8 @@ public actor AgentSession {
         case .drag:
             normalize(primaryKey: "from_element_index", canonicalKey: "from_element_id")
             normalize(primaryKey: "to_element_index", canonicalKey: "to_element_id")
-        case .listApps, .getAppState, .pressKey, .askUser, .proposeMemory, .done:
+        case .listApps, .getAppState, .pressKey, .askUser, .proposeMemory,
+             .proposeWorkflow, .done:
             break
         }
         return .object(object)
@@ -564,6 +575,62 @@ public actor AgentSession {
         }
 
         return MemoryProposal(text: text, scope: scope)
+    }
+
+    /// Handle a `propose_workflow` call: surface the proposal and let the user
+    /// approve saving it for reuse. Persistence lives in the UI's
+    /// `confirmWorkflow`, so the engine stays decoupled from the workflow store.
+    private func handleProposeWorkflow(
+        _ use: ToolUse,
+        into results: inout [LLMContentBlock]
+    ) async {
+        let proposal: WorkflowProposal
+        do {
+            proposal = try workflowProposal(from: use.input)
+        } catch {
+            appendToolInputError(error, toolUseID: use.id, into: &results)
+            return
+        }
+
+        emit(.workflowProposed(proposal))
+
+        if await interaction.confirmWorkflow(proposal) {
+            emit(.workflowSaved(proposal.name))
+            results.append(.toolResult(ToolResult(
+                toolUseID: use.id,
+                text: "Saved \"\(proposal.name)\" as a reusable workflow."
+            )))
+        } else {
+            results.append(.toolResult(ToolResult(
+                toolUseID: use.id,
+                text: "The user chose not to save that workflow. Continue with the task."
+            )))
+        }
+    }
+
+    /// Validate and resolve the input of a `propose_workflow` call.
+    private func workflowProposal(from input: JSONValue) throws -> WorkflowProposal {
+        let name = (input["name"]?.stringValue ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            throw AgentError.invalidToolInput(
+                tool: AgentTool.proposeWorkflow.rawValue,
+                detail: "name must be a non-empty string"
+            )
+        }
+
+        let goalTemplate = (input["goal_template"]?.stringValue ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !goalTemplate.isEmpty else {
+            throw AgentError.invalidToolInput(
+                tool: AgentTool.proposeWorkflow.rawValue,
+                detail: "goal_template must be a non-empty string"
+            )
+        }
+
+        let recipe = (input["recipe"]?.stringValue ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return WorkflowProposal(name: name, goalTemplate: goalTemplate, recipe: recipe)
     }
 
     private func performAction(
@@ -809,7 +876,7 @@ public actor AgentSession {
             try await computer.performSecondaryAction(elementID: id, action: action)
             return try await observedResult("Performed \(action) on \(id).")
 
-        case .askUser, .proposeMemory, .done:
+        case .askUser, .proposeMemory, .proposeWorkflow, .done:
             return []  // handled in `dispatch`
         }
     }
@@ -844,7 +911,11 @@ public actor AgentSession {
     private func buildRequest() -> LLMRequest {
         LLMRequest(
             model: configuration.model,
-            system: SystemPrompt.build(appName: computer.appName, memories: recalledMemory),
+            system: SystemPrompt.build(
+                appName: computer.appName,
+                memories: recalledMemory,
+                recipe: configuration.recipe
+            ),
             messages: transcript.messages,
             tools: ToolCatalog.all,
             maxTokens: configuration.maxTokens
@@ -909,7 +980,7 @@ public actor AgentSession {
         case .performSecondaryAction:
             _ = try requireElementID(input, tool: tool)
             _ = try requireString(input, "action", tool: tool)
-        case .askUser, .proposeMemory, .done:
+        case .askUser, .proposeMemory, .proposeWorkflow, .done:
             return
         }
     }
@@ -950,7 +1021,8 @@ public actor AgentSession {
                     action: action
                 )
             }
-        case .listApps, .getAppState, .pressKey, .askUser, .proposeMemory, .done:
+        case .listApps, .getAppState, .pressKey, .askUser, .proposeMemory,
+             .proposeWorkflow, .done:
             return
         }
     }
@@ -1173,6 +1245,8 @@ public actor AgentSession {
             return "Ask a question"
         case .proposeMemory:
             return "Propose a memory"
+        case .proposeWorkflow:
+            return "Propose a workflow"
         case .done:
             return "Finish"
         }

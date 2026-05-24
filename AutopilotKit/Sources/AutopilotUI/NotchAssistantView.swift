@@ -65,6 +65,9 @@ public struct NotchAssistantView: View {
         .onChange(of: model.pendingMemory?.id) { _, id in
             if id != nil { expand() }
         }
+        .onChange(of: model.pendingWorkflow?.id) { _, id in
+            if id != nil { expand() }
+        }
         .onChange(of: model.pendingQuestion?.id) { _, id in
             if id != nil { expand() }
         }
@@ -225,6 +228,8 @@ public struct NotchAssistantView: View {
             questionRow(question)
         } else if let memory = model.pendingMemory {
             memoryRow(memory)
+        } else if let workflow = model.pendingWorkflow {
+            workflowRow(workflow)
         }
     }
 
@@ -288,6 +293,27 @@ public struct NotchAssistantView: View {
         }
         .padding(10)
         .background(.purple.opacity(0.16), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func workflowRow(_ workflow: AgentViewModel.PendingWorkflow) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(workflow.name, systemImage: "wand.and.stars")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.teal)
+            Text(workflow.goalTemplate)
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.6))
+                .lineLimit(2)
+            HStack {
+                Spacer()
+                Button("Skip") { model.resolveWorkflow(false) }
+                Button("Save workflow") { model.resolveWorkflow(true) }
+                    .buttonStyle(.borderedProminent)
+            }
+            .controlSize(.small)
+        }
+        .padding(10)
+        .background(.teal.opacity(0.16), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var phaseLine: some View {

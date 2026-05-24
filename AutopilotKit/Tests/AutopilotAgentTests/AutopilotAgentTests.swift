@@ -1553,6 +1553,7 @@ struct DenyingInteraction: UserInteraction {
     func requestApproval(_ request: ApprovalRequest) async -> Bool { false }
     func askQuestion(_ question: String) async -> String { "" }
     func confirmMemory(_ proposal: MemoryProposal) async -> Bool { false }
+    func confirmWorkflow(_ proposal: WorkflowProposal) async -> Bool { false }
 }
 
 /// A `UserInteraction` that approves every action and saves every proposed
@@ -1561,6 +1562,16 @@ struct AcceptingMemoryInteraction: UserInteraction {
     func requestApproval(_ request: ApprovalRequest) async -> Bool { true }
     func askQuestion(_ question: String) async -> String { "" }
     func confirmMemory(_ proposal: MemoryProposal) async -> Bool { true }
+    func confirmWorkflow(_ proposal: WorkflowProposal) async -> Bool { false }
+}
+
+/// A `UserInteraction` that approves every action and saves every proposed
+/// workflow, for tests of the propose_workflow accept path.
+struct AcceptingWorkflowInteraction: UserInteraction {
+    func requestApproval(_ request: ApprovalRequest) async -> Bool { true }
+    func askQuestion(_ question: String) async -> String { "" }
+    func confirmMemory(_ proposal: MemoryProposal) async -> Bool { false }
+    func confirmWorkflow(_ proposal: WorkflowProposal) async -> Bool { true }
 }
 
 /// A `UserInteraction` that approves every action and counts how many times it
@@ -1576,6 +1587,7 @@ final class CountingInteraction: UserInteraction, @unchecked Sendable {
 
     func askQuestion(_ question: String) async -> String { "" }
     func confirmMemory(_ proposal: MemoryProposal) async -> Bool { false }
+    func confirmWorkflow(_ proposal: WorkflowProposal) async -> Bool { false }
 
     /// How many approval requests have been made so far.
     var approvalsRequested: Int {

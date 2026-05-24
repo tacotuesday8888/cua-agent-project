@@ -15,6 +15,10 @@ public protocol UserInteraction: Sendable {
     /// Ask the user whether to save a memory the agent proposed. Return `true`
     /// to store it.
     func confirmMemory(_ proposal: MemoryProposal) async -> Bool
+
+    /// Ask the user whether to save a workflow the agent proposed. Return `true`
+    /// to store it.
+    func confirmWorkflow(_ proposal: WorkflowProposal) async -> Bool
 }
 
 /// A non-interactive `UserInteraction` for tests and headless runs: it approves
@@ -34,4 +38,5 @@ public struct AutomaticApproval: UserInteraction {
     public func requestApproval(_ request: ApprovalRequest) async -> Bool { true }
     public func askQuestion(_ question: String) async -> String { cannedAnswer }
     public func confirmMemory(_ proposal: MemoryProposal) async -> Bool { approvesMemory }
+    public func confirmWorkflow(_ proposal: WorkflowProposal) async -> Bool { false }
 }
