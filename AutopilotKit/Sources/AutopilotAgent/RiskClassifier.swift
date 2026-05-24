@@ -23,8 +23,14 @@ public struct RiskClassifier: Sendable {
     /// Keys that, pressed with Command, do something consequential and hard to
     /// undo: ⌘⌫ and its variants delete content; ⌘W closes a window or tab,
     /// discarding unsaved work; ⌘Q quits the app.
+    ///
+    /// Stored in compacted form (see `compacted`) and matched the same way, so
+    /// every spelling the actuator accepts is gated too — `KeyCodes` resolves
+    /// `del`, `forward delete`, and `back-space` to the same destructive keys,
+    /// and a title-only gate would have let those bypass the destructive tier.
+    /// Keep this in sync with the destructive entries in `KeyCodes`.
     private static let destructiveCommandKeys: Set<String> = [
-        "delete", "backspace", "forwarddelete", "w", "q"
+        "delete", "backspace", "del", "forwarddelete", "w", "q"
     ]
 
     /// Assess the approval tier of a tool call against the current UI snapshot.
@@ -119,7 +125,10 @@ public struct RiskClassifier: Sendable {
     /// Whether a key press is consequential and hard to undo, e.g. ⌘⌫ to
     /// delete, ⌘W to close, or ⌘Q to quit.
     private func isDestructiveKeyPress(_ input: JSONValue) -> Bool {
-        let key = (input["key"]?.stringValue ?? "").lowercased()
+        // Compact the key the way labels and actions are matched, so the gate
+        // recognizes the same spelling variants the actuator resolves (e.g.
+        // "del", "forward delete") rather than only their canonical names.
+        let key = Self.compacted(input["key"]?.stringValue ?? "")
         let modifiers = Set(
             (input["modifiers"]?.arrayValue ?? [])
                 .compactMap(\.stringValue)
