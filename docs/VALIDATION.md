@@ -50,6 +50,20 @@ and should report PNG bytes. Screenshots are target-window-only; if the fixture
 window cannot be matched to a CoreGraphics window, the smoke run should fail with
 a screenshot warning rather than capturing the full display.
 
+The run also includes two snapshot-only perception checks that prove the
+accessibility reader captures control state the agent depends on:
+
+- `verify_checkbox_value` — the fixture checkbox reports a numeric `AXValue`;
+  this passes only if that value is captured (e.g. `"1"`), confirming numeric
+  values are not dropped by a string-only cast.
+- `verify_icon_button_label` — the fixture's icon-only button has an empty
+  `AXTitle` and its name in `AXDescription`; this passes only if the label
+  resolves, confirming the empty-title → description fallback works.
+
+If either fails on a real Mac, capture the `--dump-tree` output for the
+`autopilot.fixture.checkbox` / `autopilot.fixture.icon-button` elements — that
+shows exactly what the reader extracted.
+
 The same fixture checks can be run with:
 
 ```sh
@@ -105,6 +119,12 @@ the Safe Real-App Matrix below.
 - **Secondary-action gating.** Confirm a `perform_secondary_action` whose action
   name is destructive (for example a context-menu Delete) is surfaced for
   approval instead of running as a trusted write.
+- **AX attribute capture (numeric value + empty-title label).** The fixture run's
+  `verify_checkbox_value` and `verify_icon_button_label` steps cover this on the
+  bundled app. Confirm it on a real app too: `--dump-tree` an app with a checkbox
+  or toggle (e.g. a System Settings pane) and an icon-only toolbar button (Safari
+  or Finder), and check that the checkbox shows a `value:` (0/1) and the toolbar
+  icon shows a label rather than appearing as a bare `AXButton`.
 
 ## Safe Real-App Matrix
 
