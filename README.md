@@ -42,6 +42,42 @@ and optionally **Screen Recording** for screenshot fallback. Grant them from
 the app's permissions panel, or in System Settings > Privacy & Security. The
 smoke CLI process needs the same Accessibility grant.
 
+### Granting permissions reliably
+
+macOS ties these grants to the app's *code identity*. The local Debug build is
+ad-hoc signed (no Team ID), so its identity is keyed by the binary's content
+hash: it stays stable across launches and no-op rebuilds, but **changes whenever
+you rebuild after editing code** — and macOS then silently drops the grant, even
+though System Settings may still show Mac Autopilot enabled. To grant once and
+keep it:
+
+1. Build and launch once: `./script/build_and_run.sh`
+2. Grant **Accessibility** (required) and **Screen Recording** (optional) from
+   the app's permissions panel or System Settings > Privacy & Security, then
+   click **Re-check permissions**.
+3. Relaunch *without* rebuilding so the identity stays the same:
+   `./script/build_and_run.sh --launch-only`
+
+After you change code and rebuild, the ad-hoc identity changes, so re-grant (or
+use stable signing, below). If System Settings shows a grant the app does not
+see, clear the stale entry and grant again:
+
+```sh
+tccutil reset Accessibility com.langqi.MacAutopilot
+tccutil reset ScreenCapture com.langqi.MacAutopilot
+```
+
+**Make grants survive rebuilds (optional).** Sign with a stable Apple
+Development identity instead of ad-hoc, so the grant is keyed to your team rather
+than the content hash. Add your Apple ID in Xcode (Settings > Accounts — a free
+account works), find your 10-character Team ID, then build with it:
+
+```sh
+AUTOPILOT_DEV_TEAM=YOURTEAMID ./script/build_and_run.sh
+```
+
+Leaving `AUTOPILOT_DEV_TEAM` unset keeps the default ad-hoc build that CI uses.
+
 ## Build And Test
 
 ```sh
