@@ -91,7 +91,14 @@ enum MacDriverDiagnostics {
                 : "Mac Autopilot does not have Accessibility permission.",
             recovery: inputs.accessibilityTrusted
                 ? nil
-                : "Grant Accessibility in System Settings > Privacy & Security > Accessibility."
+                : """
+                Grant Accessibility in System Settings > Privacy & Security > \
+                Accessibility. If Mac Autopilot is already enabled there, a rebuild \
+                can leave the grant stale (System Settings still shows it on): run \
+                'tccutil reset Accessibility com.langqi.MacAutopilot', relaunch with \
+                './script/build_and_run.sh --launch-only', enable it again, then \
+                click Re-check.
+                """
         )
     }
 
@@ -105,7 +112,14 @@ enum MacDriverDiagnostics {
                 : "Screen Recording is not granted, so screenshot fallback may fail.",
             recovery: inputs.screenRecordingTrusted
                 ? nil
-                : "Grant Screen Recording in System Settings > Privacy & Security > Screen Recording."
+                : """
+                Grant Screen Recording in System Settings > Privacy & Security > \
+                Screen Recording. If Mac Autopilot is already enabled there, a \
+                rebuild can leave the grant stale (System Settings still shows it \
+                on): run 'tccutil reset ScreenCapture com.langqi.MacAutopilot', \
+                relaunch with './script/build_and_run.sh --launch-only', enable it \
+                again, then click Re-check.
+                """
         )
     }
 

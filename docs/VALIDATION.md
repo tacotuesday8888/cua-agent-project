@@ -209,9 +209,16 @@ enabled. This is why the smoke CLI keeps working (it inherits the Terminal's
 grant) while a freshly rebuilt GUI app reports missing permission. To validate
 the GUI reliably: build once, grant, then relaunch with
 `./script/build_and_run.sh --launch-only` (no rebuild). To make grants survive
-code changes, build with a stable team via `AUTOPILOT_DEV_TEAM=<TeamID>`. Recover
-a stale grant with `tccutil reset Accessibility|ScreenCapture
-com.langqi.MacAutopilot`.
+code changes, build with a stable team via `AUTOPILOT_DEV_TEAM=<TeamID>`.
+
+TCC logs confirm the trap (`Failed to match existing code requirement for subject
+com.langqi.MacAutopilot`): once a grant has gone stale, its stored requirement
+stays bound to the older build's cdhash, so System Settings keeps showing the app
+ON while the current build matches nothing — and `--launch-only` cannot repair a
+grant that is *already* stale. Recover by resetting first, then relaunching and
+re-granting the current build: `tccutil reset Accessibility|ScreenCapture
+com.langqi.MacAutopilot` → `./script/build_and_run.sh --launch-only` → re-enable
+in System Settings → **Re-check permissions**.
 
 ## Release Gate
 
