@@ -104,6 +104,7 @@ public final class AgentViewModel: UserInteraction {
 
     /// Supported LLM backends for the test harness.
     public enum Provider: String, CaseIterable, Identifiable, Sendable {
+        case openai
         case zai
         case anthropic
 
@@ -111,6 +112,7 @@ public final class AgentViewModel: UserInteraction {
 
         public var descriptor: LLMProviderDescriptor {
             switch self {
+            case .openai: .openai
             case .zai: .zai
             case .anthropic: .anthropic
             }
@@ -126,6 +128,7 @@ public final class AgentViewModel: UserInteraction {
 
         var apiKeyPlaceholder: String {
             switch self {
+            case .openai: "OpenAI API key"
             case .zai: "Z.ai API key"
             case .anthropic: "Anthropic API key"
             }
@@ -272,7 +275,7 @@ public final class AgentViewModel: UserInteraction {
         self.history = history
         self.workflows = workflows
         let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
-            .flatMap(Provider.init(rawValue:)) ?? .zai
+            .flatMap(Provider.init(rawValue:)) ?? .openai
         self.selectedProvider = savedProvider
         self.apiKey = Self.savedAPIKey(for: savedProvider)
         self.permanentlyTrustedApps = UserDefaults.standard
@@ -981,6 +984,8 @@ public final class AgentViewModel: UserInteraction {
 
     private static func makeLLMProvider(provider: Provider, apiKey: String) -> any LLMProvider {
         switch provider {
+        case .openai:
+            OpenAIProvider(apiKey: apiKey)
         case .zai:
             ZAIProvider(apiKey: apiKey)
         case .anthropic:
