@@ -41,6 +41,20 @@ extension AXUIElement {
         }
     }
 
+    /// The first non-empty string among `values`, or nil if all are empty/nil.
+    ///
+    /// AppKit reports a missing `AXTitle` as an *empty* string rather than nil
+    /// (an icon-only button created without a title is the common case), so a
+    /// plain `title ?? description` keeps the empty title and never falls back to
+    /// the description that actually labels the control. Treating empty as absent
+    /// lets the fallback fire so the agent still sees a name for the element.
+    static func firstNonEmpty(_ values: String?...) -> String? {
+        for value in values where !(value ?? "").isEmpty {
+            return value
+        }
+        return nil
+    }
+
     /// A boolean attribute (e.g. enabled, focused). Defaults to `false`.
     func boolAttribute(_ attribute: String) -> Bool {
         attributeValue(attribute, as: Bool.self) ?? false

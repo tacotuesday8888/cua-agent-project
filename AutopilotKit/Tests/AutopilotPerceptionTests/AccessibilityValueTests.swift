@@ -50,3 +50,34 @@ struct AccessibilityValueTests {
         #expect(AXUIElement.coerceValue(["a", "b"]) == nil)
     }
 }
+
+/// `AccessibilityTreeReader` resolves an element's label as the first non-empty
+/// of its title and description. AppKit reports a missing `AXTitle` as an empty
+/// string, not nil, so a plain `title ?? description` would keep the empty title
+/// and never reach the description that actually names an icon-only control.
+struct AccessibilityLabelTests {
+    @Test func titlePreferredWhenPresent() {
+        #expect(AXUIElement.firstNonEmpty("OK", "Confirm the dialog") == "OK")
+    }
+
+    @Test func emptyTitleFallsBackToDescription() {
+        // The real bug: an icon button with no title (AXTitle == "") but an
+        // accessibility label (AXDescription) must still surface a name.
+        #expect(AXUIElement.firstNonEmpty("", "Back") == "Back")
+    }
+
+    @Test func nilTitleFallsBackToDescription() {
+        #expect(AXUIElement.firstNonEmpty(nil, "Back") == "Back")
+    }
+
+    @Test func noTitleOrDescriptionIsNil() {
+        #expect(AXUIElement.firstNonEmpty("", "") == nil)
+        #expect(AXUIElement.firstNonEmpty(nil, nil) == nil)
+    }
+
+    @Test func whitespaceTitleIsKeptVerbatim() {
+        // Coercion does not trim, matching the rest of the reader; only truly
+        // empty strings count as absent.
+        #expect(AXUIElement.firstNonEmpty(" ", "Back") == " ")
+    }
+}
