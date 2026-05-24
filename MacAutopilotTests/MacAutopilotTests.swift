@@ -1,4 +1,5 @@
 import AutopilotUI
+import Foundation
 import Testing
 @testable import MacAutopilot
 
