@@ -80,6 +80,118 @@ struct AgentViewModelTests {
         #expect(answer.isEmpty)
         #expect(model.pendingQuestion == nil)
     }
+
+    // MARK: - Approval bridge
+
+    private func approvalRequest(tier: RiskLevel, summary: String) -> ApprovalRequest {
+        ApprovalRequest(
+            appName: "Notes",
+            tier: tier,
+            target: ActionTarget(appName: "Notes", description: summary),
+            summary: summary
+        )
+    }
+
+    @Test func requestApprovalSurfacesAndResolvesApproved() async {
+        let model = AgentViewModel()
+        let approvalTask = Task { @MainActor in
+            await model.requestApproval(approvalRequest(tier: .write, summary: "Click Save"))
+        }
+
+        await Task.yield()
+        #expect(model.pendingApproval?.summary == "Click Save")
+        #expect(model.pendingApproval?.isDestructive == false)
+
+        model.resolveApproval(true)
+
+        let approved = await approvalTask.value
+        #expect(approved == true)
+        #expect(model.pendingApproval == nil)
+    }
+
+    @Test func requestApprovalResolvesDeclined() async {
+        let model = AgentViewModel()
+        let approvalTask = Task { @MainActor in
+            await model.requestApproval(approvalRequest(tier: .destructive, summary: "Delete file"))
+        }
+
+        await Task.yield()
+        #expect(model.pendingApproval?.isDestructive == true)
+
+        model.resolveApproval(false)
+
+        let approved = await approvalTask.value
+        #expect(approved == false)
+        #expect(model.pendingApproval == nil)
+    }
+
+    @Test func stopResumesPendingApprovalAsDeclined() async {
+        let model = AgentViewModel()
+        let approvalTask = Task { @MainActor in
+            await model.requestApproval(approvalRequest(tier: .destructive, summary: "Delete file"))
+        }
+
+        await Task.yield()
+        #expect(model.pendingApproval != nil)
+
+        model.stop()
+
+        // A stop must never leave a gated action approved; it resumes as declined.
+        let approved = await approvalTask.value
+        #expect(approved == false)
+        #expect(model.pendingApproval == nil)
+    }
+
+    // MARK: - Memory-proposal bridge
+
+    @Test func confirmMemorySurfacesAndResolvesSaved() async {
+        let model = AgentViewModel()
+        let memoryTask = Task { @MainActor in
+            await model.confirmMemory(MemoryProposal(text: "Prefers dark mode", scope: .global))
+        }
+
+        await Task.yield()
+        #expect(model.pendingMemory?.text == "Prefers dark mode")
+
+        model.resolveMemory(true)
+
+        let saved = await memoryTask.value
+        #expect(saved == true)
+        #expect(model.pendingMemory == nil)
+    }
+
+    @Test func confirmMemoryResolvesDeclined() async {
+        let model = AgentViewModel()
+        let memoryTask = Task { @MainActor in
+            await model.confirmMemory(MemoryProposal(text: "Prefers dark mode", scope: .global))
+        }
+
+        await Task.yield()
+        #expect(model.pendingMemory != nil)
+
+        model.resolveMemory(false)
+
+        let saved = await memoryTask.value
+        #expect(saved == false)
+        #expect(model.pendingMemory == nil)
+    }
+
+    @Test func stopResumesPendingMemoryAsDeclined() async {
+        let model = AgentViewModel()
+        let memoryTask = Task { @MainActor in
+            await model.confirmMemory(MemoryProposal(text: "Prefers dark mode", scope: .global))
+        }
+
+        await Task.yield()
+        #expect(model.pendingMemory != nil)
+
+        model.stop()
+
+        // A stop must never silently save a proposed memory; it resumes declined.
+        let saved = await memoryTask.value
+        #expect(saved == false)
+        #expect(model.pendingMemory == nil)
+    }
 }
 
 @MainActor
