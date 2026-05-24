@@ -53,6 +53,19 @@ public struct LLMProviderDescriptor: Sendable, Hashable, Codable {
         apiKeyEnvironment: "ANTHROPIC_API_KEY",
         keychainAccount: "AutopilotAnthropicAPIKey"
     )
+
+    public static let openai = LLMProviderDescriptor(
+        identifier: "openai",
+        displayName: "OpenAI GPT-5.4 Mini",
+        defaultModel: "gpt-5.4-mini",
+        supportsToolCalls: true,
+        supportsImageInput: true,
+        // OpenAI caches repeated prompt prefixes automatically; we emit no
+        // explicit cache_control breakpoints, so this stays false.
+        supportsPromptCaching: false,
+        apiKeyEnvironment: "OPENAI_API_KEY",
+        keychainAccount: "AutopilotOpenAIAPIKey"
+    )
 }
 
 /// A provider-agnostic interface to a chat LLM with tool-use support.

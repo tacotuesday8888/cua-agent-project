@@ -63,6 +63,15 @@ struct LLMProviderDescriptorTests {
         #expect(LLMProviderDescriptor.anthropic.supportsPromptCaching)
         #expect(LLMProviderDescriptor.anthropic.apiKeyEnvironment == "ANTHROPIC_API_KEY")
         #expect(LLMProviderDescriptor.anthropic.keychainAccount == "AutopilotAnthropicAPIKey")
+
+        #expect(LLMProviderDescriptor.openai.identifier == "openai")
+        #expect(LLMProviderDescriptor.openai.defaultModel == "gpt-5.4-mini")
+        #expect(LLMProviderDescriptor.openai.supportsToolCalls)
+        #expect(LLMProviderDescriptor.openai.supportsImageInput)
+        // OpenAI caches automatically; we emit no cache_control breakpoints.
+        #expect(!LLMProviderDescriptor.openai.supportsPromptCaching)
+        #expect(LLMProviderDescriptor.openai.apiKeyEnvironment == "OPENAI_API_KEY")
+        #expect(LLMProviderDescriptor.openai.keychainAccount == "AutopilotOpenAIAPIKey")
     }
 }
 
@@ -740,6 +749,232 @@ struct ZAIProviderTests {
     }
 }
 
+@Suite(.serialized)
+struct OpenAIProviderTests {
+    @Test func decodesResponseWithToolCall() async throws {
+        OpenAIStubURLProtocol.responder = { request in
+            let http = HTTPURLResponse(url: request.url!, statusCode: 200,
+                                       httpVersion: nil, headerFields: nil)!
+            return (http, Data(Self.cannedResponse.utf8))
+        }
+        defer { OpenAIStubURLProtocol.responder = nil }
+
+        let response = try await makeProvider().send(
+            LLMRequest(model: "gpt-5.4-mini", system: "sys", messages: [.user("hello")])
+        )
+        #expect(response.stopReason == .toolUse)
+        #expect(response.text == "Hi")
+        #expect(response.toolUses.first?.name == "done")
+        #expect(response.toolUses.first?.input["summary"]?.stringValue == "ok")
+        #expect(response.usage.inputTokens == 12)
+        #expect(response.usage.outputTokens == 7)
+        // OpenAI's prompt_tokens already includes cached tokens — no double count.
+        #expect(response.usage.totalInputTokens == 12)
+    }
+
+    @Test func requestUsesMaxCompletionTokensNotMaxTokens() async throws {
+        OpenAIStubURLProtocol.capturedBody = nil
+        OpenAIStubURLProtocol.responder = { request in
+            let http = HTTPURLResponse(url: request.url!, statusCode: 200,
+                                       httpVersion: nil, headerFields: nil)!
+            return (http, Data(Self.cannedResponse.utf8))
+        }
+        defer {
+            OpenAIStubURLProtocol.responder = nil
+            OpenAIStubURLProtocol.capturedBody = nil
+        }
+
+        let tool = ToolDefinition(
+            name: "done",
+            description: "Finish the task.",
+            inputSchema: ["type": "object", "properties": ["summary": ["type": "string"]], "required": ["summary"]]
+        )
+        _ = try await makeProvider().send(LLMRequest(
+            model: "gpt-5.4-mini",
+            system: "sys",
+            messages: [
+                .user("hello"),
+                LLMMessage(role: .assistant, content: [
+                    .text("I will finish."),
+                    .toolUse(ToolUse(id: "call_1", name: "done", input: ["summary": "ok"]))
+                ]),
+                LLMMessage(role: .user, content: [
+                    .toolResult(ToolResult(toolUseID: "call_1", text: "Done."))
+                ])
+            ],
+            tools: [tool],
+            maxTokens: 256
+        ))
+
+        let body = try #require(OpenAIStubURLProtocol.capturedBody)
+        let payload = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        // GPT-5.x requires max_completion_tokens and rejects max_tokens.
+        #expect(payload["max_completion_tokens"] as? Int == 256)
+        #expect(payload["max_tokens"] == nil)
+
+        let messages = try #require(payload["messages"] as? [[String: Any]])
+        #expect(messages.map { $0["role"] as? String } == ["system", "user", "assistant", "tool"])
+        #expect(messages[3]["tool_call_id"] as? String == "call_1")
+        #expect(messages[3]["content"] as? String == "Done.")
+        let assistantToolCalls = try #require(messages[2]["tool_calls"] as? [[String: Any]])
+        let function = try #require(assistantToolCalls.first?["function"] as? [String: Any])
+        #expect(function["name"] as? String == "done")
+    }
+
+    @Test func encodesImagesAndRelocatesToolResultImages() async throws {
+        OpenAIStubURLProtocol.capturedBody = nil
+        OpenAIStubURLProtocol.responder = { request in
+            let http = HTTPURLResponse(url: request.url!, statusCode: 200,
+                                       httpVersion: nil, headerFields: nil)!
+            return (http, Data(Self.cannedResponse.utf8))
+        }
+        defer {
+            OpenAIStubURLProtocol.responder = nil
+            OpenAIStubURLProtocol.capturedBody = nil
+        }
+
+        _ = try await makeProvider().send(LLMRequest(
+            model: "gpt-5.4-mini",
+            messages: [
+                LLMMessage(role: .user, content: [.text("look"), .image(ImageBlock(base64Data: "BBB"))]),
+                LLMMessage(role: .user, content: [
+                    .toolResult(ToolResult(
+                        toolUseID: "call_9",
+                        content: [.text("tree"), .image(ImageBlock(base64Data: "AAA"))]
+                    ))
+                ])
+            ]
+        ))
+
+        let body = try #require(OpenAIStubURLProtocol.capturedBody)
+        let payload = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let messages = try #require(payload["messages"] as? [[String: Any]])
+
+        // Inline image: the first user message uses a parts array with image_url.
+        let firstParts = try #require(messages.first?["content"] as? [[String: Any]])
+        #expect(firstParts.contains { $0["type"] as? String == "text" && $0["text"] as? String == "look" })
+        let inlineImage = firstParts.first { $0["type"] as? String == "image_url" }
+        #expect(((inlineImage?["image_url"] as? [String: Any])?["url"] as? String) == "data:image/png;base64,BBB")
+
+        // The tool message carries only string text; its image is relocated to a
+        // following user message (OpenAI tool messages cannot carry images).
+        let toolIndex = try #require(messages.firstIndex { $0["role"] as? String == "tool" })
+        #expect(messages[toolIndex]["content"] as? String == "tree")
+        #expect(messages[toolIndex + 1]["role"] as? String == "user")
+        let relocated = try #require(messages[toolIndex + 1]["content"] as? [[String: Any]])
+        #expect(relocated.contains {
+            $0["type"] as? String == "image_url"
+                && (($0["image_url"] as? [String: Any])?["url"] as? String) == "data:image/png;base64,AAA"
+        })
+    }
+
+    @Test func invalidAPIKeyReturnsFriendlyAuthErrorWithoutRetrying() async {
+        let counter = LockedCounter()
+        OpenAIStubURLProtocol.responder = { request in
+            counter.increment()
+            let http = HTTPURLResponse(url: request.url!, statusCode: 401,
+                                       httpVersion: nil, headerFields: nil)!
+            return (http, Data(#"{"error":{"message":"Incorrect API key provided"}}"#.utf8))
+        }
+        defer { OpenAIStubURLProtocol.responder = nil }
+
+        do {
+            _ = try await makeProvider(
+                retryPolicy: RetryPolicy(maxRetries: 2, baseDelaySeconds: 0)
+            ).send(LLMRequest(model: "gpt-5.4-mini", messages: [.user("hello")]))
+            Issue.record("expected an authentication error")
+        } catch {
+            #expect(error as? LLMError == .authenticationFailed(provider: "OpenAI"))
+            #expect(counter.value == 1)
+        }
+    }
+
+    @Test func retriesTransientServerError() async throws {
+        let counter = LockedCounter()
+        OpenAIStubURLProtocol.responder = { request in
+            if counter.increment() == 1 {
+                let http = HTTPURLResponse(url: request.url!, statusCode: 503,
+                                           httpVersion: nil, headerFields: nil)!
+                return (http, Data(#"{"error":"unavailable"}"#.utf8))
+            }
+            let http = HTTPURLResponse(url: request.url!, statusCode: 200,
+                                       httpVersion: nil, headerFields: nil)!
+            return (http, Data(Self.cannedResponse.utf8))
+        }
+        defer { OpenAIStubURLProtocol.responder = nil }
+
+        let response = try await makeProvider(
+            retryPolicy: RetryPolicy(maxRetries: 1, baseDelaySeconds: 0)
+        ).send(LLMRequest(model: "gpt-5.4-mini", messages: [.user("hello")]))
+        #expect(response.text == "Hi")
+        #expect(counter.value == 2)
+    }
+
+    @Test func doesNotRetryClientError() async {
+        let counter = LockedCounter()
+        OpenAIStubURLProtocol.responder = { request in
+            counter.increment()
+            let http = HTTPURLResponse(url: request.url!, statusCode: 400,
+                                       httpVersion: nil, headerFields: nil)!
+            return (http, Data(#"{"error":"bad request"}"#.utf8))
+        }
+        defer { OpenAIStubURLProtocol.responder = nil }
+
+        do {
+            _ = try await makeProvider(
+                retryPolicy: RetryPolicy(maxRetries: 2, baseDelaySeconds: 0)
+            ).send(LLMRequest(model: "gpt-5.4-mini", messages: [.user("x")]))
+            Issue.record("expected a client error to be thrown")
+        } catch {
+            #expect(error is LLMError)
+            #expect(counter.value == 1)
+        }
+    }
+
+    @Test func missingAPIKeyThrows() async {
+        do {
+            _ = try await OpenAIProvider(apiKey: "")
+                .send(LLMRequest(model: "gpt-5.4-mini", messages: [.user("x")]))
+            Issue.record("expected a missing-API-key error")
+        } catch {
+            #expect(error as? LLMError == .missingAPIKey)
+        }
+    }
+
+    private static let cannedResponse = """
+    {
+      "id": "chatcmpl-1",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "Hi",
+            "tool_calls": [
+              {
+                "id": "call_1",
+                "type": "function",
+                "function": { "name": "done", "arguments": "{\\"summary\\":\\"ok\\"}" }
+              }
+            ]
+          },
+          "finish_reason": "tool_calls"
+        }
+      ],
+      "usage": { "prompt_tokens": 12, "completion_tokens": 7, "total_tokens": 19 }
+    }
+    """
+
+    private func makeProvider(retryPolicy: RetryPolicy = .standard) -> OpenAIProvider {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [OpenAIStubURLProtocol.self]
+        return OpenAIProvider(apiKey: "test-key",
+                              endpoint: URL(string: "https://unit.test/openai")!,
+                              urlSession: URLSession(configuration: config),
+                              retryPolicy: retryPolicy)
+    }
+}
+
 /// A `URLProtocol` that returns a canned response and captures the outbound
 /// request, for offline provider tests.
 final class StubURLProtocol: URLProtocol {
@@ -789,6 +1024,52 @@ final class StubURLProtocol: URLProtocol {
 
 /// Separate stub so Z.ai provider tests can run independently from Anthropic tests.
 final class ZAIStubURLProtocol: URLProtocol {
+    nonisolated(unsafe) static var responder: (@Sendable (URLRequest) -> (HTTPURLResponse, Data))?
+    nonisolated(unsafe) static var capturedRequest: URLRequest?
+    nonisolated(unsafe) static var capturedBody: Data?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        Self.capturedRequest = request
+        Self.capturedBody = Self.bodyData(from: request)
+        guard let responder = Self.responder else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+        let (response, data) = responder(request)
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+
+    private static func bodyData(from request: URLRequest) -> Data? {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return nil }
+
+        stream.open()
+        defer { stream.close() }
+
+        var data = Data()
+        let bufferSize = 4096
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        defer { buffer.deallocate() }
+
+        while stream.hasBytesAvailable {
+            let count = stream.read(buffer, maxLength: bufferSize)
+            if count < 0 { return nil }
+            if count == 0 { break }
+            data.append(buffer, count: count)
+        }
+        return data
+    }
+}
+
+/// Separate stub so OpenAI provider tests run independently from the others.
+final class OpenAIStubURLProtocol: URLProtocol {
     nonisolated(unsafe) static var responder: (@Sendable (URLRequest) -> (HTTPURLResponse, Data))?
     nonisolated(unsafe) static var capturedRequest: URLRequest?
     nonisolated(unsafe) static var capturedBody: Data?
