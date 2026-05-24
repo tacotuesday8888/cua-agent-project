@@ -54,6 +54,17 @@ public final class AgentViewModel: UserInteraction {
         public let scopeLabel: String
     }
 
+    /// A workflow the agent proposed saving, awaiting the user's approval.
+    public struct PendingWorkflow: Sendable, Identifiable {
+        public let id = UUID()
+        /// The proposed name.
+        public let name: String
+        /// The reusable goal, with `{{slot}}` tokens.
+        public let goalTemplate: String
+        /// Optional learned hints injected as a prior on re-runs.
+        public let recipe: String
+    }
+
     /// A stored memory shown in the management list.
     public struct StoredMemory: Sendable, Identifiable {
         /// The underlying `MemoryItem` id, used to delete it.
@@ -151,6 +162,8 @@ public final class AgentViewModel: UserInteraction {
     public var pendingApproval: PendingApproval?
     /// A proposed memory awaiting approval, or `nil`.
     public var pendingMemory: PendingMemory?
+    /// A proposed workflow awaiting approval, or `nil`.
+    public var pendingWorkflow: PendingWorkflow?
     /// A clarifying question awaiting an answer, or `nil`.
     public var pendingQuestion: PendingQuestion?
     /// Draft answer for a pending clarification question.
@@ -238,6 +251,7 @@ public final class AgentViewModel: UserInteraction {
     private var activeWorkflowID: UUID?
     private var approvalContinuation: CheckedContinuation<Bool, Never>?
     private var memoryContinuation: CheckedContinuation<Bool, Never>?
+    private var workflowContinuation: CheckedContinuation<Bool, Never>?
     private var questionContinuation: CheckedContinuation<String, Never>?
 
     /// In-flight run metadata, redacted into a `RunRecord` once the run ends.
@@ -430,6 +444,7 @@ public final class AgentViewModel: UserInteraction {
         }
         pendingApproval = nil
         pendingMemory = nil
+        pendingWorkflow = nil
         pendingQuestion = nil
         highlightedTarget = nil
         questionAnswerText = ""
@@ -481,6 +496,11 @@ public final class AgentViewModel: UserInteraction {
             pendingMemory = nil
             continuation.resume(returning: false)
         }
+        if let continuation = workflowContinuation {
+            workflowContinuation = nil
+            pendingWorkflow = nil
+            continuation.resume(returning: false)
+        }
         if let continuation = questionContinuation {
             questionContinuation = nil
             pendingQuestion = nil
@@ -502,6 +522,29 @@ public final class AgentViewModel: UserInteraction {
         guard let continuation = memoryContinuation else { return }
         memoryContinuation = nil
         pendingMemory = nil
+        continuation.resume(returning: save)
+    }
+
+    /// Answer a pending workflow proposal. On save, persist it for reuse against
+    /// the current run's target app, deriving variables from its `{{slot}}`s.
+    public func resolveWorkflow(_ save: Bool) {
+        guard let continuation = workflowContinuation else { return }
+        workflowContinuation = nil
+        let proposed = pendingWorkflow
+        pendingWorkflow = nil
+        if save, let proposed {
+            let appName = pendingRun?.appName ?? selectedAppName
+            let variables = WorkflowRenderer.slotNames(in: proposed.goalTemplate)
+                .map { WorkflowVariable(name: $0) }
+            storeWorkflow(Workflow(
+                name: proposed.name,
+                appName: appName,
+                goalTemplate: proposed.goalTemplate,
+                recipe: proposed.recipe,
+                variables: variables,
+                source: .proposed
+            ))
+        }
         continuation.resume(returning: save)
     }
 
@@ -594,6 +637,17 @@ public final class AgentViewModel: UserInteraction {
                 scopeLabel: proposal.scope.displayName
             )
             self.memoryContinuation = continuation
+        }
+    }
+
+    public func confirmWorkflow(_ proposal: WorkflowProposal) async -> Bool {
+        await withCheckedContinuation { continuation in
+            self.pendingWorkflow = PendingWorkflow(
+                name: proposal.name,
+                goalTemplate: proposal.goalTemplate,
+                recipe: proposal.recipe
+            )
+            self.workflowContinuation = continuation
         }
     }
 
@@ -807,6 +861,11 @@ public final class AgentViewModel: UserInteraction {
         case .memoryStored(let item):
             append("Saved to memory: \(item.text)")
             Task { [weak self] in await self?.loadMemories() }
+        case .workflowProposed(let proposal):
+            append("Proposing to save a workflow: \(proposal.name)")
+        case .workflowSaved(let name):
+            append("Saved workflow: \(name)")
+            Task { [weak self] in await self?.loadWorkflows() }
         case .storageFailed(let message):
             append("Storage warning — \(message)", isError: true)
         case .finished(let summary):

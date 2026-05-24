@@ -17,6 +17,7 @@ public enum AgentTool: String, CaseIterable, Sendable {
     case performSecondaryAction = "perform_secondary_action"
     case askUser = "ask_user"
     case proposeMemory = "propose_memory"
+    case proposeWorkflow = "propose_workflow"
     case done = "done"
 }
 
@@ -35,6 +36,7 @@ public enum ToolCatalog {
         performSecondaryAction,
         askUser,
         proposeMemory,
+        proposeWorkflow,
         done
     ]
 
@@ -267,6 +269,37 @@ public enum ToolCatalog {
                 ]
             ],
             "required": ["text", "scope"]
+        ]
+    )
+
+    static let proposeWorkflow = ToolDefinition(
+        name: AgentTool.proposeWorkflow.rawValue,
+        description: """
+        Propose saving the current task as a reusable workflow, after you have \
+        completed it successfully and it is the kind of task the user would run \
+        again. The user approves or skips it; if approved it is saved locally. \
+        Use {{slot}} placeholders in the goal for the parts that change per run \
+        (for example "Email {{recipient}} the weekly report"). The optional \
+        recipe is a few short hints for next time — never recorded clicks, \
+        passwords, or one-off values.
+        """,
+        inputSchema: [
+            "type": "object",
+            "properties": [
+                "name": [
+                    "type": "string",
+                    "description": "A short, human-facing name for the workflow."
+                ],
+                "goal_template": [
+                    "type": "string",
+                    "description": "The reusable goal, with {{slot}} placeholders for variable parts."
+                ],
+                "recipe": [
+                    "type": "string",
+                    "description": "Optional short hints for re-runs. Guidance only, never sensitive values."
+                ]
+            ],
+            "required": ["name", "goal_template"]
         ]
     )
 
