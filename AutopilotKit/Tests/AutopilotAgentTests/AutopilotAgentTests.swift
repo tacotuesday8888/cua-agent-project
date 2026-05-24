@@ -175,6 +175,39 @@ struct RiskClassifierTests {
         ) == .destructive)
     }
 
+    @Test(arguments: [
+        "del",            // KeyCodes alias for delete
+        "Delete",         // case the actuator lowercases
+        "forward delete", // spaced spelling KeyCodes collapses
+        "forward-delete", // hyphenated spelling
+        "back space",     // spaced backspace
+        " w ",            // stray whitespace the actuator strips
+        "Q"
+    ])
+    func commandDestructiveKeyAliasesAreGated(key: String) {
+        // The actuator resolves these to the same destructive keys (⌘⌫, ⌘W,
+        // ⌘Q), so a title-only gate that only matched canonical names would let
+        // them execute as a plain write without asking. Each must still be
+        // classified destructive.
+        let risk = RiskClassifier().assess(
+            tool: .pressKey,
+            input: ["key": JSONValue.string(key), "modifiers": ["command"]],
+            snapshot: nil
+        )
+        #expect(risk == .destructive)
+    }
+
+    @Test func deleteAliasWithoutCommandIsWrite() {
+        // The alias only escalates with Command held; on its own it is an
+        // ordinary edit.
+        let risk = RiskClassifier().assess(
+            tool: .pressKey,
+            input: ["key": "del"],
+            snapshot: nil
+        )
+        #expect(risk == .write)
+    }
+
     @Test func closeKeyWithoutCommandIsWrite() {
         // Without Command, "w" is just an ordinary typed character.
         let risk = RiskClassifier().assess(
