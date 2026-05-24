@@ -66,6 +66,27 @@ struct LLMProviderDescriptorTests {
     }
 }
 
+struct LLMErrorTests {
+    @Test func authenticationFailedMessageNamesTheProviderAndIsActionable() {
+        #expect(
+            LLMError.authenticationFailed(provider: "Z.ai").errorDescription
+                == "The saved Z.ai API key is invalid or expired. Update the API key and run again."
+        )
+        #expect(
+            LLMError.authenticationFailed(provider: "Anthropic").errorDescription
+                == "The saved Anthropic API key is invalid or expired. Update the API key and run again."
+        )
+    }
+
+    @Test func authenticationFailedDoesNotLeakRawProviderBody() {
+        // Unlike `.http`, the 401 path must not surface raw provider JSON or a
+        // bare status code to the user.
+        let message = LLMError.authenticationFailed(provider: "Z.ai").errorDescription ?? ""
+        #expect(!message.contains("{"))
+        #expect(!message.contains("HTTP"))
+    }
+}
+
 struct ScriptedLLMProviderTests {
     @Test func returnsResponsesInOrderAndRecordsRequests() async throws {
         let one = LLMResponse(content: [.text("one")], stopReason: .endTurn,
@@ -251,6 +272,29 @@ struct AnthropicProviderTests {
         } catch {
             #expect(error is LLMError)
             // A 4xx is not transient — it must not be retried.
+            #expect(counter.value == 1)
+        }
+    }
+
+    @Test func invalidAPIKeyReturnsFriendlyAuthErrorWithoutRetrying() async {
+        let counter = LockedCounter()
+        StubURLProtocol.responder = { request in
+            counter.increment()
+            let http = HTTPURLResponse(url: request.url!, statusCode: 401,
+                                       httpVersion: nil, headerFields: nil)!
+            return (http, Data(#"{"type":"error","error":{"type":"authentication_error"}}"#.utf8))
+        }
+        defer { StubURLProtocol.responder = nil }
+
+        do {
+            _ = try await makeProvider(
+                retryPolicy: RetryPolicy(maxRetries: 2, baseDelaySeconds: 0)
+            ).send(LLMRequest(model: "claude-test", messages: [.user("hello")]))
+            Issue.record("expected an authentication error")
+        } catch {
+            // A 401 maps to a plain, provider-named message, not raw JSON, and
+            // is not retried (a bad key will not fix itself).
+            #expect(error as? LLMError == .authenticationFailed(provider: "Anthropic"))
             #expect(counter.value == 1)
         }
     }
@@ -639,6 +683,29 @@ struct ZAIProviderTests {
             Issue.record("expected a missing-API-key error")
         } catch {
             #expect(error as? LLMError == .missingAPIKey)
+        }
+    }
+
+    @Test func invalidAPIKeyReturnsFriendlyAuthErrorWithoutRetrying() async {
+        let counter = LockedCounter()
+        ZAIStubURLProtocol.responder = { request in
+            counter.increment()
+            let http = HTTPURLResponse(url: request.url!, statusCode: 401,
+                                       httpVersion: nil, headerFields: nil)!
+            return (http, Data(#"{"error":{"message":"token expired or incorrect"}}"#.utf8))
+        }
+        defer { ZAIStubURLProtocol.responder = nil }
+
+        do {
+            _ = try await makeProvider(
+                retryPolicy: RetryPolicy(maxRetries: 2, baseDelaySeconds: 0)
+            ).send(LLMRequest(model: "glm-4.7-flash", messages: [.user("hello")]))
+            Issue.record("expected an authentication error")
+        } catch {
+            // A 401 maps to a plain, provider-named message, not raw JSON, and
+            // is not retried (a bad key will not fix itself).
+            #expect(error as? LLMError == .authenticationFailed(provider: "Z.ai"))
+            #expect(counter.value == 1)
         }
     }
 
