@@ -56,10 +56,13 @@ That product shape implies a few hard technical seams:
   under Application Support, capped to the most recent entries.
 - `AutopilotWorkflows` persists reusable workflows (`Workflow`) under Application
   Support, capped and secrets-free. A workflow is a goal template plus the
-  variables that fill it; a `recipe` field exists on the model for forward
-  compatibility but is unused for now (a later phase injects it as a prompt
-  prior). The module depends only on Foundation, and only `AutopilotUI` consumes
-  it — the agent loop is untouched by single-app workflows.
+  variables that fill it, and an optional `recipe` of learned hints. On a re-run,
+  the recipe is injected into the system prompt as a prior (guidance, not a
+  script); the agent still re-reads and verifies the live screen. The module
+  depends only on Foundation, and only `AutopilotUI` consumes it — the agent loop
+  stays storage-agnostic for workflows: the `propose_workflow` tool produces a
+  `WorkflowProposal` (defined in `AutopilotAgent`) that the UI maps onto a stored
+  `Workflow`, so the engine never depends on the workflow store.
 - Local JSON stores write atomically and keep a `.backup` sibling of the
   previous file before overwriting existing memory, history, or workflow state.
   If a corrupt file is later replaced, the corrupt bytes are still retained for
@@ -140,9 +143,11 @@ Scope and guarantees for the current phase:
   invalid records read from disk, and rejects writes missing a name, app, or
   goal. The UI still validates early for a nicer user flow, but persistence is
   the final integrity boundary.
-- **Capture.** This phase captures workflows by hand or by saving a finished run
-  (`AgentViewModel.createWorkflow` / `saveRunAsWorkflow`). A later phase adds an
-  agent-proposed `propose_workflow` tool and a learned recipe injected on re-runs.
+- **Capture.** Workflows are captured by hand, by saving a finished run
+  (`AgentViewModel.createWorkflow` / `saveRunAsWorkflow`), or by the agent itself:
+  after a repeatable task it may call `propose_workflow`, and on approval the run's
+  goal and learned hints are saved (`source: .proposed`). The saved recipe is then
+  injected as a prompt prior on re-runs. Cross-app workflows remain a later phase.
 
 ## Session State
 
