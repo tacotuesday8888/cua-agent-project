@@ -33,6 +33,7 @@ struct RiskClassifierTests {
             input: ["direction": "down"],
             snapshot: nil
         ) == .safe)
+        #expect(classifier.assess(tool: .wait, input: ["seconds": 1], snapshot: nil) == .safe)
     }
 
     @Test func ordinaryClickIsWrite() {
@@ -312,6 +313,10 @@ struct ToolCatalogTests {
     @Test func includesProposeMemoryTool() {
         #expect(ToolCatalog.all.contains { $0.name == "propose_memory" })
     }
+
+    @Test func includesWaitTool() {
+        #expect(ToolCatalog.all.contains { $0.name == "wait" })
+    }
 }
 
 struct AgentSessionTests {
@@ -372,6 +377,28 @@ struct AgentSessionTests {
 
         let actions = await computer.performedActions
         #expect(actions == ["setValue:e2=jazz", "click:e3"])
+    }
+
+    @Test func waitToolPausesAndPerformsNoActuation() async {
+        // wait (seconds: 0 to keep the test fast) should run to completion as a
+        // safe, no-approval step that only re-reads state — it must not actuate.
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "t1", tool: "wait", input: ["seconds": 0]),
+            toolResponse(id: "t2", tool: "done", input: ["summary": "Waited, then finished."])
+        ])
+        let computer = musicComputer()
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory()
+        )
+
+        let outcome = await session.run(task: "Wait for the UI to settle")
+        #expect(outcome.status == .completed)
+        let actions = await computer.performedActions
+        #expect(actions.isEmpty)
     }
 
     @Test func multipleToolCallsOnlyRunTheFirstTool() async {
