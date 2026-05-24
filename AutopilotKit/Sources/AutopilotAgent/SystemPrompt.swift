@@ -31,6 +31,8 @@ enum SystemPrompt {
         - press_key: send a keyboard key, optionally with modifiers.
         - drag: drag from one element to another.
         - perform_secondary_action: perform an advertised non-primary AX action.
+        - wait: pause briefly for the UI to settle (animation or loading) before \
+        re-reading, when you expect the state is still changing.
         - ask_user: ask a clarifying question when the task is ambiguous.
         - propose_memory: suggest saving a durable preference you noticed.
         - propose_workflow: after finishing a repeatable task, suggest saving it \

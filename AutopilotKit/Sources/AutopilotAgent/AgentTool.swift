@@ -15,6 +15,7 @@ public enum AgentTool: String, CaseIterable, Sendable {
     case setValue = "set_value"
     case drag = "drag"
     case performSecondaryAction = "perform_secondary_action"
+    case wait = "wait"
     case askUser = "ask_user"
     case proposeMemory = "propose_memory"
     case proposeWorkflow = "propose_workflow"
@@ -34,6 +35,7 @@ public enum ToolCatalog {
         setValue,
         drag,
         performSecondaryAction,
+        wait,
         askUser,
         proposeMemory,
         proposeWorkflow,
@@ -222,6 +224,26 @@ public enum ToolCatalog {
                 ]
             ],
             "required": ["element_index", "action"]
+        ]
+    )
+
+    static let wait = ToolDefinition(
+        name: AgentTool.wait.rawValue,
+        description: """
+        Pause briefly to let the app settle — use after an action that triggers \
+        animation or loading, before re-reading the state. Returns the updated \
+        accessibility tree after waiting. Do not use it to idle; only when you \
+        expect the UI to still be changing.
+        """,
+        inputSchema: [
+            "type": "object",
+            "properties": [
+                "seconds": [
+                    "type": "number",
+                    "description": "How long to wait, in seconds (default 1, max 5)."
+                ]
+            ],
+            "required": []
         ]
     )
 

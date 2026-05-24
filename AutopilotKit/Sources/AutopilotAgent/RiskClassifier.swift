@@ -40,8 +40,8 @@ public struct RiskClassifier: Sendable {
         snapshot: UITreeSnapshot?
     ) -> RiskLevel {
         switch tool {
-        case .listApps, .getAppState, .scroll:
-            // Reading and scrolling change nothing the user cannot undo.
+        case .listApps, .getAppState, .scroll, .wait:
+            // Reading, scrolling, and waiting change nothing the user cannot undo.
             return .safe
         case .askUser, .done, .proposeMemory, .proposeWorkflow:
             // Orchestration tools never touch the controlled app.

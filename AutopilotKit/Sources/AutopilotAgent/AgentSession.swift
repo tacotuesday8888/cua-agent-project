@@ -474,7 +474,7 @@ public actor AgentSession {
         case .drag:
             normalize(primaryKey: "from_element_index", canonicalKey: "from_element_id")
             normalize(primaryKey: "to_element_index", canonicalKey: "to_element_id")
-        case .listApps, .getAppState, .pressKey, .askUser, .proposeMemory,
+        case .listApps, .getAppState, .pressKey, .wait, .askUser, .proposeMemory,
              .proposeWorkflow, .done:
             break
         }
@@ -876,9 +876,23 @@ public actor AgentSession {
             try await computer.performSecondaryAction(elementID: id, action: action)
             return try await observedResult("Performed \(action) on \(id).")
 
+        case .wait:
+            let seconds = Self.waitSeconds(input)
+            if seconds > 0 {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            }
+            return try await observedResult("Waited \(seconds)s for the UI to settle.")
+
         case .askUser, .proposeMemory, .proposeWorkflow, .done:
             return []  // handled in `dispatch`
         }
+    }
+
+    /// The wait duration, clamped to a small, safe range so the model cannot
+    /// stall a run. Missing or non-numeric input defaults to one second.
+    private static func waitSeconds(_ input: JSONValue) -> Double {
+        let requested = input["seconds"]?.doubleValue ?? 1
+        return min(max(requested, 0), 5)
     }
 
     // MARK: - Helpers
@@ -980,7 +994,7 @@ public actor AgentSession {
         case .performSecondaryAction:
             _ = try requireElementID(input, tool: tool)
             _ = try requireString(input, "action", tool: tool)
-        case .askUser, .proposeMemory, .proposeWorkflow, .done:
+        case .wait, .askUser, .proposeMemory, .proposeWorkflow, .done:
             return
         }
     }
@@ -1021,7 +1035,7 @@ public actor AgentSession {
                     action: action
                 )
             }
-        case .listApps, .getAppState, .pressKey, .askUser, .proposeMemory,
+        case .listApps, .getAppState, .pressKey, .wait, .askUser, .proposeMemory,
              .proposeWorkflow, .done:
             return
         }
@@ -1241,6 +1255,8 @@ public actor AgentSession {
             return "Drag"
         case .performSecondaryAction:
             return "Perform \(input["action"]?.stringValue ?? "secondary action")"
+        case .wait:
+            return "Wait"
         case .askUser:
             return "Ask a question"
         case .proposeMemory:
