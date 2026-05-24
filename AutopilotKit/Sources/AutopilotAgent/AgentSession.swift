@@ -22,6 +22,10 @@ public struct AgentConfiguration: Sendable {
     /// Text-only providers still get the accessibility tree, but screenshot
     /// requests are answered with an explicit omission note.
     public var supportsImageInput: Bool
+    /// Optional guidance from a saved workflow ("recipe"), woven into the system
+    /// prompt as hints. The agent still re-reads and verifies the live screen;
+    /// the recipe is a prior, not a script. Empty/nil for ordinary runs.
+    public var recipe: String?
 
     public init(
         model: String,
@@ -29,7 +33,8 @@ public struct AgentConfiguration: Sendable {
         maxTokens: Int = 4096,
         highlightDwell: Duration = .milliseconds(400),
         liveObservationWindow: Int = 3,
-        supportsImageInput: Bool = true
+        supportsImageInput: Bool = true,
+        recipe: String? = nil
     ) {
         self.model = model
         self.maxSteps = maxSteps
@@ -37,6 +42,7 @@ public struct AgentConfiguration: Sendable {
         self.highlightDwell = highlightDwell
         self.liveObservationWindow = max(1, liveObservationWindow)
         self.supportsImageInput = supportsImageInput
+        self.recipe = recipe
     }
 }
 
@@ -844,7 +850,11 @@ public actor AgentSession {
     private func buildRequest() -> LLMRequest {
         LLMRequest(
             model: configuration.model,
-            system: SystemPrompt.build(appName: computer.appName, memories: recalledMemory),
+            system: SystemPrompt.build(
+                appName: computer.appName,
+                memories: recalledMemory,
+                recipe: configuration.recipe
+            ),
             messages: transcript.messages,
             tools: ToolCatalog.all,
             maxTokens: configuration.maxTokens

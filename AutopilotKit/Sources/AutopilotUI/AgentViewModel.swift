@@ -391,13 +391,24 @@ public final class AgentViewModel: UserInteraction {
             )
             self.selectedAppName = workflow.appName
             self.activeWorkflowID = workflow.id
-            self.startRun(task: goal, target: target, note: "Workflow — \(workflow.name)")
+            self.startRun(
+                task: goal,
+                target: target,
+                note: "Workflow — \(workflow.name)",
+                recipe: workflow.recipe
+            )
         }
     }
 
     /// Build and start an `AgentSession` for `task` against `target`, resetting
-    /// the run UI state. Shared by direct prompts and workflow re-runs.
-    private func startRun(task: String, target: AppLocator.RunningApp, note: String? = nil) {
+    /// the run UI state. Shared by direct prompts and workflow re-runs. A
+    /// workflow re-run passes its saved `recipe` as a prompt prior.
+    private func startRun(
+        task: String,
+        target: AppLocator.RunningApp,
+        note: String? = nil,
+        recipe: String? = nil
+    ) {
         let provider = selectedProvider
         let apiKey = apiKey
         do {
@@ -440,7 +451,8 @@ public final class AgentViewModel: UserInteraction {
             interaction: self,
             configuration: AgentConfiguration(
                 model: provider.model,
-                supportsImageInput: provider.descriptor.supportsImageInput
+                supportsImageInput: provider.descriptor.supportsImageInput,
+                recipe: recipe
             ),
             memory: memory,
             permanentlyTrustedApps: Set(permanentlyTrustedApps),
