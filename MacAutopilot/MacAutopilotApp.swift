@@ -116,8 +116,14 @@ final class AuthModel {
     /// non-Sendable `GIDSignInResult`/`AuthDataResult` never cross actor
     /// isolation, which strict Swift concurrency would otherwise reject.
     func signIn(presenting window: NSWindow) async {
+        guard FirebaseApp.app() != nil else {
+            statusMessage = "Firebase isn't configured — GoogleService-Info.plist is "
+                + "missing from the app bundle (do a clean build)."
+            return
+        }
         guard let clientID = FirebaseApp.app()?.options.clientID else {
-            statusMessage = "Firebase is not configured."
+            statusMessage = "Google sign-in isn't set up — GoogleService-Info.plist has no "
+                + "CLIENT_ID. Re-download it from Firebase."
             return
         }
         GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientID)
