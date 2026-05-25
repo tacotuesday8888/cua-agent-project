@@ -32,17 +32,6 @@ public struct LLMProviderDescriptor: Sendable, Hashable, Codable {
         self.keychainAccount = keychainAccount
     }
 
-    public static let zai = LLMProviderDescriptor(
-        identifier: "zai",
-        displayName: "Z.ai GLM-4.7-Flash",
-        defaultModel: "glm-4.7-flash",
-        supportsToolCalls: true,
-        supportsImageInput: false,
-        supportsPromptCaching: false,
-        apiKeyEnvironment: "ZAI_API_KEY",
-        keychainAccount: "AutopilotZAIAPIKey"
-    )
-
     public static let anthropic = LLMProviderDescriptor(
         identifier: "anthropic",
         displayName: "Anthropic Claude",
@@ -86,7 +75,7 @@ public struct LLMProviderDescriptor: Sendable, Hashable, Codable {
 ///
 /// Conforming types adapt a specific vendor API (Anthropic, OpenAI, a local
 /// model, …) to one request/response shape, so the agent never depends on a
-/// particular model or vendor. The v1 app default is `ZAIProvider`.
+/// particular model or vendor. The app default is `OpenAIProvider`.
 public protocol LLMProvider: Sendable {
     /// A short identifier for logging and telemetry, e.g. "anthropic".
     var identifier: String { get }

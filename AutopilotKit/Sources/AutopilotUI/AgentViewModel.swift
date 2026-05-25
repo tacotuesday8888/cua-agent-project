@@ -105,7 +105,6 @@ public final class AgentViewModel: UserInteraction {
     /// Supported LLM backends.
     public enum Provider: String, CaseIterable, Identifiable, Sendable {
         case openai
-        case zai
         case anthropic
         /// Mac Autopilot's own hosted backend (the `llmProxy` callable). Uses the
         /// signed-in account for auth instead of a pasted key.
@@ -116,7 +115,6 @@ public final class AgentViewModel: UserInteraction {
         public var descriptor: LLMProviderDescriptor {
             switch self {
             case .openai: .openai
-            case .zai: .zai
             case .anthropic: .anthropic
             case .hosted: .hosted
             }
@@ -139,7 +137,6 @@ public final class AgentViewModel: UserInteraction {
         var apiKeyPlaceholder: String {
             switch self {
             case .openai: "OpenAI API key"
-            case .zai: "Z.ai API key"
             case .anthropic: "Anthropic API key"
             case .hosted: "No API key needed"
             }
@@ -1023,8 +1020,6 @@ public final class AgentViewModel: UserInteraction {
         switch provider {
         case .openai:
             OpenAIProvider(apiKey: apiKey)
-        case .zai:
-            ZAIProvider(apiKey: apiKey)
         case .anthropic:
             AnthropicProvider(apiKey: apiKey)
         case .hosted:

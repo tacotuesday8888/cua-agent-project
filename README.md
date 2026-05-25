@@ -109,7 +109,7 @@ swift run --package-path AutopilotKit AutopilotFixtureApp
 swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp
 swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp --include-screenshot
 ./script/validate_fixture.sh
-./script/validate_fixture.sh --live-provider zai
+./script/validate_fixture.sh --live-provider openai
 ```
 
 To inspect what the agent would see for any running app, dump its
@@ -119,23 +119,22 @@ accessibility tree:
 swift run --package-path AutopilotKit AutopilotSmokeCLI --app Safari --dump-tree
 ```
 
-## GLM 4.7 Flash
+## Live provider smoke test
 
-The default Z.AI provider is `glm-4.7-flash` on Z.AI's OpenAI-compatible chat
-completions endpoint. Do not put keys in source files. Use one of these local
-paths:
+The default provider is OpenAI `gpt-5.4-mini`. Do not put keys in source files.
+Use one of these local paths:
 
-- App harness: choose `Z.ai GLM-4.7-Flash`, paste the key into the secure field,
-  and run a task; the app stores it in Keychain.
-- Smoke CLI: set `ZAI_API_KEY` only in the shell session that runs the smoke
-  test, or save the key through the app first.
+- App harness: choose `OpenAI GPT-5.4 Mini` (or `Anthropic Claude`), paste the
+  key into the secure field, and run a task; the app stores it in Keychain.
+- Smoke CLI: set `OPENAI_API_KEY` (or `ANTHROPIC_API_KEY`) only in the shell
+  session that runs the smoke test, or save the key through the app first.
 
 ```sh
-swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp --live-provider zai
+swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp --live-provider openai
 ```
 
 The same live fixture smoke can be run through the validation script with
-`./script/validate_fixture.sh --live-provider zai`; add `--api-key-env NAME`,
+`./script/validate_fixture.sh --live-provider openai`; add `--api-key-env NAME`,
 `--model MODEL`, or `--max-steps N` when needed. The live provider path is
 opt-in because it uses a real API key.
 
@@ -143,6 +142,6 @@ The smoke runner process needs Accessibility permission in System Settings >
 Privacy & Security > Accessibility. Add `--include-screenshot` to also require
 Screen Recording and validate target-window screenshot bytes.
 
-Provider capabilities are explicit in code. Z.AI is configured as a text-only
-tool-calling provider, so screenshot image blocks are omitted with a warning;
-Anthropic is configured for image input and prompt caching.
+Provider capabilities are explicit in code: OpenAI GPT-5.4 Mini and Anthropic
+Claude both support image input. OpenAI caches repeated prompt prefixes
+automatically; Anthropic uses explicit prompt caching.

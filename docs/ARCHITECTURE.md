@@ -68,28 +68,25 @@ That product shape implies a few hard technical seams:
   If a corrupt file is later replaced, the corrupt bytes are still retained for
   manual recovery instead of being silently lost.
 
-## GLM 4.7 Flash
+## LLM providers
 
-The Z.AI provider uses the OpenAI-compatible chat-completions shape:
+The default provider is **OpenAI GPT-5.4 Mini** (`gpt-5.4-mini`) over the
+standard Chat Completions API. **Anthropic Claude** is a second
+bring-your-own-key option, and **Mac Autopilot (hosted)** routes the same model
+through the project's authenticated backend (the user signs in instead of
+pasting a key). All three support tool calling and image input.
 
-- Endpoint: `https://api.z.ai/api/paas/v4/chat/completions`
-- Model: `glm-4.7-flash`
-- Tool calling: function tools with `tool_choice: auto`
-- Key handling: `Authorization: Bearer <api-key>`
-- Capability metadata: tool calls are enabled, image input is disabled, prompt
-  caching is disabled.
-
-Official references:
-
-- Z.AI Chat Completion API:
-  `https://docs.z.ai/api-reference/llm/chat-completion`
-- GLM 4.7 model guide:
-  `https://docs.z.ai/guides/llm/glm-4.7`
+- OpenAI / hosted: Chat Completions shape, function tools with
+  `tool_choice: auto`. BYOK uses `Authorization: Bearer <api-key>`; hosted sends
+  the signed-in account's Firebase ID token to the `llmProxy` backend.
+- Anthropic: Messages API with prompt caching.
 
 The app should never store provider keys in source, `UserDefaults`, logs, test
-fixtures, or commits. The temporary harness stores the Z.AI key in Keychain when
-the user runs a task. The smoke CLI can read `ZAI_API_KEY` from the environment
-for one-off validation, then falls back to the same Keychain account.
+fixtures, or commits. The harness stores the bring-your-own-key in Keychain when
+the user runs a task. The smoke CLI can read `OPENAI_API_KEY` /
+`ANTHROPIC_API_KEY` from the environment for one-off validation, then falls back
+to the same Keychain account. Hosted access uses the signed-in account's token,
+not a stored key.
 
 Provider capabilities live in `AutopilotLLM.LLMProviderDescriptor`. UI and smoke
 tooling must use those descriptors instead of duplicating model names, keychain
@@ -187,7 +184,7 @@ rather than making the agent loop depend on a server.
 
 ## Work That Can Continue Before Final UI
 
-- First low-risk live GLM run against a normal third-party app.
+- First low-risk live run against a normal third-party app.
 - Better prompt/tool-choice recovery for stale or missing AX elements.
 - More robust driver diagnostics for permission and target-window failures.
 - App-picker polish around duplicate app names and saved workflow target edits.
