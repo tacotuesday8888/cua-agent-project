@@ -12,9 +12,12 @@
 		A5D7F6E0EF733CE249BBEE96 /* AutopilotCore in Frameworks */ = {isa = PBXBuildFile; productRef = 8FF2EC3426FF996A35B951FF /* AutopilotCore */; };
 		B18B37A2430BA4993177A607 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D8FF34B626C1F73BBCB7465 /* ContentView.swift */; };
 		C40A9F4B7F9F4F6E9D0C1001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C40A9F4B7F9F4F6E9D0C1000 /* Assets.xcassets */; };
+		C40A9F4B7F9F4F6E9D0C1003 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = C40A9F4B7F9F4F6E9D0C1004 /* GoogleService-Info.plist */; };
 		CB4671DB015FAA38964052DC /* MacAutopilotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D0BF057B2091CE0320A5958 /* MacAutopilotTests.swift */; };
 		CE9A5658CB90F9C2375E368C /* MacAutopilotApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E7DB48C234ECB4F9FD5A111 /* MacAutopilotApp.swift */; };
 		D8372C345B3276B9AE06800B /* AutopilotLLM in Frameworks */ = {isa = PBXBuildFile; productRef = 4C6C024C9585F7102B43F33D /* AutopilotLLM */; };
+		DEADBEEF0000000000000001 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = CAFEF00D0000000000000001 /* FirebaseAuth */; };
+		DEADBEEF0000000000000002 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = CAFEF00D0000000000000002 /* GoogleSignIn */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -36,6 +39,7 @@
 		A646B4FE57A1CE79B5371FE0 /* MacAutopilotTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MacAutopilotTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		BE75A44D29DB0A0EBA24C4E8 /* MacAutopilot.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MacAutopilot.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C40A9F4B7F9F4F6E9D0C1000 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		C40A9F4B7F9F4F6E9D0C1004 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -47,6 +51,8 @@
 				D8372C345B3276B9AE06800B /* AutopilotLLM in Frameworks */,
 				0A234545A4775E4289E39A25 /* AutopilotAgent in Frameworks */,
 				D1E2F3A4B5C6D7E8F9A0B1C2 /* AutopilotUI in Frameworks */,
+				DEADBEEF0000000000000001 /* FirebaseAuth in Frameworks */,
+				DEADBEEF0000000000000002 /* GoogleSignIn in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -57,6 +63,7 @@
 			isa = PBXGroup;
 			children = (
 				C40A9F4B7F9F4F6E9D0C1000 /* Assets.xcassets */,
+				C40A9F4B7F9F4F6E9D0C1004 /* GoogleService-Info.plist */,
 				5D8FF34B626C1F73BBCB7465 /* ContentView.swift */,
 				36D00CB693ECB52CB13153DC /* MacAutopilot.entitlements */,
 				7E7DB48C234ECB4F9FD5A111 /* MacAutopilotApp.swift */,
@@ -120,6 +127,8 @@
 				4C6C024C9585F7102B43F33D /* AutopilotLLM */,
 				E2C1701687B09E7182366316 /* AutopilotAgent */,
 				C2B1A0F9E8D7C6B5A4F3E2D1 /* AutopilotUI */,
+				CAFEF00D0000000000000001 /* FirebaseAuth */,
+				CAFEF00D0000000000000002 /* GoogleSignIn */,
 			);
 			productName = MacAutopilot;
 			productReference = BE75A44D29DB0A0EBA24C4E8 /* MacAutopilot.app */;
@@ -171,6 +180,8 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				68F75A66569323935A09652E /* XCLocalSwiftPackageReference "AutopilotKit" */,
+				FACEFEED0000000000000001 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				FACEFEED0000000000000002 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 634BFAD61D71ED326BCC7FE0 /* Products */;
@@ -189,6 +200,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				C40A9F4B7F9F4F6E9D0C1001 /* Assets.xcassets in Resources */,
+				C40A9F4B7F9F4F6E9D0C1003 /* GoogleService-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -471,6 +483,25 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		FACEFEED0000000000000001 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.13.0;
+			};
+		};
+		FACEFEED0000000000000002 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.1.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		4C6C024C9585F7102B43F33D /* AutopilotLLM */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -487,6 +518,16 @@
 		C2B1A0F9E8D7C6B5A4F3E2D1 /* AutopilotUI */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = AutopilotUI;
+		};
+		CAFEF00D0000000000000001 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FACEFEED0000000000000001 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		CAFEF00D0000000000000002 /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FACEFEED0000000000000002 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

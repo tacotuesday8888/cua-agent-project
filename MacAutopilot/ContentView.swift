@@ -7,9 +7,32 @@ import SwiftUI
 /// watch the live feed. The notch UI replaces this once the engine is proven.
 struct ContentView: View {
     @State private var model = AgentViewModel()
+    @State private var auth = AuthModel()
     @State private var newWorkflowName = ""
     @State private var newWorkflowGoal = ""
     @State private var workflowBindings: [UUID: [String: String]] = [:]
+
+    /// Sign-in controls shown in place of the API-key field for hosted AI.
+    @ViewBuilder
+    private var hostedAccountControls: some View {
+        if let email = auth.email {
+            HStack(spacing: 8) {
+                Text("Signed in as \(email)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Button("Sign out") { auth.signOut() }
+            }
+        } else {
+            Button("Sign in with Google") {
+                Task {
+                    guard let window = NSApp.keyWindow ?? NSApp.windows.first else { return }
+                    await auth.signIn(presenting: window)
+                }
+            }
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -29,8 +52,17 @@ struct ContentView: View {
                 }
                 .frame(maxWidth: 220)
 
-                SecureField(model.apiKeyPlaceholder, text: $model.apiKey)
-                    .textFieldStyle(.roundedBorder)
+                if model.selectedProviderRequiresAPIKey {
+                    SecureField(model.apiKeyPlaceholder, text: $model.apiKey)
+                        .textFieldStyle(.roundedBorder)
+                } else {
+                    hostedAccountControls
+                }
+            }
+            if !model.selectedProviderRequiresAPIKey, let status = auth.statusMessage {
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle(.red)
             }
 
             HStack {
@@ -87,6 +119,8 @@ struct ContentView: View {
         .onAppear {
             model.refreshApps()
             model.refreshPermissions()
+            model.hostedTokenProvider = hostedFirebaseToken
+            auth.refresh()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             model.refreshPermissions()
