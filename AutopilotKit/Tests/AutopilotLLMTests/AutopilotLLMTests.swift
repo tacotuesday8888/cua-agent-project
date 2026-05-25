@@ -72,6 +72,14 @@ struct LLMProviderDescriptorTests {
         #expect(!LLMProviderDescriptor.openai.supportsPromptCaching)
         #expect(LLMProviderDescriptor.openai.apiKeyEnvironment == "OPENAI_API_KEY")
         #expect(LLMProviderDescriptor.openai.keychainAccount == "AutopilotOpenAIAPIKey")
+
+        // Hosted uses sign-in, not a local API key, so the key fields are empty.
+        #expect(LLMProviderDescriptor.hosted.identifier == "hosted")
+        #expect(LLMProviderDescriptor.hosted.defaultModel == "gpt-5.4-mini")
+        #expect(LLMProviderDescriptor.hosted.supportsToolCalls)
+        #expect(LLMProviderDescriptor.hosted.supportsImageInput)
+        #expect(LLMProviderDescriptor.hosted.apiKeyEnvironment.isEmpty)
+        #expect(LLMProviderDescriptor.hosted.keychainAccount.isEmpty)
     }
 }
 
@@ -93,6 +101,14 @@ struct LLMErrorTests {
         let message = LLMError.authenticationFailed(provider: "Z.ai").errorDescription ?? ""
         #expect(!message.contains("{"))
         #expect(!message.contains("HTTP"))
+    }
+
+    @Test func serviceErrorPassesTheBackendMessageThrough() {
+        // The hosted backend already writes user-facing messages; surface them as-is.
+        #expect(
+            LLMError.service(message: "Monthly usage limit reached.").errorDescription
+                == "Monthly usage limit reached."
+        )
     }
 }
 
@@ -975,6 +991,171 @@ struct OpenAIProviderTests {
     }
 }
 
+@Suite(.serialized)
+struct HostedProviderTests {
+    private func makeProvider(token: String?, retryPolicy: RetryPolicy = .standard) -> HostedProvider {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [HostedStubURLProtocol.self]
+        return HostedProvider(
+            endpoint: URL(string: "https://unit.test/llmProxy")!,
+            tokenProvider: { token },
+            urlSession: URLSession(configuration: config),
+            retryPolicy: retryPolicy
+        )
+    }
+
+    @Test func notSignedInFailsWithoutCallingTheNetwork() async {
+        let counter = LockedCounter()
+        HostedStubURLProtocol.responder = { request in
+            counter.increment()
+            let http = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (http, Data("{}".utf8))
+        }
+        defer { HostedStubURLProtocol.responder = nil }
+
+        do {
+            _ = try await makeProvider(token: nil)
+                .send(LLMRequest(model: "gpt-5.4-mini", messages: [.user("hi")]))
+            Issue.record("expected a sign-in error")
+        } catch {
+            #expect(error as? LLMError == .service(message: "Sign in to use hosted AI."))
+            #expect(counter.value == 0) // never reached the backend
+        }
+    }
+
+    @Test func decodesResultEnvelopeIntoResponse() async throws {
+        HostedStubURLProtocol.responder = { request in
+            let http = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            let json = """
+            {"result":{"content":[{"type":"text","text":"Hi"},{"type":"toolUse","id":"t1","name":"done","input":{"summary":"ok"}}],"stopReason":"toolUse","usage":{"inputTokens":12,"outputTokens":7}}}
+            """
+            return (http, Data(json.utf8))
+        }
+        defer { HostedStubURLProtocol.responder = nil }
+
+        let response = try await makeProvider(token: "tok")
+            .send(LLMRequest(model: "gpt-5.4-mini", messages: [.user("hi")]))
+        #expect(response.text == "Hi")
+        #expect(response.stopReason == .toolUse)
+        #expect(response.toolUses.first?.name == "done")
+        #expect(response.toolUses.first?.input["summary"]?.stringValue == "ok")
+        #expect(response.usage.inputTokens == 12)
+        #expect(response.usage.outputTokens == 7)
+    }
+
+    @Test func sendsDataEnvelopeWithBearerToken() async throws {
+        HostedStubURLProtocol.capturedRequest = nil
+        HostedStubURLProtocol.capturedBody = nil
+        HostedStubURLProtocol.responder = { request in
+            let http = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (http, Data(#"{"result":{"content":[],"stopReason":"endTurn","usage":{"inputTokens":0,"outputTokens":0}}}"#.utf8))
+        }
+        defer {
+            HostedStubURLProtocol.responder = nil
+            HostedStubURLProtocol.capturedRequest = nil
+            HostedStubURLProtocol.capturedBody = nil
+        }
+
+        _ = try await makeProvider(token: "tok").send(
+            LLMRequest(model: "gpt-5.4-mini", system: "sys", messages: [.user("hello")])
+        )
+
+        let request = try #require(HostedStubURLProtocol.capturedRequest)
+        #expect(request.value(forHTTPHeaderField: "authorization") == "Bearer tok")
+        let body = try #require(HostedStubURLProtocol.capturedBody)
+        let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        let envelope = try #require(json)
+        let data = try #require(envelope["data"] as? [String: Any])
+        #expect(data["model"] as? String == "gpt-5.4-mini")
+        #expect(data["system"] as? String == "sys")
+        let messages = try #require(data["messages"] as? [[String: Any]])
+        #expect(messages.first?["role"] as? String == "user")
+        #expect(messages.first?["text"] as? String == "hello")
+    }
+
+    @Test func relocatesToolResultImagesAndLooksUpToolName() async throws {
+        HostedStubURLProtocol.capturedBody = nil
+        HostedStubURLProtocol.responder = { request in
+            let http = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (http, Data(#"{"result":{"content":[],"stopReason":"endTurn","usage":{"inputTokens":0,"outputTokens":0}}}"#.utf8))
+        }
+        defer {
+            HostedStubURLProtocol.responder = nil
+            HostedStubURLProtocol.capturedBody = nil
+        }
+
+        _ = try await makeProvider(token: "tok").send(LLMRequest(
+            model: "gpt-5.4-mini",
+            messages: [
+                LLMMessage(role: .assistant, content: [
+                    .toolUse(ToolUse(id: "c1", name: "get_app_state", input: .object([:]))),
+                ]),
+                LLMMessage(role: .user, content: [
+                    .toolResult(ToolResult(
+                        toolUseID: "c1",
+                        content: [.text("tree"), .image(ImageBlock(base64Data: "AAA"))]
+                    )),
+                ]),
+            ]
+        ))
+
+        let body = try #require(HostedStubURLProtocol.capturedBody)
+        let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        let data = try #require((json?["data"]) as? [String: Any])
+        let messages = try #require(data["messages"] as? [[String: Any]])
+
+        // The assistant tool call is preserved.
+        let assistant = try #require(messages.first { $0["role"] as? String == "assistant" })
+        let toolCalls = try #require(assistant["toolCalls"] as? [[String: Any]])
+        #expect(toolCalls.first?["name"] as? String == "get_app_state")
+
+        // The tool-result message carries text + the name looked up from the call.
+        let toolResultMessage = try #require(messages.first { $0["toolResults"] != nil })
+        let toolResults = try #require(toolResultMessage["toolResults"] as? [[String: Any]])
+        #expect(toolResults.first?["name"] as? String == "get_app_state")
+        #expect(toolResults.first?["text"] as? String == "tree")
+
+        // The tool-result image is relocated into a following user message.
+        let imageMessage = try #require(messages.first { ($0["images"] as? [[String: Any]])?.isEmpty == false })
+        #expect(imageMessage["role"] as? String == "user")
+        let images = try #require(imageMessage["images"] as? [[String: Any]])
+        #expect(images.first?["dataBase64"] as? String == "AAA")
+    }
+
+    @Test func callableErrorMapsToServiceMessageAndIsNotRetried() async {
+        let counter = LockedCounter()
+        HostedStubURLProtocol.responder = { request in
+            counter.increment()
+            let http = HTTPURLResponse(url: request.url!, statusCode: 429, httpVersion: nil, headerFields: nil)!
+            return (http, Data(#"{"error":{"message":"Monthly usage limit reached.","status":"RESOURCE_EXHAUSTED"}}"#.utf8))
+        }
+        defer { HostedStubURLProtocol.responder = nil }
+
+        do {
+            _ = try await makeProvider(token: "tok", retryPolicy: RetryPolicy(maxRetries: 2, baseDelaySeconds: 0))
+                .send(LLMRequest(model: "gpt-5.4-mini", messages: [.user("hi")]))
+            Issue.record("expected a service error")
+        } catch {
+            #expect(error as? LLMError == .service(message: "Monthly usage limit reached."))
+            #expect(counter.value == 1)
+        }
+    }
+
+    @Test func networkFailureMapsToNetworkError() async {
+        HostedStubURLProtocol.responder = nil // makes the stub fail the request
+        do {
+            _ = try await makeProvider(token: "tok", retryPolicy: RetryPolicy(maxRetries: 0, baseDelaySeconds: 0))
+                .send(LLMRequest(model: "gpt-5.4-mini", messages: [.user("hi")]))
+            Issue.record("expected a network error")
+        } catch {
+            guard case LLMError.network = error else {
+                Issue.record("expected .network, got \(error)")
+                return
+            }
+        }
+    }
+}
+
 /// A `URLProtocol` that returns a canned response and captures the outbound
 /// request, for offline provider tests.
 final class StubURLProtocol: URLProtocol {
@@ -1070,6 +1251,52 @@ final class ZAIStubURLProtocol: URLProtocol {
 
 /// Separate stub so OpenAI provider tests run independently from the others.
 final class OpenAIStubURLProtocol: URLProtocol {
+    nonisolated(unsafe) static var responder: (@Sendable (URLRequest) -> (HTTPURLResponse, Data))?
+    nonisolated(unsafe) static var capturedRequest: URLRequest?
+    nonisolated(unsafe) static var capturedBody: Data?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        Self.capturedRequest = request
+        Self.capturedBody = Self.bodyData(from: request)
+        guard let responder = Self.responder else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+        let (response, data) = responder(request)
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+
+    private static func bodyData(from request: URLRequest) -> Data? {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return nil }
+
+        stream.open()
+        defer { stream.close() }
+
+        var data = Data()
+        let bufferSize = 4096
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        defer { buffer.deallocate() }
+
+        while stream.hasBytesAvailable {
+            let count = stream.read(buffer, maxLength: bufferSize)
+            if count < 0 { return nil }
+            if count == 0 { break }
+            data.append(buffer, count: count)
+        }
+        return data
+    }
+}
+
+/// Separate stub so hosted-provider tests run independently from the others.
+final class HostedStubURLProtocol: URLProtocol {
     nonisolated(unsafe) static var responder: (@Sendable (URLRequest) -> (HTTPURLResponse, Data))?
     nonisolated(unsafe) static var capturedRequest: URLRequest?
     nonisolated(unsafe) static var capturedBody: Data?

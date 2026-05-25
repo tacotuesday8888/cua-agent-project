@@ -61,7 +61,7 @@ public struct RetryPolicy: Sendable, Equatable {
             return true
         case .http(let status, _):
             return [500, 502, 503, 504].contains(status)
-        case .missingAPIKey, .authenticationFailed, .decodingFailed, .invalidResponse:
+        case .missingAPIKey, .authenticationFailed, .decodingFailed, .invalidResponse, .service:
             return false
         }
     }
