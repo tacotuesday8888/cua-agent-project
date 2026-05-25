@@ -93,8 +93,28 @@ final class AuthModel {
         email = Auth.auth().currentUser?.email
     }
 
+    /// The Sendable bits we pull out of a Google sign-in result.
+    private struct GoogleTokens: Sendable {
+        let idToken: String
+        let accessToken: String
+    }
+
+    private enum SignInError: LocalizedError {
+        case noIDToken
+        var errorDescription: String? {
+            switch self {
+            case .noIDToken: "Google did not return an ID token."
+            }
+        }
+    }
+
     /// Run the Google sign-in flow, exchange the Google credential for a
     /// Firebase session, and record the signed-in email.
+    ///
+    /// Both vendor calls use completion handlers wrapped in continuations so we
+    /// extract only the Sendable token/email strings inside each callback — the
+    /// non-Sendable `GIDSignInResult`/`AuthDataResult` never cross actor
+    /// isolation, which strict Swift concurrency would otherwise reject.
     func signIn(presenting window: NSWindow) async {
         guard let clientID = FirebaseApp.app()?.options.clientID else {
             statusMessage = "Firebase is not configured."
@@ -102,17 +122,36 @@ final class AuthModel {
         }
         GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientID)
         do {
-            let result = try await GIDSignIn.sharedInstance.signIn(withPresenting: window)
-            guard let idToken = result.user.idToken?.tokenString else {
-                statusMessage = "Google did not return an ID token."
-                return
+            let tokens: GoogleTokens = try await withCheckedThrowingContinuation { continuation in
+                GIDSignIn.sharedInstance.signIn(withPresenting: window) { result, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else if let user = result?.user, let idToken = user.idToken?.tokenString {
+                        continuation.resume(
+                            returning: GoogleTokens(
+                                idToken: idToken,
+                                accessToken: user.accessToken.tokenString
+                            )
+                        )
+                    } else {
+                        continuation.resume(throwing: SignInError.noIDToken)
+                    }
+                }
             }
             let credential = GoogleAuthProvider.credential(
-                withIDToken: idToken,
-                accessToken: result.user.accessToken.tokenString
+                withIDToken: tokens.idToken,
+                accessToken: tokens.accessToken
             )
-            let authResult = try await Auth.auth().signIn(with: credential)
-            email = authResult.user.email
+            let signedInEmail: String? = try await withCheckedThrowingContinuation { continuation in
+                Auth.auth().signIn(with: credential) { authResult, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume(returning: authResult?.user.email)
+                    }
+                }
+            }
+            email = signedInEmail
             statusMessage = nil
         } catch {
             statusMessage = "Sign-in failed: \(error.localizedDescription)"
