@@ -192,6 +192,69 @@ struct AgentViewModelTests {
         #expect(saved == false)
         #expect(model.pendingMemory == nil)
     }
+
+    // MARK: - Hosted provider
+
+    /// The persisted-provider key. Hosted tests restore it so the only
+    /// key-free provider never leaks into the suite's "missing key" tests.
+    private static let providerDefaultsKey = "AutopilotLLMProvider"
+
+    @Test func hostedProviderExposesCapabilityMetadata() {
+        let saved = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+        defer { Self.restoreProviderDefault(saved) }
+
+        let model = AgentViewModel()
+        model.selectedProvider = .hosted
+        #expect(model.selectedProviderDescriptor.identifier == "hosted")
+        #expect(model.selectedProvider.displayName == "Mac Autopilot (hosted)")
+        #expect(model.selectedModelName == "gpt-5.4-mini")
+        #expect(model.selectedProviderDescriptor.supportsImageInput)
+        #expect(model.selectedProviderDescriptor.supportsToolCalls)
+        #expect(model.selectedProviderLimitations == nil)
+        // Hosted authenticates with the signed-in account, so the UI hides the
+        // key field and no key is required to start a run.
+        #expect(model.selectedProviderRequiresAPIKey == false)
+    }
+
+    @Test func hostedProviderIsSelectableInThePicker() {
+        #expect(AgentViewModel.Provider.allCases.contains(.hosted))
+    }
+
+    @Test func hostedEndpointPointsAtTheDeployedProxy() {
+        #expect(
+            AgentViewModel.hostedEndpoint.absoluteString
+                == "https://us-central1-macautopilot.cloudfunctions.net/llmProxy"
+        )
+    }
+
+    @Test func submitWithHostedProviderSkipsAPIKeyGuard() {
+        let saved = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+        defer { Self.restoreProviderDefault(saved) }
+
+        let model = AgentViewModel()
+        model.selectedProvider = .hosted
+        model.apiKey = ""
+        model.selectedAppName = "NoSuchApp9X8Y7Z"
+        model.promptText = "Do something"
+        model.submit()
+
+        // Hosted needs no key: submit clears the key guard and fails later at
+        // app resolution — never with the "API key" message.
+        guard case .failed(let reason) = model.phase else {
+            Issue.record("expected a failure after the app lookup")
+            return
+        }
+        #expect(!reason.contains("API key"))
+        #expect(reason.contains("NoSuchApp9X8Y7Z"))
+    }
+
+    private static func restoreProviderDefault(_ saved: String?) {
+        if let saved {
+            UserDefaults.standard.set(saved, forKey: providerDefaultsKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: providerDefaultsKey)
+        }
+    }
 }
 
 @MainActor
@@ -356,6 +419,37 @@ struct AgentViewModelWorkflowTests {
             return
         }
         #expect(reason.contains("API key"))
+    }
+
+    @Test func runWorkflowWithHostedProviderSkipsAPIKeyGuard() async {
+        let providerKey = "AutopilotLLMProvider"
+        let savedProvider = UserDefaults.standard.string(forKey: providerKey)
+
+        let (model, _) = makeModel()
+        model.selectedProvider = .hosted
+        model.apiKey = ""
+        model.runWorkflow(id: UUID(), bindings: [:])
+        // The key guard runs synchronously above; restore the global default
+        // before the first await so a parallel test never observes the persisted
+        // "hosted" value (which would make it skip its own key guard).
+        if let savedProvider {
+            UserDefaults.standard.set(savedProvider, forKey: providerKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: providerKey)
+        }
+
+        // Hosted needs no key, so the run clears the key guard and fails later
+        // because the workflow id does not exist — not with the "API key" message.
+        await waitUntil {
+            if case .failed = model.phase { return true }
+            return false
+        }
+        guard case .failed(let reason) = model.phase else {
+            Issue.record("expected a failure after the workflow lookup")
+            return
+        }
+        #expect(!reason.contains("API key"))
+        #expect(reason.contains("could not be found"))
     }
 
     @Test func runWorkflowWithMissingBindingsFailsBeforeAppLookup() async {

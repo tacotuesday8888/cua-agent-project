@@ -102,11 +102,14 @@ public final class AgentViewModel: UserInteraction {
         public let text: String
     }
 
-    /// Supported LLM backends for the test harness.
+    /// Supported LLM backends.
     public enum Provider: String, CaseIterable, Identifiable, Sendable {
         case openai
         case zai
         case anthropic
+        /// Mac Autopilot's own hosted backend (the `llmProxy` callable). Uses the
+        /// signed-in account for auth instead of a pasted key.
+        case hosted
 
         public var id: String { rawValue }
 
@@ -115,6 +118,7 @@ public final class AgentViewModel: UserInteraction {
             case .openai: .openai
             case .zai: .zai
             case .anthropic: .anthropic
+            case .hosted: .hosted
             }
         }
 
@@ -126,11 +130,18 @@ public final class AgentViewModel: UserInteraction {
             descriptor.defaultModel
         }
 
+        /// Whether this provider needs a user-supplied API key. Hosted AI
+        /// authenticates with the signed-in account, so it needs no key.
+        var requiresAPIKey: Bool {
+            self != .hosted
+        }
+
         var apiKeyPlaceholder: String {
             switch self {
             case .openai: "OpenAI API key"
             case .zai: "Z.ai API key"
             case .anthropic: "Anthropic API key"
+            case .hosted: "No API key needed"
             }
         }
 
@@ -199,13 +210,25 @@ public final class AgentViewModel: UserInteraction {
             apiKey = Self.savedAPIKey(for: selectedProvider)
         }
     }
-    /// The selected provider's API key (bring-your-own in v1).
+    /// The selected provider's API key (bring-your-own). Unused for hosted AI,
+    /// which authenticates with the signed-in account.
     public var apiKey: String
+
+    /// Supplies the Firebase ID token for hosted AI, or `nil` when not signed in.
+    /// Injected by the app once Google Sign-In lands; the default returns `nil`,
+    /// so a hosted run before sign-in fails with a clear "Sign in to use hosted
+    /// AI." message rather than calling the backend unauthenticated. Not part of
+    /// the observable UI state.
+    @ObservationIgnored
+    public var hostedTokenProvider: HostedProvider.TokenProvider = { nil }
 
     public var apiKeyPlaceholder: String { selectedProvider.apiKeyPlaceholder }
     public var selectedModelName: String { selectedProvider.model }
     public var selectedProviderDescriptor: LLMProviderDescriptor { selectedProvider.descriptor }
     public var selectedProviderLimitations: String? { selectedProvider.providerLimitations }
+    /// Whether the selected provider needs a pasted API key. `false` for hosted
+    /// AI; the UI uses this to hide the key field.
+    public var selectedProviderRequiresAPIKey: Bool { selectedProvider.requiresAPIKey }
 
     /// A compact "1.2k in · 0.3k out" token-usage label, or `nil` before any
     /// tokens have been reported.
@@ -230,6 +253,10 @@ public final class AgentViewModel: UserInteraction {
 
     private static let providerDefaultsKey = "AutopilotLLMProvider"
     private static let trustedAppsDefaultsKey = "AutopilotPermanentlyTrustedApps"
+    /// The deployed `llmProxy` Firebase callable that backs hosted AI.
+    static let hostedEndpoint = URL(
+        string: "https://us-central1-macautopilot.cloudfunctions.net/llmProxy"
+    )!
     /// How many recent runs to keep loaded for display.
     private static let recentRunDisplayLimit = 20
     /// The most live-feed items to retain; older items are dropped so a long
@@ -310,7 +337,7 @@ public final class AgentViewModel: UserInteraction {
             return
         }
 
-        guard !apiKey.isEmpty else {
+        guard !selectedProvider.requiresAPIKey || !apiKey.isEmpty else {
             phase = .failed("Add your \(selectedProvider.displayName) API key to get started.")
             return
         }
@@ -361,7 +388,7 @@ public final class AgentViewModel: UserInteraction {
     public func runWorkflow(id: UUID, bindings: [String: String]) {
         guard phase != .running else { return }
         activeWorkflowID = nil
-        guard !apiKey.isEmpty else {
+        guard !selectedProvider.requiresAPIKey || !apiKey.isEmpty else {
             phase = .failed("Add your \(selectedProvider.displayName) API key to get started.")
             return
         }
@@ -428,11 +455,13 @@ public final class AgentViewModel: UserInteraction {
     ) {
         let provider = selectedProvider
         let apiKey = apiKey
-        do {
-            try Self.saveAPIKey(apiKey, for: provider)
-        } catch {
-            phase = .failed("Could not save API key securely: \(error.localizedDescription)")
-            return
+        if provider.requiresAPIKey {
+            do {
+                try Self.saveAPIKey(apiKey, for: provider)
+            } catch {
+                phase = .failed("Could not save API key securely: \(error.localizedDescription)")
+                return
+            }
         }
 
         feed = []
@@ -460,7 +489,11 @@ public final class AgentViewModel: UserInteraction {
         )
 
         let session = AgentSession(
-            llm: Self.makeLLMProvider(provider: provider, apiKey: apiKey),
+            llm: Self.makeLLMProvider(
+                provider: provider,
+                apiKey: apiKey,
+                hostedTokenProvider: hostedTokenProvider
+            ),
             computer: MacComputer(
                 pid: target.processID,
                 appName: target.name,
@@ -982,7 +1015,11 @@ public final class AgentViewModel: UserInteraction {
         UserDefaults.standard.removeObject(forKey: provider.apiKeyDefaultsKey)
     }
 
-    private static func makeLLMProvider(provider: Provider, apiKey: String) -> any LLMProvider {
+    private static func makeLLMProvider(
+        provider: Provider,
+        apiKey: String,
+        hostedTokenProvider: @escaping HostedProvider.TokenProvider
+    ) -> any LLMProvider {
         switch provider {
         case .openai:
             OpenAIProvider(apiKey: apiKey)
@@ -990,6 +1027,8 @@ public final class AgentViewModel: UserInteraction {
             ZAIProvider(apiKey: apiKey)
         case .anthropic:
             AnthropicProvider(apiKey: apiKey)
+        case .hosted:
+            HostedProvider(endpoint: hostedEndpoint, tokenProvider: hostedTokenProvider)
         }
     }
 }
