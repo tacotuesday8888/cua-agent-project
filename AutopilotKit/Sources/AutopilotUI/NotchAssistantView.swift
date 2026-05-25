@@ -184,7 +184,7 @@ public struct NotchAssistantView: View {
 
     private var promptRow: some View {
         VStack(spacing: 8) {
-            if model.apiKey.isEmpty {
+            if model.selectedProviderRequiresAPIKey, model.apiKey.isEmpty {
                 SecureField(model.apiKeyPlaceholder, text: $model.apiKey)
                     .textFieldStyle(.plain)
                     .padding(8)
