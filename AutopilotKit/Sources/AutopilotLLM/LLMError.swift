@@ -16,6 +16,9 @@ public enum LLMError: Error, Sendable, Equatable {
     case network(String)
     /// The provider returned a structurally invalid response.
     case invalidResponse(String)
+    /// The hosted backend returned a handled error (auth, quota, availability)
+    /// whose message is already user-facing.
+    case service(message: String)
 }
 
 extension LLMError: LocalizedError {
@@ -35,6 +38,8 @@ extension LLMError: LocalizedError {
             return "Network error contacting the LLM provider: \(detail)"
         case .invalidResponse(let detail):
             return "The LLM returned an invalid response: \(detail)"
+        case .service(let message):
+            return message
         }
     }
 }

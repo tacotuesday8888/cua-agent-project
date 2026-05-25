@@ -66,6 +66,20 @@ public struct LLMProviderDescriptor: Sendable, Hashable, Codable {
         apiKeyEnvironment: "OPENAI_API_KEY",
         keychainAccount: "AutopilotOpenAIAPIKey"
     )
+
+    /// The hosted path: the model runs behind Mac Autopilot's own backend, so the
+    /// user signs in instead of bringing a key. There is no local API key, hence
+    /// the empty environment/keychain fields.
+    public static let hosted = LLMProviderDescriptor(
+        identifier: "hosted",
+        displayName: "Mac Autopilot (hosted)",
+        defaultModel: "gpt-5.4-mini",
+        supportsToolCalls: true,
+        supportsImageInput: true,
+        supportsPromptCaching: false,
+        apiKeyEnvironment: "",
+        keychainAccount: ""
+    )
 }
 
 /// A provider-agnostic interface to a chat LLM with tool-use support.
