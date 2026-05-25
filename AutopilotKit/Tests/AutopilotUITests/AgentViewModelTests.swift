@@ -11,10 +11,10 @@ import Testing
 struct AgentViewModelTests {
     @Test func selectedProviderExposesCapabilityMetadata() {
         let model = AgentViewModel()
-        model.selectedProvider = .zai
-        #expect(model.selectedProviderDescriptor.identifier == "zai")
-        #expect(!model.selectedProviderDescriptor.supportsImageInput)
-        #expect(model.selectedProviderLimitations?.contains("Screenshots are disabled") == true)
+        model.selectedProvider = .openai
+        #expect(model.selectedProviderDescriptor.identifier == "openai")
+        #expect(model.selectedProviderDescriptor.supportsImageInput)
+        #expect(model.selectedProviderLimitations == nil)
 
         model.selectedProvider = .anthropic
         #expect(model.selectedProviderDescriptor.identifier == "anthropic")

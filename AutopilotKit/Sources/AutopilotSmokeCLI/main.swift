@@ -402,7 +402,7 @@ struct AutopilotSmokeCLI {
             let provider = LiveProvider(rawValue: raw)
         else {
             fflush(stdout)
-            fputs("Invalid --live-provider. Use zai or anthropic.\n\n", stderr)
+            fputs("Invalid --live-provider. Use openai or anthropic.\n\n", stderr)
             printUsage()
             exit(2)
         }
@@ -447,7 +447,7 @@ struct AutopilotSmokeCLI {
           swift run --package-path AutopilotKit AutopilotFixtureApp
           swift run --package-path AutopilotKit AutopilotSmokeCLI [--app AutopilotFixtureApp] [--include-screenshot] [--agent-loop]
           swift run --package-path AutopilotKit AutopilotSmokeCLI --app Safari --dump-tree
-          swift run --package-path AutopilotKit AutopilotSmokeCLI --live-provider zai [--api-key-env ZAI_API_KEY] [--model glm-4.7-flash] [--task "…"] [--expect-text "live smoke value"] [--max-steps 15]
+          swift run --package-path AutopilotKit AutopilotSmokeCLI --live-provider openai [--api-key-env OPENAI_API_KEY] [--model gpt-5.4-mini] [--task "…"] [--expect-text "live smoke value"] [--max-steps 15]
 
         --dump-tree prints the accessibility tree the agent would see for any
         running app, after the readiness checks pass.
@@ -462,12 +462,12 @@ struct AutopilotSmokeCLI {
 }
 
 private enum LiveProvider: String {
-    case zai
+    case openai
     case anthropic
 
     var descriptor: LLMProviderDescriptor {
         switch self {
-        case .zai: .zai
+        case .openai: .openai
         case .anthropic: .anthropic
         }
     }
@@ -490,8 +490,8 @@ private enum LiveProvider: String {
 
     func makeProvider(apiKey: String) -> any LLMProvider {
         switch self {
-        case .zai:
-            ZAIProvider(apiKey: apiKey)
+        case .openai:
+            OpenAIProvider(apiKey: apiKey)
         case .anthropic:
             AnthropicProvider(apiKey: apiKey)
         }

@@ -82,19 +82,18 @@ Requires a saved Keychain key from the app or a process-local environment key.
 Do not commit keys or write them into docs.
 
 ```sh
-ZAI_API_KEY=... swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp --live-provider zai
+OPENAI_API_KEY=... swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp --live-provider openai
 ANTHROPIC_API_KEY=... swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp --live-provider anthropic
 ```
 
 Expected result: the fixture input ends with `live smoke value`, the agent calls
-`done`, and the smoke CLI reports success. Z.AI is configured as text-only, so
-screenshot requests must be omitted or explicitly warned about.
+`done`, and the smoke CLI reports success.
 
 To run deterministic fixture checks and one live fixture smoke in a single
 launch/cleanup cycle:
 
 ```sh
-./script/validate_fixture.sh --live-provider zai
+./script/validate_fixture.sh --live-provider openai
 ./script/validate_fixture.sh --live-provider anthropic --api-key-env ANTHROPIC_API_KEY
 ```
 
@@ -187,8 +186,9 @@ trace of any failure.
   with one write and one destructive action. Confirm the prompt appears, Approve
   proceeds, and Decline stops the action without a retry. The smoke CLI
   auto-approves, so this is the only way to validate the safety gate. (Risk #6.)
-- **Anthropic live.** One live run on the Anthropic provider (only Z.AI has been
-  exercised), confirming image input and prompt caching work end to end.
+- **Live provider runs.** One live run on each BYOK provider (OpenAI and
+  Anthropic) and the hosted path, confirming image input and prompt caching
+  work end to end.
 
 ## Permission Checks
 

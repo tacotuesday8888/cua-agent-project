@@ -8,7 +8,7 @@ LIVE_ARGS_COUNT=0
 
 usage() {
   cat >&2 <<'USAGE'
-usage: ./script/validate_fixture.sh [--include-screenshot] [--live-provider zai|anthropic] [--api-key-env NAME] [--model MODEL] [--max-steps N]
+usage: ./script/validate_fixture.sh [--include-screenshot] [--live-provider openai|anthropic] [--api-key-env NAME] [--model MODEL] [--max-steps N]
 
 Runs the deterministic fixture smoke paths. --live-provider also runs one
 fixture AgentSession against the selected provider, using the provider's
@@ -48,7 +48,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$LIVE_PROVIDER" in
-  ""|zai|anthropic)
+  ""|openai|anthropic)
     ;;
   *)
     usage

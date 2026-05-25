@@ -3,8 +3,8 @@ import Foundation
 
 /// An `LLMProvider` backed by OpenAI's Chat Completions API (e.g. GPT-5.4 Mini).
 ///
-/// OpenAI's wire format is OpenAI-compatible like Z.ai, so the tool-call shapes
-/// match. The differences this provider handles are: GPT-5.x requires
+/// It speaks the standard OpenAI Chat Completions wire format. The differences
+/// this provider handles are: GPT-5.x requires
 /// `max_completion_tokens` (it rejects `max_tokens`); multimodal `image_url`
 /// content parts so the screenshot fallback works; and relocating images out of
 /// `tool` messages — which OpenAI's tool role cannot carry — into a following
