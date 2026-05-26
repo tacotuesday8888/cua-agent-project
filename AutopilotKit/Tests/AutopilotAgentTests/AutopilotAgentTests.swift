@@ -1276,6 +1276,29 @@ struct AgentSessionTests {
         #expect(actions == Array(repeating: "scroll:down:3", count: 4))
     }
 
+    @Test func consecutiveUnreadableReadsStopTheRun() async {
+        // Two click attempts that both fail AND can't be re-read afterwards —
+        // a strong "the app vanished mid-run" signal. The third loop
+        // iteration never reaches the LLM because the safety check at the top
+        // of the loop ends the run after two consecutive unreadable failures.
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "c1", tool: "click", input: ["element_index": 2]),
+            toolResponse(id: "c2", tool: "click", input: ["element_index": 2])
+        ])
+        let session = AgentSession(
+            llm: llm,
+            computer: VanishingClickComputer(),
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(model: "test", maxSteps: 10, highlightDwell: .zero),
+            memory: makeTestMemory()
+        )
+
+        let outcome = await session.run(task: "click in a vanishing app")
+        #expect(outcome.status == .failed)
+        #expect(outcome.summary.contains("Lost contact with Ghost"))
+        #expect(outcome.summary.contains("2 failed attempts to read it"))
+    }
+
     @Test func cancellingDuringAnLLMCallReportsStopped() async {
         let session = AgentSession(
             llm: SlowLLMProvider(),
@@ -1693,6 +1716,41 @@ actor VanishingComputer: ComputerControl {
     func setValue(elementID: String, value: String) async throws {}
     func scroll(elementID: String?, direction: ScrollDirection, amount: Int) async throws {}
     func pressKey(_ key: KeyPress) async throws {}
+    func captureScreenshot() async throws -> Data { Data() }
+}
+
+/// Like `VanishingComputer`, but actions also fail — exercises the
+/// `consecutiveUnreadableFailures` safety stop where each action throws AND
+/// the post-failure re-read of the tree also throws.
+actor VanishingClickComputer: ComputerControl {
+    nonisolated let appName = "Ghost"
+    private var captures = 0
+
+    func captureTree() async throws -> UITreeSnapshot {
+        captures += 1
+        guard captures == 1 else {
+            throw AgentError.computer("\(appName)'s window can no longer be read")
+        }
+        return UITreeSnapshot(
+            appName: appName,
+            root: UIElement(id: "e1", role: "AXWindow", children: [
+                UIElement(id: "e2", role: "AXButton", label: "Go")
+            ])
+        )
+    }
+
+    func click(elementID: String) async throws {
+        throw AgentError.computer("\(appName) is gone")
+    }
+    func setValue(elementID: String, value: String) async throws {
+        throw AgentError.computer("\(appName) is gone")
+    }
+    func scroll(elementID: String?, direction: ScrollDirection, amount: Int) async throws {
+        throw AgentError.computer("\(appName) is gone")
+    }
+    func pressKey(_ key: KeyPress) async throws {
+        throw AgentError.computer("\(appName) is gone")
+    }
     func captureScreenshot() async throws -> Data { Data() }
 }
 
