@@ -40,6 +40,21 @@ struct MacAutopilotTests {
     }
 
     @Test func missingAPIKeyFailsBeforeStartingRun() {
+        // The selected provider is persisted in UserDefaults across runs;
+        // clear it so this test always runs against the BYOK default and
+        // isn't poisoned by an earlier run that selected the hosted provider
+        // (which doesn't need a key and would mask this failure mode).
+        let providerKey = "AutopilotLLMProvider"
+        let savedProvider = UserDefaults.standard.string(forKey: providerKey)
+        UserDefaults.standard.removeObject(forKey: providerKey)
+        defer {
+            if let savedProvider {
+                UserDefaults.standard.set(savedProvider, forKey: providerKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: providerKey)
+            }
+        }
+
         let model = AgentViewModel()
         model.apiKey = ""
         model.promptText = "Read the selected app"

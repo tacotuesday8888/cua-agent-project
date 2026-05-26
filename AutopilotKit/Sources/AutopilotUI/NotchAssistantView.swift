@@ -102,7 +102,6 @@ public struct NotchAssistantView: View {
             VStack(alignment: .leading, spacing: 10) {
                 permissionBanner
                 controls
-                providerBanner
                 promptRow
                 pendingInteraction
                 phaseLine
@@ -168,18 +167,6 @@ public struct NotchAssistantView: View {
             .help("Refresh apps")
         }
         .controlSize(.small)
-    }
-
-    @ViewBuilder
-    private var providerBanner: some View {
-        if let limitation = model.selectedProviderLimitations {
-            Label(limitation, systemImage: "eye.slash.fill")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.yellow)
-                .padding(8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.yellow.opacity(0.14), in: RoundedRectangle(cornerRadius: 8))
-        }
     }
 
     private var promptRow: some View {

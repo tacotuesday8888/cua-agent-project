@@ -14,12 +14,10 @@ struct AgentViewModelTests {
         model.selectedProvider = .openai
         #expect(model.selectedProviderDescriptor.identifier == "openai")
         #expect(model.selectedProviderDescriptor.supportsImageInput)
-        #expect(model.selectedProviderLimitations == nil)
 
         model.selectedProvider = .anthropic
         #expect(model.selectedProviderDescriptor.identifier == "anthropic")
         #expect(model.selectedProviderDescriptor.supportsImageInput)
-        #expect(model.selectedProviderLimitations == nil)
     }
 
     @Test func willPerformHighlightsTargetUntilActionEnds() {
@@ -210,7 +208,6 @@ struct AgentViewModelTests {
         #expect(model.selectedModelName == "gpt-5.4-mini")
         #expect(model.selectedProviderDescriptor.supportsImageInput)
         #expect(model.selectedProviderDescriptor.supportsToolCalls)
-        #expect(model.selectedProviderLimitations == nil)
         // Hosted authenticates with the signed-in account, so the UI hides the
         // key field and no key is required to start a run.
         #expect(model.selectedProviderRequiresAPIKey == false)

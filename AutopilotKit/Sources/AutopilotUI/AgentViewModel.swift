@@ -145,12 +145,6 @@ public final class AgentViewModel: UserInteraction {
         var apiKeyDefaultsKey: String {
             descriptor.keychainAccount
         }
-
-        var providerLimitations: String? {
-            descriptor.supportsImageInput
-                ? nil
-                : "Screenshots are disabled for this text-only provider."
-        }
     }
 
     // MARK: - Observable state
@@ -222,7 +216,6 @@ public final class AgentViewModel: UserInteraction {
     public var apiKeyPlaceholder: String { selectedProvider.apiKeyPlaceholder }
     public var selectedModelName: String { selectedProvider.model }
     public var selectedProviderDescriptor: LLMProviderDescriptor { selectedProvider.descriptor }
-    public var selectedProviderLimitations: String? { selectedProvider.providerLimitations }
     /// Whether the selected provider needs a pasted API key. `false` for hosted
     /// AI; the UI uses this to hide the key field.
     public var selectedProviderRequiresAPIKey: Bool { selectedProvider.requiresAPIKey }
@@ -465,9 +458,6 @@ public final class AgentViewModel: UserInteraction {
         runInputTokens = 0
         runOutputTokens = 0
         append("Model — \(provider.displayName) (\(provider.model))")
-        if let limitation = provider.providerLimitations {
-            append(limitation)
-        }
         if let note {
             append(note)
         }

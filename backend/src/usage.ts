@@ -8,9 +8,21 @@ const PRICE_PER_MTOK: Record<string, { input: number; output: number }> = {
   'gpt-5.4-mini': { input: 0.75, output: 4.5 },
 };
 
+/// Tracks which unknown models we've already warned about, so adding a new
+/// model never silently goes uncosted but we don't spam the logs either.
+const warnedUnknownModels = new Set<string>();
+
 export function estimateCostUsd(model: string, usage: ProxyUsage): number {
   const price = PRICE_PER_MTOK[model];
-  if (!price) return 0;
+  if (!price) {
+    if (!warnedUnknownModels.has(model)) {
+      warnedUnknownModels.add(model);
+      console.warn(
+        `[usage] unknown model "${model}" — cost reported as 0; add it to PRICE_PER_MTOK`
+      );
+    }
+    return 0;
+  }
   const cost =
     (usage.inputTokens / 1_000_000) * price.input +
     (usage.outputTokens / 1_000_000) * price.output;

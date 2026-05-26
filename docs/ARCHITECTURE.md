@@ -164,27 +164,43 @@ they can contain private user data.
 
 ## Backend And Accounts
 
-The MVP does not need user accounts if it remains local-first and bring-your-own
-key. Accounts become useful when the product offers hosted features:
+The on-device agent stays local — only the LLM call can move server-side, via
+a thin authenticated proxy. That keeps BYOK as the local default while making
+metered hosted access possible without putting a provider key in the client.
 
-- Authentication: required for paid hosted plans, sync, team use, or support.
-- User settings: optional sync for preferences, trusted apps, and model choice.
-- Usage limits: required if Mac Autopilot pays for LLM usage or offers trials.
-- Subscription/payment readiness: required before managed LLM credits or
-  commercial distribution with entitlements.
-- LLM key/security handling: BYOK can remain local Keychain-only; hosted keys
-  need a server-side vault, access audit logs, key rotation, and least-privilege
-  service boundaries.
-- Logs/history: local redacted history first; remote history should be opt-in
-  and encrypted or minimized.
+What's shipped:
 
-Recommended default: keep the engine local-first, make BYOK the first working
-path, and design backend contracts around optional entitlements and settings
-rather than making the agent loop depend on a server.
+- **`llmProxy`** — Firebase Functions 2nd gen, written with **Genkit** + the
+  `@genkit-ai/compat-oai` plugin, currently fronting **OpenAI GPT-5.4 Mini**.
+  Source lives under `backend/`.
+- **Auth gate** — `onCallGenkit`'s `authPolicy` rejects anything without a
+  signed-in Firebase user, so the function can't be invoked anonymously.
+- **Sign-in** — Firebase Authentication with the Google provider. The client
+  obtains an ID token via `FirebaseAuth` + `GoogleSignIn-iOS` and sends it as
+  the callable's `Authorization: Bearer …`.
+- **Quotas + usage** — a per-user monthly cap is enforced inside the flow
+  (atomic Firestore transaction). Each call writes a **metadata-only** usage
+  doc (uid, model, tokens, cost, latency, status). Prompts, responses, AX
+  trees, and screenshots are never persisted.
+- **Client provider** — `HostedProvider` (alongside `OpenAIProvider` and
+  `AnthropicProvider`) speaks the callable wire format
+  (`{data: …}` request + `{result: …}` / `{error: …}` response) and maps
+  errors back into `LLMError` for the UI. BYOK stays the default; hosted is
+  opt-in once the user signs in.
+
+Security stays server-side: Firestore rules are deny-all (clients never read
+or write directly), the OpenAI key lives in **Cloud Secret Manager**, and the
+client-shipped `GoogleService-Info.plist` carries only client identifiers.
+
+### Later
+
+- RevenueCat-driven entitlements + paid tiers.
+- Multi-provider routing on the backend (e.g. Anthropic via the same proxy).
+- Optional remote sync of memories, history, or workflows — deliberately
+  postponed; today's persistence stays local + redacted.
 
 ## Work That Can Continue Before Final UI
 
-- First low-risk live run against a normal third-party app.
 - Better prompt/tool-choice recovery for stale or missing AX elements.
 - More robust driver diagnostics for permission and target-window failures.
 - App-picker polish around duplicate app names and saved workflow target edits.
