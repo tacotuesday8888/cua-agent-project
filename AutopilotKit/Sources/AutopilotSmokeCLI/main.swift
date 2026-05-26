@@ -126,10 +126,6 @@ struct AutopilotSmokeCLI {
         print("- model: \(model)")
         print("- api key source: \(apiKeySourceDescription(environment: apiKeyEnvironment, provider: provider))")
         print("- task: \(task)")
-        if arguments.contains("--include-screenshot"), !provider.descriptor.supportsImageInput {
-            print("- screenshots: disabled because \(provider.displayName) is configured as text-only")
-        }
-
         let recorder = AgentSmokeEventRecorder()
         let session = AgentSession(
             llm: provider.makeProvider(apiKey: apiKey),

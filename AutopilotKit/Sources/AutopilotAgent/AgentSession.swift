@@ -19,8 +19,8 @@ public struct AgentConfiguration: Sendable {
     /// does not grow with every screen it has ever read.
     public var liveObservationWindow: Int
     /// Whether the active model/provider can receive screenshot image blocks.
-    /// Text-only providers still get the accessibility tree, but screenshot
-    /// requests are answered with an explicit omission note.
+    /// All current providers support image input; this flag is reserved so a
+    /// future text-only provider can be added by setting it to `false`.
     public var supportsImageInput: Bool
     /// Optional guidance from a saved workflow ("recipe"), woven into the system
     /// prompt as hints. The agent still re-reads and verifies the live screen;
