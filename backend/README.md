@@ -70,5 +70,6 @@ then `npx genkit start` or the Firebase emulators.
    firebase deploy --only functions
    ```
 
-The macOS client's `HostedProvider` (next PR) calls `llmProxy` with the signed-in
-user's Firebase ID token.
+The macOS client's `HostedProvider`
+([`AutopilotKit/Sources/AutopilotLLM/HostedProvider.swift`](../AutopilotKit/Sources/AutopilotLLM/HostedProvider.swift))
+calls `llmProxy` with the signed-in user's Firebase ID token.
