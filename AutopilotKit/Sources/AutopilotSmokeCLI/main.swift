@@ -17,24 +17,29 @@ struct AutopilotSmokeCLI {
         }
 
         let target = value(after: "--app", in: arguments) ?? "AutopilotFixtureApp"
+        let scenario = loadScenario(from: arguments)
+        let resolvedTarget = value(after: "--app", in: arguments)
+            ?? scenario?.app
+            ?? target
         let includeScreenshot = arguments.contains("--include-screenshot")
         let runAgentLoop = arguments.contains("--agent-loop")
         let dumpTree = arguments.contains("--dump-tree")
         let liveProvider = liveProvider(from: arguments)
+        let recorder = makeRecorder(from: arguments, scenarioID: scenario?.id)
         let resolution = await MainActor.run {
-            AppLocator().resolveRunningApp(matching: target)
+            AppLocator().resolveRunningApp(matching: resolvedTarget)
         }
         let app: AppLocator.RunningApp
         switch resolution {
         case .matched(let resolved):
             app = resolved
         case .notFound:
-            fputs("No running app matched '\(target)'.\n\n", stderr)
+            fputs("No running app matched '\(resolvedTarget)'.\n\n", stderr)
             printUsage()
             exit(2)
         case .ambiguous(let apps):
             let names = apps.map(\.name).sorted().joined(separator: ", ")
-            fputs("'\(target)' matched more than one running app: \(names).\n\n", stderr)
+            fputs("'\(resolvedTarget)' matched more than one running app: \(names).\n\n", stderr)
             printUsage()
             exit(2)
         }
@@ -56,11 +61,22 @@ struct AutopilotSmokeCLI {
             exit(0)
         }
 
+        if let scenario {
+            let passed = await runScenario(
+                computer: computer,
+                scenario: scenario,
+                arguments: arguments,
+                recorder: recorder
+            )
+            exit(passed ? 0 : 1)
+        }
+
         if let liveProvider {
             let passed = await runLiveLLMSmoke(
                 computer: computer,
                 provider: liveProvider,
-                arguments: arguments
+                arguments: arguments,
+                recorder: recorder
             )
             exit(passed ? 0 : 1)
         }
@@ -68,7 +84,8 @@ struct AutopilotSmokeCLI {
         if runAgentLoop {
             let passed = await runAgentLoopSmoke(
                 computer: computer,
-                includeScreenshot: includeScreenshot
+                includeScreenshot: includeScreenshot,
+                recorder: recorder
             )
             exit(passed ? 0 : 1)
         }
@@ -96,7 +113,8 @@ struct AutopilotSmokeCLI {
     private static func runLiveLLMSmoke(
         computer: MacComputer,
         provider: LiveProvider,
-        arguments: [String]
+        arguments: [String],
+        recorder traceRecorder: (any AgentRunRecording)? = nil
     ) async -> Bool {
         let apiKeyEnvironment = value(after: "--api-key-env", in: arguments)
             ?? provider.defaultAPIKeyEnvironment
@@ -126,7 +144,7 @@ struct AutopilotSmokeCLI {
         print("- model: \(model)")
         print("- api key source: \(apiKeySourceDescription(environment: apiKeyEnvironment, provider: provider))")
         print("- task: \(task)")
-        let recorder = AgentSmokeEventRecorder()
+        let eventRecorder = AgentSmokeEventRecorder()
         let session = AgentSession(
             llm: provider.makeProvider(apiKey: apiKey),
             computer: computer,
@@ -138,8 +156,9 @@ struct AutopilotSmokeCLI {
                 supportsImageInput: provider.descriptor.supportsImageInput
             ),
             memory: smokeMemoryStore(),
+            recorder: traceRecorder,
             eventHandler: { event in
-                recorder.append(event)
+                eventRecorder.append(event)
                 if let line = formatAgentEvent(event) {
                     print(line)
                 }
@@ -162,7 +181,7 @@ struct AutopilotSmokeCLI {
         )
 
         if !passed {
-            let performedTools = recorder.performedTools().map(\.rawValue)
+            let performedTools = eventRecorder.performedTools().map(\.rawValue)
             print("Performed tools: \(performedTools.joined(separator: ", "))")
         }
 
@@ -200,7 +219,8 @@ struct AutopilotSmokeCLI {
 
     private static func runAgentLoopSmoke(
         computer: MacComputer,
-        includeScreenshot: Bool
+        includeScreenshot: Bool,
+        recorder traceRecorder: (any AgentRunRecording)? = nil
     ) async -> Bool {
         let plan: ComputerUseSmokePlan
         do {
@@ -217,7 +237,7 @@ struct AutopilotSmokeCLI {
         print("")
         print("Running scripted AgentSession smoke loop...")
 
-        let recorder = AgentSmokeEventRecorder()
+        let eventRecorder = AgentSmokeEventRecorder()
         let llm = ScriptedLLMProvider(agentLoopResponses(
             plan: plan,
             includeScreenshot: includeScreenshot
@@ -232,8 +252,9 @@ struct AutopilotSmokeCLI {
                 highlightDwell: .zero
             ),
             memory: smokeMemoryStore(),
+            recorder: traceRecorder,
             eventHandler: { event in
-                recorder.append(event)
+                eventRecorder.append(event)
                 if let line = formatAgentEvent(event) {
                     print(line)
                 }
@@ -255,7 +276,7 @@ struct AutopilotSmokeCLI {
             .drag,
             .performSecondaryAction
         ]
-        let performedTools = recorder.performedTools()
+        let performedTools = eventRecorder.performedTools()
         let passed = outcome.status == .completed && performedTools == expectedTools
 
         print("")
@@ -266,6 +287,110 @@ struct AutopilotSmokeCLI {
         }
 
         return passed
+    }
+
+    private static func runScenario(
+        computer: MacComputer,
+        scenario: AgentValidationScenario,
+        arguments: [String],
+        recorder traceRecorder: (any AgentRunRecording)?
+    ) async -> Bool {
+        let providerName = value(after: "--live-provider", in: arguments)
+            ?? scenario.provider
+            ?? "scripted-fixture"
+        let includeScreenshot = scenario.includeScreenshot ?? arguments.contains("--include-screenshot")
+        let maxSteps = value(after: "--max-steps", in: arguments).flatMap(Int.init)
+            ?? scenario.maxSteps
+            ?? 15
+
+        print("")
+        print("Running validation scenario \(scenario.id)...")
+        print("- app: \(scenario.app)")
+        print("- provider: \(providerName)")
+        print("- task: \(scenario.task)")
+
+        let eventRecorder = AgentSmokeEventRecorder()
+        let llm: any LLMProvider
+        let model: String
+        let supportsImageInput: Bool
+
+        if providerName == "scripted-fixture" || providerName == "scripted" {
+            do {
+                let state = try await computer.getAppState(includeScreenshot: false)
+                let plan = try ComputerUseSmokePlan.autopilotFixturePlan(for: state.snapshot)
+                llm = ScriptedLLMProvider(agentLoopResponses(
+                    plan: plan,
+                    includeScreenshot: includeScreenshot
+                ))
+                model = "scripted-smoke"
+                supportsImageInput = true
+            } catch {
+                fflush(stdout)
+                fputs("Could not resolve scripted fixture scenario: \(error.localizedDescription)\n", stderr)
+                return false
+            }
+        } else if let provider = LiveProvider(rawValue: providerName) {
+            let apiKeyEnvironment = value(after: "--api-key-env", in: arguments)
+                ?? provider.defaultAPIKeyEnvironment
+            let apiKey = loadAPIKey(
+                environment: apiKeyEnvironment,
+                keychainAccount: provider.keychainAccount
+            )
+            guard !apiKey.isEmpty else {
+                fflush(stdout)
+                fputs(
+                    "Missing API key. Set \(apiKeyEnvironment), pass --api-key-env NAME, or save a key in MacAutopilot first.\n",
+                    stderr
+                )
+                return false
+            }
+            llm = provider.makeProvider(apiKey: apiKey)
+            model = value(after: "--model", in: arguments) ?? provider.defaultModel
+            supportsImageInput = provider.descriptor.supportsImageInput
+        } else {
+            fflush(stdout)
+            fputs("Invalid scenario provider '\(providerName)'. Use scripted-fixture, openai, or anthropic.\n", stderr)
+            return false
+        }
+
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: AutomaticApproval(),
+            configuration: AgentConfiguration(
+                model: model,
+                maxSteps: maxSteps,
+                highlightDwell: .zero,
+                supportsImageInput: supportsImageInput
+            ),
+            memory: smokeMemoryStore(),
+            recorder: traceRecorder,
+            eventHandler: { event in
+                eventRecorder.append(event)
+                if let line = formatAgentEvent(event) {
+                    print(line)
+                }
+            }
+        )
+
+        let outcome = await session.run(task: scenario.task)
+        let finalSnapshot = try? await computer.captureTree()
+        let report = AgentValidationEvaluator.evaluate(
+            scenario: scenario,
+            outcome: outcome,
+            events: eventRecorder.all(),
+            finalSnapshot: finalSnapshot
+        )
+        print("")
+        print(report.summary)
+        for check in report.checks {
+            print("- \(check.passed ? "passed" : "failed"): \(check.name) - \(check.detail)")
+        }
+
+        if let reportPath = value(after: "--report-json", in: arguments) {
+            writeReport(report, to: reportPath)
+        }
+        return report.passed
     }
 
     private static func agentLoopResponses(
@@ -384,6 +509,68 @@ struct AutopilotSmokeCLI {
             .appendingPathComponent("autopilot-smoke-\(UUID().uuidString)", isDirectory: true))
     }
 
+    private static func loadScenario(from arguments: [String]) -> AgentValidationScenario? {
+        guard let path = value(after: "--scenario", in: arguments) else { return nil }
+        do {
+            let data = try Data(contentsOf: URL(fileURLWithPath: path))
+            return try JSONDecoder().decode(AgentValidationScenario.self, from: data)
+        } catch {
+            fflush(stdout)
+            fputs("Could not load scenario at \(path): \(error.localizedDescription)\n", stderr)
+            exit(2)
+        }
+    }
+
+    private static func makeRecorder(
+        from arguments: [String],
+        scenarioID: String?
+    ) -> (any AgentRunRecording)? {
+        guard arguments.contains("--record-trajectory") else { return nil }
+        let path = optionalValue(after: "--record-trajectory", in: arguments)
+            ?? defaultTrajectoryPath(scenarioID: scenarioID)
+        let directory = URL(fileURLWithPath: path)
+        do {
+            let recorder = try JSONLAgentRunRecorder(directory: directory)
+            print("Recording trajectory to \(directory.path)")
+            return recorder
+        } catch {
+            fflush(stdout)
+            fputs("Could not create trajectory recorder at \(path): \(error.localizedDescription)\n", stderr)
+            exit(2)
+        }
+    }
+
+    private static func optionalValue(after flag: String, in arguments: [String]) -> String? {
+        guard let index = arguments.firstIndex(of: flag) else { return nil }
+        let valueIndex = arguments.index(after: index)
+        guard arguments.indices.contains(valueIndex) else { return nil }
+        let value = arguments[valueIndex]
+        return value.hasPrefix("--") ? nil : value
+    }
+
+    private static func defaultTrajectoryPath(scenarioID: String?) -> String {
+        let base = scenarioID?.replacingOccurrences(of: "/", with: "-") ?? "run"
+        let stamp = Int(Date().timeIntervalSince1970)
+        return ".build/trajectories/\(base)-\(stamp)"
+    }
+
+    private static func writeReport(_ report: AgentValidationReport, to path: String) {
+        do {
+            let url = URL(fileURLWithPath: path)
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            try encoder.encode(report).write(to: url, options: .atomic)
+            print("Wrote scenario report to \(url.path)")
+        } catch {
+            fflush(stdout)
+            fputs("Could not write scenario report at \(path): \(error.localizedDescription)\n", stderr)
+        }
+    }
+
     private static func value(after flag: String, in arguments: [String]) -> String? {
         guard let index = arguments.firstIndex(of: flag) else { return nil }
         let valueIndex = arguments.index(after: index)
@@ -441,12 +628,16 @@ struct AutopilotSmokeCLI {
         print("""
         Usage:
           swift run --package-path AutopilotKit AutopilotFixtureApp
-          swift run --package-path AutopilotKit AutopilotSmokeCLI [--app AutopilotFixtureApp] [--include-screenshot] [--agent-loop]
+          swift run --package-path AutopilotKit AutopilotSmokeCLI [--app AutopilotFixtureApp] [--include-screenshot] [--agent-loop] [--record-trajectory [DIR]]
           swift run --package-path AutopilotKit AutopilotSmokeCLI --app Safari --dump-tree
+          swift run --package-path AutopilotKit AutopilotSmokeCLI --scenario scenario.json [--record-trajectory [DIR]] [--report-json report.json]
           swift run --package-path AutopilotKit AutopilotSmokeCLI --live-provider openai [--api-key-env OPENAI_API_KEY] [--model gpt-5.4-mini] [--task "…"] [--expect-text "live smoke value"] [--max-steps 15]
 
         --dump-tree prints the accessibility tree the agent would see for any
         running app, after the readiness checks pass.
+        --scenario runs a JSON validation scenario with pass/fail expectations.
+        --record-trajectory writes an opt-in developer trace under DIR, or
+        .build/trajectories when DIR is omitted.
 
         The fixture app must be running and the smoke runner process must have
         Accessibility permission in System Settings > Privacy & Security.
@@ -533,6 +724,12 @@ private final class AgentSmokeEventRecorder: @unchecked Sendable {
             }
             return nil
         }
+    }
+
+    func all() -> [AgentEvent] {
+        lock.lock()
+        defer { lock.unlock() }
+        return events
     }
 }
 
