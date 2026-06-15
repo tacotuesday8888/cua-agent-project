@@ -744,10 +744,20 @@ public final class AgentViewModel: UserInteraction {
             return
         }
         phase = .running
-        Task { @MainActor [weak self] in
+        runTask = Task { @MainActor [weak self] in
             guard let self else { return }
+            guard !Task.isCancelled else {
+                self.finishStoppedWorkflowPreflight()
+                return
+            }
             guard let workflow = await self.workflows.get(id: id) else {
                 self.phase = .failed("That workflow could not be found.")
+                self.runTask = nil
+                self.activeWorkflowID = nil
+                return
+            }
+            guard !Task.isCancelled else {
+                self.finishStoppedWorkflowPreflight()
                 return
             }
             let missingSlots = WorkflowRenderer.missingSlotNames(
@@ -758,6 +768,12 @@ public final class AgentViewModel: UserInteraction {
             guard missingSlots.isEmpty else {
                 let labels = missingSlots.map { "{{\($0)}}" }.joined(separator: ", ")
                 self.phase = .failed("Fill workflow fields: \(labels).")
+                self.runTask = nil
+                self.activeWorkflowID = nil
+                return
+            }
+            guard !Task.isCancelled else {
+                self.finishStoppedWorkflowPreflight()
                 return
             }
             let target: AppLocator.RunningApp
@@ -768,12 +784,20 @@ public final class AgentViewModel: UserInteraction {
                 self.phase = .failed(
                     "\(workflow.appName) is not running. Open it, then run this workflow."
                 )
+                self.runTask = nil
+                self.activeWorkflowID = nil
                 return
             case .ambiguous(let apps):
                 self.phase = .failed(
                     "\(workflow.appName) matches more than one running app: "
                         + "\(Self.appList(apps)). Use a more specific workflow target."
                 )
+                self.runTask = nil
+                self.activeWorkflowID = nil
+                return
+            }
+            guard !Task.isCancelled else {
+                self.finishStoppedWorkflowPreflight()
                 return
             }
             let resolvedBindings = WorkflowRenderer.resolvedBindings(
@@ -786,6 +810,7 @@ public final class AgentViewModel: UserInteraction {
             )
             self.selectedAppName = workflow.appName
             self.activeWorkflowID = workflow.id
+            self.runTask = nil
             self.startRun(
                 task: goal,
                 target: target,
@@ -793,6 +818,12 @@ public final class AgentViewModel: UserInteraction {
                 recipe: workflow.recipe
             )
         }
+    }
+
+    private func finishStoppedWorkflowPreflight() {
+        phase = .failed("Stopped.")
+        runTask = nil
+        activeWorkflowID = nil
     }
 
     /// Build and start an `AgentSession` for `task` against `target`, resetting

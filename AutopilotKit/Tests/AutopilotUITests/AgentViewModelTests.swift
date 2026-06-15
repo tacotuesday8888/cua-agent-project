@@ -854,6 +854,42 @@ struct AgentViewModelWorkflowTests {
         #expect(model.phase == .running)
     }
 
+    @Test func stopDuringWorkflowPreflightPreventsLaterFailureOverride() async {
+        let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+        let (model, store) = makeModel()
+        model.selectedProvider = .openai
+        Self.restoreProviderDefault(savedProvider)
+        model.apiKey = "test-key"
+        let workflow = Workflow(
+            name: "Cancelable",
+            appName: "NoSuchApp9X8Y7Z",
+            goalTemplate: "Do it",
+            source: .manual
+        )
+        await store.add(workflow)
+
+        model.runWorkflow(id: workflow.id, bindings: [:])
+        #expect(model.phase == .running)
+
+        model.stop()
+        await waitUntil {
+            guard case .failed(let reason) = model.phase else { return false }
+            return reason == "Stopped."
+        }
+
+        guard case .failed(let reason) = model.phase else {
+            Issue.record("expected stop to end workflow preflight")
+            return
+        }
+        #expect(reason == "Stopped.")
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        guard case .failed(let finalReason) = model.phase else {
+            Issue.record("expected stopped state to remain stable")
+            return
+        }
+        #expect(finalReason == "Stopped.")
+    }
+
     @Test func runWorkflowIgnoresPersistedDefaultBindings() async {
         let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
         let (model, store) = makeModel()
