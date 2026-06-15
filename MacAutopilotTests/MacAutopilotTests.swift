@@ -9,7 +9,7 @@ struct MacAutopilotTests {
         _ = ContentView()
     }
 
-    @Test func viewModelStartsInLocalBYOKMode() {
+    @Test func viewModelStartsInAppManagedMode() {
         // The selected provider is persisted in UserDefaults; clear it so this
         // tests the true default, then restore any real saved value afterward.
         let providerKey = "AutopilotLLMProvider"
@@ -26,10 +26,11 @@ struct MacAutopilotTests {
         let model = AgentViewModel()
         #expect(model.phase == .idle)
         #expect(model.promptText.isEmpty)
-        // GPT-5.4 Mini is the default primary provider — a local BYOK, vision-capable model.
-        #expect(model.selectedProvider == .openai)
-        #expect(model.selectedProviderDescriptor.keychainAccount == "AutopilotOpenAIAPIKey")
-        #expect(model.selectedProviderDescriptor.supportsImageInput)
+        #expect(model.selectedProvider == .hosted)
+        #expect(model.selectedProviderAccessMode == .appManaged)
+        #expect(model.selectedProviderDescriptor.displayName == "Mac Autopilot Basic")
+        #expect(model.selectedModelDescriptor.identifier == "gpt-5.4-mini")
+        #expect(model.selectedModelDescriptor.supportsImageInput)
     }
 
     @Test func emptySubmitDoesNotStartRun() {
@@ -40,10 +41,8 @@ struct MacAutopilotTests {
     }
 
     @Test func missingAPIKeyFailsBeforeStartingRun() {
-        // The selected provider is persisted in UserDefaults across runs;
-        // clear it so this test always runs against the BYOK default and
-        // isn't poisoned by an earlier run that selected the hosted provider
-        // (which doesn't need a key and would mask this failure mode).
+        // The default mode is app-managed AI, so select a BYOK provider
+        // explicitly before testing the key guard.
         let providerKey = "AutopilotLLMProvider"
         let savedProvider = UserDefaults.standard.string(forKey: providerKey)
         UserDefaults.standard.removeObject(forKey: providerKey)
@@ -56,6 +55,7 @@ struct MacAutopilotTests {
         }
 
         let model = AgentViewModel()
+        model.selectedProvider = .openai
         model.apiKey = ""
         model.promptText = "Read the selected app"
         model.submit()
@@ -66,4 +66,5 @@ struct MacAutopilotTests {
         }
         #expect(reason.contains("API key"))
     }
+
 }

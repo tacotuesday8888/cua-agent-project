@@ -6,10 +6,26 @@ import Foundation
 /// Maps the provider-agnostic request/response types to Anthropic's wire
 /// format, and enables prompt caching on the system prompt and tool
 /// definitions (both static across an agent run).
+///
+/// Supports API-key authentication against `api.anthropic.com`. Claude
+/// subscription access uses separate OAuth credentials rather than browser
+/// cookies or pasted session tokens.
 public struct AnthropicProvider: LLMProvider {
-    public let identifier = "anthropic"
+    public enum Authentication: Sendable, Equatable {
+        case apiKey(String)
+        case oauthBearer(String)
 
-    private let apiKey: String
+        var token: String {
+            switch self {
+            case .apiKey(let value), .oauthBearer(let value):
+                value
+            }
+        }
+    }
+
+    public let identifier: String
+
+    private let authentication: Authentication
     private let endpoint: URL
     private let apiVersion: String
     private let urlSession: URLSession
@@ -19,13 +35,33 @@ public struct AnthropicProvider: LLMProvider {
 
     public init(
         apiKey: String,
+        identifier: String = "anthropic",
         endpoint: URL = URL(string: "https://api.anthropic.com/v1/messages")!,
         apiVersion: String = "2023-06-01",
         urlSession: URLSession = .shared,
         retryPolicy: RetryPolicy = .standard,
         requestTimeout: Double = 60
     ) {
-        self.apiKey = apiKey
+        self.identifier = identifier
+        self.authentication = .apiKey(apiKey)
+        self.endpoint = endpoint
+        self.apiVersion = apiVersion
+        self.urlSession = urlSession
+        self.retryPolicy = retryPolicy
+        self.requestTimeout = max(1, requestTimeout)
+    }
+
+    public init(
+        oauthToken: String,
+        identifier: String = "anthropic-subscription",
+        endpoint: URL = URL(string: "https://api.anthropic.com/v1/messages")!,
+        apiVersion: String = "2023-06-01",
+        urlSession: URLSession = .shared,
+        retryPolicy: RetryPolicy = .standard,
+        requestTimeout: Double = 60
+    ) {
+        self.identifier = identifier
+        self.authentication = .oauthBearer(oauthToken)
         self.endpoint = endpoint
         self.apiVersion = apiVersion
         self.urlSession = urlSession
@@ -34,11 +70,16 @@ public struct AnthropicProvider: LLMProvider {
     }
 
     public func send(_ request: LLMRequest) async throws -> LLMResponse {
-        guard !apiKey.isEmpty else { throw LLMError.missingAPIKey }
+        if authentication.token.isEmpty {
+            throw LLMError.missingAPIKey
+        }
 
         let body: Data
         do {
-            body = try JSONEncoder().encode(WireRequest(request))
+            body = try JSONEncoder().encode(WireRequest(
+                request,
+                includeOAuthIdentityPrompt: authentication.isOAuthBearer
+            ))
         } catch {
             throw LLMError.decodingFailed("request encoding failed: \(error)")
         }
@@ -51,8 +92,20 @@ public struct AnthropicProvider: LLMProvider {
         urlRequest.httpMethod = "POST"
         urlRequest.timeoutInterval = requestTimeout
         urlRequest.setValue("application/json", forHTTPHeaderField: "content-type")
-        urlRequest.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         urlRequest.setValue(apiVersion, forHTTPHeaderField: "anthropic-version")
+        switch authentication {
+        case .apiKey(let apiKey):
+            urlRequest.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        case .oauthBearer(let token):
+            urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "authorization")
+            urlRequest.setValue(
+                "claude-code-20250219,oauth-2025-04-20",
+                forHTTPHeaderField: "anthropic-beta"
+            )
+            urlRequest.setValue("claude-cli/2.1.75", forHTTPHeaderField: "user-agent")
+            urlRequest.setValue("cli", forHTTPHeaderField: "x-app")
+        }
+
         urlRequest.httpBody = body
 
         let data: Data
@@ -86,6 +139,13 @@ public struct AnthropicProvider: LLMProvider {
     }
 }
 
+private extension AnthropicProvider.Authentication {
+    var isOAuthBearer: Bool {
+        if case .oauthBearer = self { return true }
+        return false
+    }
+}
+
 // MARK: - Anthropic wire format (request)
 
 private struct WireCacheControl: Encodable {
@@ -110,12 +170,22 @@ private struct WireRequest: Encodable {
         case tools
     }
 
-    init(_ request: LLMRequest) {
+    init(_ request: LLMRequest, includeOAuthIdentityPrompt: Bool = false) {
         model = request.model
         maxTokens = request.maxTokens
         temperature = request.temperature
+        var systemBlocks: [WireSystemBlock] = []
+        if includeOAuthIdentityPrompt {
+            systemBlocks.append(WireSystemBlock(
+                text: "You are Claude Code, Anthropic's official CLI for Claude.",
+                cacheControl: .ephemeral
+            ))
+        }
         if let system = request.system, !system.isEmpty {
-            self.system = [WireSystemBlock(text: system, cacheControl: .ephemeral)]
+            systemBlocks.append(WireSystemBlock(text: system, cacheControl: .ephemeral))
+        }
+        if !systemBlocks.isEmpty {
+            system = systemBlocks
         } else {
             system = nil
         }

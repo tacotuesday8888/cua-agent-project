@@ -15,14 +15,15 @@ public enum RunStatus: String, Sendable, Hashable, Codable {
 
 /// One redacted record of a finished agent run.
 ///
-/// History is deliberately metadata-only: the task, target app, model, status,
-/// a short summary, and the ordered tool names that ran. Accessibility trees,
-/// screenshots, provider messages, clarifying-question answers, and memory
-/// contents are never stored — they can carry private user data.
+/// History is deliberately metadata-only: target app, model, status, token
+/// counts, timestamps, ordered tool names, and redacted display labels.
+/// Accessibility trees, screenshots, raw prompts, provider messages,
+/// clarifying-question answers, typed values, and memory contents are never
+/// stored — they can carry private user data.
 public struct RunRecord: Sendable, Hashable, Codable, Identifiable {
     /// Stable identifier, assigned on creation.
     public let id: UUID
-    /// The natural-language task the user gave the agent.
+    /// A redacted display label, never the raw prompt.
     public let task: String
     /// The app the agent operated.
     public let appName: String
@@ -30,7 +31,7 @@ public struct RunRecord: Sendable, Hashable, Codable, Identifiable {
     public let model: String
     /// How the run ended.
     public let status: RunStatus
-    /// The final outcome summary shown to the user.
+    /// A redacted status label, never provider/model response text.
     public let summary: String
     /// Ordered raw tool names performed during the run — high-level actions
     /// only, carrying no element labels or typed values.
@@ -58,16 +59,73 @@ public struct RunRecord: Sendable, Hashable, Codable, Identifiable {
         finishedAt: Date
     ) {
         self.id = id
-        self.task = task
+        self.task = Self.redactedTaskLabel(appName: appName)
         self.appName = appName
         self.model = model
         self.status = status
-        self.summary = summary
+        self.summary = Self.redactedSummary(for: status)
         self.actions = actions
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
         self.startedAt = startedAt
         self.finishedAt = finishedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        appName = try container.decode(String.self, forKey: .appName)
+        model = try container.decode(String.self, forKey: .model)
+        status = try container.decode(RunStatus.self, forKey: .status)
+        task = Self.redactedTaskLabel(appName: appName)
+        summary = Self.redactedSummary(for: status)
+        actions = try container.decodeIfPresent([String].self, forKey: .actions) ?? []
+        inputTokens = try container.decodeIfPresent(Int.self, forKey: .inputTokens) ?? 0
+        outputTokens = try container.decodeIfPresent(Int.self, forKey: .outputTokens) ?? 0
+        startedAt = try container.decode(Date.self, forKey: .startedAt)
+        finishedAt = try container.decode(Date.self, forKey: .finishedAt)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(task, forKey: .task)
+        try container.encode(appName, forKey: .appName)
+        try container.encode(model, forKey: .model)
+        try container.encode(status, forKey: .status)
+        try container.encode(summary, forKey: .summary)
+        try container.encode(actions, forKey: .actions)
+        try container.encode(inputTokens, forKey: .inputTokens)
+        try container.encode(outputTokens, forKey: .outputTokens)
+        try container.encode(startedAt, forKey: .startedAt)
+        try container.encode(finishedAt, forKey: .finishedAt)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case task
+        case appName
+        case model
+        case status
+        case summary
+        case actions
+        case inputTokens
+        case outputTokens
+        case startedAt
+        case finishedAt
+    }
+
+    private static func redactedTaskLabel(appName: String) -> String {
+        let app = appName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return app.isEmpty ? "Run" : "Run in \(app)"
+    }
+
+    private static func redactedSummary(for status: RunStatus) -> String {
+        switch status {
+        case .completed: "Completed"
+        case .stopped: "Stopped"
+        case .failed: "Failed"
+        }
     }
 
     /// How many actions the agent performed during the run.

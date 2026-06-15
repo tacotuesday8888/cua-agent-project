@@ -102,21 +102,117 @@ public final class AgentViewModel: UserInteraction {
         public let text: String
     }
 
+    /// Product-facing status for consumer-account access.
+    public struct ExistingAccountAccessStatus: Sendable, Equatable {
+        public let accessMode: LLMAccessMode
+        public let title: String
+        public let summary: String
+        public let detail: String
+        public let isAvailable: Bool
+
+        public init(
+            accessMode: LLMAccessMode,
+            title: String,
+            summary: String,
+            detail: String,
+            isAvailable: Bool
+        ) {
+            self.accessMode = accessMode
+            self.title = title
+            self.summary = summary
+            self.detail = detail
+            self.isAvailable = isAvailable
+        }
+    }
+
+    /// Product-facing setup state for existing subscription OAuth providers.
+    public struct SubscriptionAccountRequirement: Sendable, Equatable {
+        public let providerName: String
+        public let providerID: SubscriptionOAuthProviderID
+        public let setupSummary: String
+
+        public init(
+            providerName: String,
+            providerID: SubscriptionOAuthProviderID,
+            setupSummary: String
+        ) {
+            self.providerName = providerName
+            self.providerID = providerID
+            self.setupSummary = setupSummary
+        }
+    }
+
+    /// Minimal hosted-account state exposed by the app shell. The UI package
+    /// stays Firebase-free; the app target supplies this snapshot and actions.
+    public struct HostedAccountStatus: Sendable, Equatable {
+        public let email: String?
+        public let statusMessage: String?
+
+        public init(email: String? = nil, statusMessage: String? = nil) {
+            self.email = email
+            self.statusMessage = statusMessage
+        }
+
+        public var isSignedIn: Bool { email != nil }
+    }
+
+    /// A known OpenAI-compatible endpoint preset. Presets reduce setup friction
+    /// for common routing/local platforms without adding provider-specific
+    /// transport code.
+    public struct OpenAICompatiblePreset: Identifiable, Sendable, Equatable {
+        public let id: String
+        public let displayName: String
+        public let endpoint: String
+        public let requiresAPIKey: Bool
+
+        public init(
+            id: String,
+            displayName: String,
+            endpoint: String,
+            requiresAPIKey: Bool
+        ) {
+            self.id = id
+            self.displayName = displayName
+            self.endpoint = endpoint
+            self.requiresAPIKey = requiresAPIKey
+        }
+    }
+
     /// Supported LLM backends.
     public enum Provider: String, CaseIterable, Identifiable, Sendable {
+        /// Mac Autopilot Basic: the app-managed hosted backend (`llmProxy`).
+        /// Uses the signed-in Firebase account for auth instead of a pasted key.
+        case hosted
+        /// ChatGPT Plus/Pro account access through subscription OAuth.
+        case chatGPTAccount = "chatgpt-account"
         case openai
         case anthropic
-        /// Mac Autopilot's own hosted backend (the `llmProxy` callable). Uses the
-        /// signed-in account for auth instead of a pasted key.
-        case hosted
+        /// Any OpenAI-compatible Chat Completions endpoint configured by the
+        /// user. Supports routers and local servers without provider-specific
+        /// subscription assumptions.
+        case openAICompatible = "openai-compatible"
+        /// Claude Pro/Max account access through subscription OAuth.
+        case anthropicSubscription
+
+        public static let allCases: [Provider] = [
+            .hosted,
+            .chatGPTAccount,
+            .anthropicSubscription,
+            .openai,
+            .anthropic,
+            .openAICompatible
+        ]
 
         public var id: String { rawValue }
 
         public var descriptor: LLMProviderDescriptor {
             switch self {
+            case .hosted: .hosted
+            case .chatGPTAccount: .chatGPTAccount
             case .openai: .openai
             case .anthropic: .anthropic
-            case .hosted: .hosted
+            case .openAICompatible: .openAICompatible
+            case .anthropicSubscription: .anthropicSubscription
             }
         }
 
@@ -124,21 +220,57 @@ public final class AgentViewModel: UserInteraction {
             descriptor.displayName
         }
 
-        var model: String {
-            descriptor.defaultModel
+        public var accessMode: LLMAccessMode {
+            descriptor.accessMode
         }
 
-        /// Whether this provider needs a user-supplied API key. Hosted AI
-        /// authenticates with the signed-in account, so it needs no key.
+        /// How this provider authenticates. Drives the settings UI: API key
+        /// providers show a `SecureField`; hosted shows Google Sign-In; account
+        /// providers show app-owned OAuth sign-in.
+        public enum AuthStyle: Sendable, Equatable {
+            case apiKey(required: Bool)
+            case hostedFirebase
+            case subscriptionOAuth(providerID: SubscriptionOAuthProviderID)
+        }
+
+        public var authStyle: AuthStyle {
+            switch self {
+            case .openai, .anthropic:
+                .apiKey(required: true)
+            case .openAICompatible:
+                .apiKey(required: false)
+            case .chatGPTAccount:
+                .subscriptionOAuth(providerID: .chatGPTCodex)
+            case .hosted:
+                .hostedFirebase
+            case .anthropicSubscription:
+                .subscriptionOAuth(providerID: .anthropic)
+            }
+        }
+
+        /// Whether this provider uses an API key field at all. For the generic
+        /// OpenAI-compatible endpoint the key is optional, because local servers
+        /// such as Ollama commonly run without one.
+        var usesAPIKey: Bool {
+            if case .apiKey = authStyle { return true }
+            return false
+        }
+
+        /// Whether this provider needs a user-supplied API key. Hosted AI and
+        /// existing-account providers authenticate without a pasted key.
         var requiresAPIKey: Bool {
-            self != .hosted
+            if case .apiKey(let required) = authStyle { return required }
+            return false
         }
 
         var apiKeyPlaceholder: String {
             switch self {
+            case .hosted: "Sign in for Mac Autopilot Basic"
+            case .chatGPTAccount: "Uses ChatGPT subscription login"
             case .openai: "OpenAI API key"
             case .anthropic: "Anthropic API key"
-            case .hosted: "No API key needed"
+            case .openAICompatible: "API key (optional for local)"
+            case .anthropicSubscription: "Uses Claude subscription login"
             }
         }
 
@@ -146,6 +278,75 @@ public final class AgentViewModel: UserInteraction {
             descriptor.keychainAccount
         }
     }
+
+    public static let openAICompatiblePresets: [OpenAICompatiblePreset] = [
+        OpenAICompatiblePreset(
+            id: "custom",
+            displayName: "Custom endpoint",
+            endpoint: "",
+            requiresAPIKey: false
+        ),
+        OpenAICompatiblePreset(
+            id: "openrouter",
+            displayName: "OpenRouter",
+            endpoint: "https://openrouter.ai/api/v1/chat/completions",
+            requiresAPIKey: true
+        ),
+        OpenAICompatiblePreset(
+            id: "gemini",
+            displayName: "Gemini",
+            endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+            requiresAPIKey: true
+        ),
+        OpenAICompatiblePreset(
+            id: "groq",
+            displayName: "Groq",
+            endpoint: "https://api.groq.com/openai/v1/chat/completions",
+            requiresAPIKey: true
+        ),
+        OpenAICompatiblePreset(
+            id: "together",
+            displayName: "Together AI",
+            endpoint: "https://api.together.xyz/v1/chat/completions",
+            requiresAPIKey: true
+        ),
+        OpenAICompatiblePreset(
+            id: "fireworks",
+            displayName: "Fireworks AI",
+            endpoint: "https://api.fireworks.ai/inference/v1/chat/completions",
+            requiresAPIKey: true
+        ),
+        OpenAICompatiblePreset(
+            id: "deepseek",
+            displayName: "DeepSeek",
+            endpoint: "https://api.deepseek.com/chat/completions",
+            requiresAPIKey: true
+        ),
+        OpenAICompatiblePreset(
+            id: "qwen",
+            displayName: "Qwen / DashScope",
+            endpoint: "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+            requiresAPIKey: true
+        ),
+        OpenAICompatiblePreset(
+            id: "glm",
+            displayName: "GLM / BigModel",
+            endpoint: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+            requiresAPIKey: true
+        ),
+        OpenAICompatiblePreset(
+            id: "litellm",
+            displayName: "LiteLLM local proxy",
+            endpoint: "http://localhost:4000/v1/chat/completions",
+            requiresAPIKey: false
+        ),
+        OpenAICompatiblePreset(
+            id: "ollama",
+            displayName: "Ollama local",
+            endpoint: "http://localhost:11434/v1/chat/completions",
+            requiresAPIKey: false
+        )
+    ]
 
     // MARK: - Observable state
 
@@ -198,12 +399,53 @@ public final class AgentViewModel: UserInteraction {
         didSet {
             guard selectedProvider != oldValue else { return }
             UserDefaults.standard.set(selectedProvider.rawValue, forKey: Self.providerDefaultsKey)
+            selectedModelID = Self.savedModelID(for: selectedProvider)
             apiKey = Self.savedAPIKey(for: selectedProvider)
+        }
+    }
+    /// The selected model id within the selected provider. This is persisted
+    /// per provider so switching providers keeps each provider's model choice.
+    public var selectedModelID: String {
+        didSet {
+            UserDefaults.standard.set(
+                selectedModelDescriptor.identifier,
+                forKey: Self.modelDefaultsKey(for: selectedProvider)
+            )
         }
     }
     /// The selected provider's API key (bring-your-own). Unused for hosted AI,
     /// which authenticates with the signed-in account.
     public var apiKey: String
+    /// Selected OpenAI-compatible provider preset. `custom` means the endpoint
+    /// field is user-controlled without a known platform default.
+    public var openAICompatiblePresetID: String {
+        didSet {
+            UserDefaults.standard.set(
+                openAICompatiblePresetID,
+                forKey: Self.openAICompatiblePresetDefaultsKey
+            )
+        }
+    }
+    /// Full Chat Completions URL for the OpenAI-compatible BYOK path.
+    /// This is not secret; any API key for the endpoint stays in Keychain.
+    public var openAICompatibleEndpoint: String {
+        didSet {
+            UserDefaults.standard.set(
+                openAICompatibleEndpoint,
+                forKey: Self.openAICompatibleEndpointDefaultsKey
+            )
+        }
+    }
+    /// Whether the user-selected compatible model accepts image input. Routers
+    /// cannot expose this consistently, so the app lets the user opt in.
+    public var openAICompatibleSupportsImageInput: Bool {
+        didSet {
+            UserDefaults.standard.set(
+                openAICompatibleSupportsImageInput,
+                forKey: Self.openAICompatibleSupportsImageInputDefaultsKey
+            )
+        }
+    }
 
     /// Supplies the Firebase ID token for hosted AI, or `nil` when not signed in.
     /// Injected by the app once Google Sign-In lands; the default returns `nil`,
@@ -212,13 +454,104 @@ public final class AgentViewModel: UserInteraction {
     /// the observable UI state.
     @ObservationIgnored
     public var hostedTokenProvider: HostedProvider.TokenProvider = { nil }
+    /// Supplies hosted account UI state without coupling AutopilotUI to Firebase.
+    @ObservationIgnored
+    public var hostedAccountStatusProvider: @MainActor () -> HostedAccountStatus = {
+        HostedAccountStatus()
+    }
+    /// Starts the app-managed AI sign-in flow. The app target owns the concrete
+    /// provider flow and browser presentation.
+    @ObservationIgnored
+    public var hostedSignInHandler: @MainActor () async -> Void = {}
+    /// Signs out of the app-managed AI account.
+    @ObservationIgnored
+    public var hostedSignOutHandler: @MainActor () -> Void = {}
+    /// Returns the current OAuth sign-in state for a supported subscription
+    /// provider, or `nil` when the UI has not checked yet.
+    @ObservationIgnored
+    public var subscriptionAccountSignedInProvider:
+        @MainActor (SubscriptionOAuthProviderID) -> Bool? = { provider in
+            guard let credential = try? SubscriptionOAuthCredentialStore().load(provider: provider) else {
+                return false
+            }
+            return !credential.refreshToken.isEmpty
+        }
+    /// Supplies refreshable subscription credentials to direct subscription
+    /// providers. The default loads from Keychain and refreshes expired tokens.
+    @ObservationIgnored
+    public var subscriptionOAuthCredentialProvider:
+        SubscriptionOAuthCredentialProvider.Load = SubscriptionOAuthCredentialProvider.keychain()
 
     public var apiKeyPlaceholder: String { selectedProvider.apiKeyPlaceholder }
-    public var selectedModelName: String { selectedProvider.model }
+    public var selectedModelName: String { selectedModelDescriptor.identifier }
     public var selectedProviderDescriptor: LLMProviderDescriptor { selectedProvider.descriptor }
+    public var selectedProviderAccessMode: LLMAccessMode { selectedProvider.accessMode }
+    public var availableModelDescriptors: [LLMModelDescriptor] {
+        selectedProviderDescriptor.availableModels
+    }
+    public var selectedModelDescriptor: LLMModelDescriptor {
+        if selectedProvider == .openAICompatible {
+            let modelID = selectedModelID.trimmingCharacters(in: .whitespacesAndNewlines)
+            let resolved = modelID.isEmpty ? selectedProviderDescriptor.defaultModel : modelID
+            return LLMModelDescriptor(
+                identifier: resolved,
+                displayName: resolved == selectedProviderDescriptor.defaultModel ? "Custom model" : resolved,
+                supportsToolCalls: true,
+                supportsImageInput: openAICompatibleSupportsImageInput,
+                supportsPromptCaching: false
+            )
+        }
+        return selectedProviderDescriptor.modelDescriptor(for: selectedModelID)
+    }
+    public var openAICompatibleEndpointURL: URL? {
+        let trimmed = openAICompatibleEndpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard
+            let url = URL(string: trimmed),
+            let scheme = url.scheme?.lowercased(),
+            ["http", "https"].contains(scheme),
+            url.host != nil
+        else {
+            return nil
+        }
+        return url
+    }
+    /// Whether the selected provider shows an API-key field. The field can be
+    /// optional for local OpenAI-compatible endpoints.
+    public var selectedProviderUsesAPIKey: Bool { selectedProvider.usesAPIKey }
     /// Whether the selected provider needs a pasted API key. `false` for hosted
     /// AI; the UI uses this to hide the key field.
-    public var selectedProviderRequiresAPIKey: Bool { selectedProvider.requiresAPIKey }
+    public var selectedProviderRequiresAPIKey: Bool {
+        if selectedProvider == .openAICompatible {
+            return selectedOpenAICompatiblePreset.requiresAPIKey
+        }
+        return selectedProvider.requiresAPIKey
+    }
+    public var selectedOpenAICompatiblePreset: OpenAICompatiblePreset {
+        Self.openAICompatiblePresets.first { $0.id == openAICompatiblePresetID }
+            ?? Self.openAICompatiblePresets[0]
+    }
+    public var existingAccountAccessStatus: ExistingAccountAccessStatus {
+        ExistingAccountAccessStatus(
+            accessMode: .existingSubscription,
+            title: "Existing AI Account Access",
+            summary: "ChatGPT Plus/Pro and Claude Pro/Max use subscription login.",
+            detail: "Mac Autopilot owns ChatGPT/Claude OAuth credential storage in Keychain and asks subscription-backed models for structured output.",
+            isAvailable: true
+        )
+    }
+
+    public var selectedSubscriptionAccountRequirement: SubscriptionAccountRequirement? {
+        switch selectedProvider.authStyle {
+        case .subscriptionOAuth(let providerID):
+            return SubscriptionAccountRequirement(
+                providerName: selectedProvider.displayName,
+                providerID: providerID,
+                setupSummary: "\(selectedProvider.displayName) uses app-owned OAuth sign-in. Tokens are stored in Keychain; browser cookies are not read."
+            )
+        default:
+            return nil
+        }
+    }
 
     /// A compact "1.2k in · 0.3k out" token-usage label, or `nil` before any
     /// tokens have been reported.
@@ -242,6 +575,11 @@ public final class AgentViewModel: UserInteraction {
     // MARK: - Private
 
     private static let providerDefaultsKey = "AutopilotLLMProvider"
+    private static let modelDefaultsPrefix = "AutopilotLLMModel."
+    private static let openAICompatiblePresetDefaultsKey = "AutopilotOpenAICompatiblePreset"
+    private static let openAICompatibleEndpointDefaultsKey = "AutopilotOpenAICompatibleEndpoint"
+    private static let openAICompatibleSupportsImageInputDefaultsKey =
+        "AutopilotOpenAICompatibleSupportsImageInput"
     private static let trustedAppsDefaultsKey = "AutopilotPermanentlyTrustedApps"
     /// The deployed `llmProxy` Firebase callable that backs hosted AI.
     static let hostedEndpoint = URL(
@@ -291,10 +629,26 @@ public final class AgentViewModel: UserInteraction {
         self.memory = memory
         self.history = history
         self.workflows = workflows
-        let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
-            .flatMap(Provider.init(rawValue:)) ?? .openai
+        let storedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+            .flatMap(Provider.init(rawValue:))
+        let savedProvider = storedProvider.flatMap { Provider.allCases.contains($0) ? $0 : nil }
+            ?? .hosted
         self.selectedProvider = savedProvider
+        self.selectedModelID = Self.savedModelID(for: savedProvider)
         self.apiKey = Self.savedAPIKey(for: savedProvider)
+        let savedPreset = UserDefaults.standard.string(
+            forKey: Self.openAICompatiblePresetDefaultsKey
+        )
+        if let savedPreset,
+           Self.openAICompatiblePresets.contains(where: { $0.id == savedPreset }) {
+            self.openAICompatiblePresetID = savedPreset
+        } else {
+            self.openAICompatiblePresetID = "custom"
+        }
+        self.openAICompatibleEndpoint = UserDefaults.standard
+            .string(forKey: Self.openAICompatibleEndpointDefaultsKey) ?? ""
+        self.openAICompatibleSupportsImageInput = UserDefaults.standard
+            .object(forKey: Self.openAICompatibleSupportsImageInputDefaultsKey) as? Bool ?? false
         self.permanentlyTrustedApps = UserDefaults.standard
             .stringArray(forKey: Self.trustedAppsDefaultsKey) ?? []
         refreshPermissions()
@@ -327,8 +681,8 @@ public final class AgentViewModel: UserInteraction {
             return
         }
 
-        guard !selectedProvider.requiresAPIKey || !apiKey.isEmpty else {
-            phase = .failed("Add your \(selectedProvider.displayName) API key to get started.")
+        if let message = providerSetupErrorMessage() {
+            phase = .failed(message)
             return
         }
         // An "@app" mention in the task picks the target, overriding the picker.
@@ -378,8 +732,8 @@ public final class AgentViewModel: UserInteraction {
     public func runWorkflow(id: UUID, bindings: [String: String]) {
         guard phase != .running else { return }
         activeWorkflowID = nil
-        guard !selectedProvider.requiresAPIKey || !apiKey.isEmpty else {
-            phase = .failed("Add your \(selectedProvider.displayName) API key to get started.")
+        if let message = providerSetupErrorMessage() {
+            phase = .failed(message)
             return
         }
         phase = .running
@@ -444,8 +798,11 @@ public final class AgentViewModel: UserInteraction {
         recipe: String? = nil
     ) {
         let provider = selectedProvider
+        let model = selectedModelDescriptor
         let apiKey = apiKey
-        if provider.requiresAPIKey {
+        let compatibleEndpoint = openAICompatibleEndpointURL
+        let subscriptionCredentialProvider = subscriptionOAuthCredentialProvider
+        if provider.usesAPIKey {
             do {
                 try Self.saveAPIKey(apiKey, for: provider)
             } catch {
@@ -457,7 +814,7 @@ public final class AgentViewModel: UserInteraction {
         feed = []
         runInputTokens = 0
         runOutputTokens = 0
-        append("Model — \(provider.displayName) (\(provider.model))")
+        append("Model — \(provider.displayName) (\(model.identifier))")
         if let note {
             append(note)
         }
@@ -471,7 +828,7 @@ public final class AgentViewModel: UserInteraction {
         pendingRun = PendingRun(
             task: task,
             appName: target.name,
-            model: provider.model,
+            model: model.identifier,
             startedAt: Date()
         )
 
@@ -479,7 +836,9 @@ public final class AgentViewModel: UserInteraction {
             llm: Self.makeLLMProvider(
                 provider: provider,
                 apiKey: apiKey,
-                hostedTokenProvider: hostedTokenProvider
+                hostedTokenProvider: hostedTokenProvider,
+                subscriptionCredentialProvider: subscriptionCredentialProvider,
+                openAICompatibleEndpoint: compatibleEndpoint
             ),
             computer: MacComputer(
                 pid: target.processID,
@@ -488,8 +847,8 @@ public final class AgentViewModel: UserInteraction {
             ),
             interaction: self,
             configuration: AgentConfiguration(
-                model: provider.model,
-                supportsImageInput: provider.descriptor.supportsImageInput,
+                model: model.identifier,
+                supportsImageInput: model.supportsImageInput,
                 recipe: recipe
             ),
             memory: memory,
@@ -529,6 +888,16 @@ public final class AgentViewModel: UserInteraction {
             pendingQuestion = nil
             questionAnswerText = ""
             continuation.resume(returning: "")
+        }
+    }
+
+    public func applyOpenAICompatiblePreset(id: String) {
+        guard let preset = Self.openAICompatiblePresets.first(where: { $0.id == id }) else {
+            return
+        }
+        openAICompatiblePresetID = preset.id
+        if !preset.endpoint.isEmpty {
+            openAICompatibleEndpoint = preset.endpoint
         }
     }
 
@@ -777,23 +1146,11 @@ public final class AgentViewModel: UserInteraction {
         ))
     }
 
-    /// Save a finished run as a reusable workflow: its task becomes the goal and
-    /// its app the target. The user can add `{{slot}}` variables by editing.
+    /// Run history is redacted, so it cannot be converted back into a workflow
+    /// goal. Workflows must be created manually from the current form or saved
+    /// through an explicit agent proposal.
     public func saveRunAsWorkflow(_ record: RunRecord, name: String) {
-        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedGoal = record.task.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedApp = record.appName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty, !trimmedGoal.isEmpty, !trimmedApp.isEmpty else { return }
-        let variables = WorkflowRenderer.slotNames(in: trimmedGoal)
-            .map { WorkflowVariable(name: $0) }
-        storeWorkflow(Workflow(
-            name: trimmedName,
-            appName: trimmedApp,
-            goalTemplate: trimmedGoal,
-            variables: variables,
-            source: .savedFromRun,
-            sourceRunID: record.id
-        ))
+        append("Run history is redacted. Create a workflow from a goal template instead.", isError: true)
     }
 
     /// Delete a saved workflow, then refresh the list.
@@ -979,6 +1336,40 @@ public final class AgentViewModel: UserInteraction {
         }
     }
 
+    /// Returns a user-facing error message if the selected provider can't run
+    /// yet (missing API key, not signed in), or `nil` if ready.
+    private func providerSetupErrorMessage() -> String? {
+        if selectedProvider == .hosted, !hostedAccountStatusProvider().isSignedIn {
+            return "Sign in with Google to use Mac Autopilot Basic."
+        }
+        if selectedProvider != .openAICompatible, selectedProvider.requiresAPIKey, apiKey.isEmpty {
+            return "Add your \(selectedProvider.displayName) API key to get started."
+        }
+        if selectedProvider == .openAICompatible {
+            if selectedOpenAICompatiblePreset.requiresAPIKey, apiKey.isEmpty {
+                return "Add your \(selectedOpenAICompatiblePreset.displayName) API key to get started."
+            }
+            if openAICompatibleEndpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return "Add the OpenAI-compatible chat completions URL to get started."
+            }
+            if openAICompatibleEndpointURL == nil {
+                return "Enter a valid OpenAI-compatible chat completions URL."
+            }
+            if selectedModelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return "Add a model ID for the OpenAI-compatible endpoint."
+            }
+        }
+        if case .subscriptionOAuth(let providerID) = selectedProvider.authStyle,
+           let signedIn = subscriptionAccountSignedInProvider(providerID) {
+            if signedIn == false {
+                return "Sign in with \(selectedProvider.displayName) to use your existing account."
+            }
+        } else if case .subscriptionOAuth = selectedProvider.authStyle {
+            return "Check \(selectedProvider.displayName) sign-in status, then run again."
+        }
+        return nil
+    }
+
     private static func savedAPIKey(for provider: Provider) -> String {
         if let key = try? APIKeyStore.load(account: provider.apiKeyDefaultsKey),
            !key.isEmpty {
@@ -997,6 +1388,25 @@ public final class AgentViewModel: UserInteraction {
         return legacyKey
     }
 
+    private static func savedModelID(for provider: Provider) -> String {
+        let descriptor = provider.descriptor
+        let key = modelDefaultsKey(for: provider)
+        if let saved = UserDefaults.standard.string(forKey: key),
+           !saved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if descriptor.allowsCustomModelID {
+                return saved
+            }
+            if descriptor.availableModels.contains(where: { $0.identifier == saved }) {
+                return saved
+            }
+        }
+        return descriptor.defaultModel
+    }
+
+    private static func modelDefaultsKey(for provider: Provider) -> String {
+        "\(modelDefaultsPrefix)\(provider.rawValue)"
+    }
+
     private static func saveAPIKey(_ apiKey: String, for provider: Provider) throws {
         try APIKeyStore.save(apiKey, account: provider.apiKeyDefaultsKey)
         UserDefaults.standard.removeObject(forKey: provider.apiKeyDefaultsKey)
@@ -1005,15 +1415,32 @@ public final class AgentViewModel: UserInteraction {
     private static func makeLLMProvider(
         provider: Provider,
         apiKey: String,
-        hostedTokenProvider: @escaping HostedProvider.TokenProvider
+        hostedTokenProvider: @escaping HostedProvider.TokenProvider,
+        subscriptionCredentialProvider: @escaping SubscriptionOAuthCredentialProvider.Load,
+        openAICompatibleEndpoint: URL? = nil
     ) -> any LLMProvider {
         switch provider {
-        case .openai:
-            OpenAIProvider(apiKey: apiKey)
-        case .anthropic:
-            AnthropicProvider(apiKey: apiKey)
         case .hosted:
-            HostedProvider(endpoint: hostedEndpoint, tokenProvider: hostedTokenProvider)
+            return HostedProvider(endpoint: hostedEndpoint, tokenProvider: hostedTokenProvider)
+        case .chatGPTAccount:
+            return ChatGPTSubscriptionProvider(credentialProvider: subscriptionCredentialProvider)
+        case .openai:
+            return OpenAIProvider(apiKey: apiKey)
+        case .anthropic:
+            return AnthropicProvider(apiKey: apiKey)
+        case .openAICompatible:
+            return OpenAIProvider(
+                apiKey: apiKey,
+                identifier: LLMProviderDescriptor.openAICompatible.identifier,
+                authenticationProviderName: "OpenAI-compatible endpoint",
+                endpoint: openAICompatibleEndpoint ?? URL(
+                    string: "http://localhost:11434/v1/chat/completions"
+                )!,
+                requiresAPIKey: false,
+                tokenLimitParameter: .maxTokens
+            )
+        case .anthropicSubscription:
+            return AnthropicSubscriptionProvider(credentialProvider: subscriptionCredentialProvider)
         }
     }
 }

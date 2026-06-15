@@ -23,3 +23,13 @@ xcuserdata/
 
 # Claude Code local state
 .claude/
+
+# Firebase local deploy/emulator state
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+
+# Generated design handoff package
+claude-design-upload/
+claude-design-upload.zip

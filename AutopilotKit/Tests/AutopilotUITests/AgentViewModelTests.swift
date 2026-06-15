@@ -7,17 +7,47 @@ import Foundation
 import Testing
 @testable import AutopilotUI
 
+@Suite(.serialized)
 @MainActor
 struct AgentViewModelTests {
     @Test func selectedProviderExposesCapabilityMetadata() {
         let model = AgentViewModel()
         model.selectedProvider = .openai
         #expect(model.selectedProviderDescriptor.identifier == "openai")
+        #expect(model.selectedProviderAccessMode == .bringYourOwnKey)
+        #expect(model.selectedModelDescriptor.identifier == "gpt-5.4-mini")
         #expect(model.selectedProviderDescriptor.supportsImageInput)
+        #expect(model.selectedModelDescriptor.supportsImageInput)
 
         model.selectedProvider = .anthropic
         #expect(model.selectedProviderDescriptor.identifier == "anthropic")
+        #expect(model.selectedProviderAccessMode == .bringYourOwnKey)
+        #expect(model.selectedModelDescriptor.identifier == "claude-sonnet-4-6")
         #expect(model.selectedProviderDescriptor.supportsImageInput)
+    }
+
+    @Test func providerSwitchLoadsThatProvidersDefaultModel() {
+        let saved = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+        let savedCompatibleModel = UserDefaults.standard.string(forKey: Self.compatibleModelDefaultsKey)
+        UserDefaults.standard.removeObject(forKey: Self.compatibleModelDefaultsKey)
+        defer {
+            Self.restoreProviderDefault(saved)
+            Self.restoreDefault(savedCompatibleModel, forKey: Self.compatibleModelDefaultsKey)
+        }
+
+        let model = AgentViewModel()
+        model.selectedProvider = .hosted
+        #expect(model.selectedProviderAccessMode == .appManaged)
+        #expect(model.selectedProvider.displayName == "Mac Autopilot Basic")
+        #expect(model.selectedModelName == "gpt-5.4-mini")
+        #expect(model.availableModelDescriptors.map(\.identifier).contains(model.selectedModelName))
+
+        model.selectedProvider = .openAICompatible
+        #expect(model.selectedProviderAccessMode == .bringYourOwnKey)
+        #expect(model.selectedProvider.displayName == "OpenAI-compatible endpoint")
+        #expect(model.selectedProviderUsesAPIKey)
+        #expect(!model.selectedProviderRequiresAPIKey)
+        #expect(model.selectedModelDescriptor.identifier == "custom-model")
     }
 
     @Test func willPerformHighlightsTargetUntilActionEnds() {
@@ -196,6 +226,21 @@ struct AgentViewModelTests {
     /// The persisted-provider key. Hosted tests restore it so the only
     /// key-free provider never leaks into the suite's "missing key" tests.
     private static let providerDefaultsKey = "AutopilotLLMProvider"
+    private static let compatibleModelDefaultsKey = "AutopilotLLMModel.openai-compatible"
+    private static let compatiblePresetDefaultsKey = "AutopilotOpenAICompatiblePreset"
+    private static let compatibleEndpointDefaultsKey = "AutopilotOpenAICompatibleEndpoint"
+    private static let compatibleImageSupportDefaultsKey = "AutopilotOpenAICompatibleSupportsImageInput"
+
+    @Test func defaultProviderIsAppManagedAI() {
+        let saved = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+        UserDefaults.standard.removeObject(forKey: Self.providerDefaultsKey)
+        defer { Self.restoreProviderDefault(saved) }
+
+        let model = AgentViewModel()
+        #expect(model.selectedProvider == .hosted)
+        #expect(model.selectedProviderAccessMode == .appManaged)
+        #expect(model.selectedProvider.displayName == "Mac Autopilot Basic")
+    }
 
     @Test func hostedProviderExposesCapabilityMetadata() {
         let saved = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
@@ -204,9 +249,11 @@ struct AgentViewModelTests {
         let model = AgentViewModel()
         model.selectedProvider = .hosted
         #expect(model.selectedProviderDescriptor.identifier == "hosted")
-        #expect(model.selectedProvider.displayName == "Mac Autopilot (hosted)")
+        #expect(model.selectedProvider.displayName == "Mac Autopilot Basic")
+        #expect(model.selectedProviderAccessMode == .appManaged)
         #expect(model.selectedModelName == "gpt-5.4-mini")
         #expect(model.selectedProviderDescriptor.supportsImageInput)
+        #expect(model.selectedModelDescriptor.supportsImageInput)
         #expect(model.selectedProviderDescriptor.supportsToolCalls)
         // Hosted authenticates with the signed-in account, so the UI hides the
         // key field and no key is required to start a run.
@@ -217,6 +264,158 @@ struct AgentViewModelTests {
         #expect(AgentViewModel.Provider.allCases.contains(.hosted))
     }
 
+    @Test func openAICompatibleProviderIsSelectableInThePicker() {
+        #expect(AgentViewModel.Provider.allCases.contains(.openAICompatible))
+    }
+
+    @Test func existingAccountProvidersAreSelectableInThePicker() {
+        #expect(AgentViewModel.Provider.allCases.contains(.chatGPTAccount))
+        #expect(AgentViewModel.Provider.allCases.contains(.anthropicSubscription))
+    }
+
+    @Test func openAICompatiblePresetsExposeMainstreamRoutersAndLocalEndpoints() {
+        let presets = Dictionary(uniqueKeysWithValues: AgentViewModel.openAICompatiblePresets.map {
+            ($0.id, $0)
+        })
+
+        #expect(presets["openrouter"]?.endpoint == "https://openrouter.ai/api/v1/chat/completions")
+        #expect(presets["gemini"]?.endpoint == "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")
+        #expect(presets["groq"]?.endpoint == "https://api.groq.com/openai/v1/chat/completions")
+        #expect(presets["together"]?.endpoint == "https://api.together.xyz/v1/chat/completions")
+        #expect(presets["fireworks"]?.endpoint == "https://api.fireworks.ai/inference/v1/chat/completions")
+        #expect(presets["deepseek"]?.endpoint == "https://api.deepseek.com/chat/completions")
+        #expect(presets["qwen"]?.endpoint == "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions")
+        #expect(presets["glm"]?.endpoint == "https://open.bigmodel.cn/api/paas/v4/chat/completions")
+        #expect(presets["litellm"]?.endpoint == "http://localhost:4000/v1/chat/completions")
+        #expect(presets["ollama"]?.endpoint == "http://localhost:11434/v1/chat/completions")
+
+        #expect(presets["openrouter"]?.requiresAPIKey == true)
+        #expect(presets["gemini"]?.requiresAPIKey == true)
+        #expect(presets["ollama"]?.requiresAPIKey == false)
+        #expect(presets["custom"]?.requiresAPIKey == false)
+    }
+
+    @Test func existingAccountAccessModeIsVisibleAndAvailable() {
+        let model = AgentViewModel()
+        let status = model.existingAccountAccessStatus
+
+        #expect(status.accessMode == .existingSubscription)
+        #expect(status.title == "Existing AI Account Access")
+        #expect(status.isAvailable)
+        #expect(status.summary.contains("ChatGPT"))
+        #expect(status.summary.contains("Claude Pro/Max"))
+        #expect(status.detail.contains("ChatGPT"))
+        #expect(status.detail.contains("OAuth"))
+        #expect(status.detail.contains("structured output"))
+    }
+
+    @Test func savedAccountProviderRestoresFromUserDefaults() {
+        let saved = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+        UserDefaults.standard.set(
+            AgentViewModel.Provider.anthropicSubscription.rawValue,
+            forKey: Self.providerDefaultsKey
+        )
+        defer { Self.restoreProviderDefault(saved) }
+
+        let model = AgentViewModel()
+        #expect(model.selectedProvider == .anthropicSubscription)
+        #expect(model.selectedProviderAccessMode == .existingSubscription)
+    }
+
+    @Test func chatGPTAccountProviderExposesSubscriptionOAuthMetadata() {
+        let saved = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+        defer { Self.restoreProviderDefault(saved) }
+
+        let model = AgentViewModel()
+        model.selectedProvider = .chatGPTAccount
+
+        #expect(model.selectedProviderAccessMode == .existingSubscription)
+        #expect(model.selectedProvider.displayName == "ChatGPT subscription")
+        #expect(!model.selectedProviderUsesAPIKey)
+        #expect(!model.selectedProviderRequiresAPIKey)
+        #expect(model.selectedModelDescriptor.identifier == "automatic")
+        #expect(!model.selectedModelDescriptor.supportsImageInput)
+        #expect(model.selectedSubscriptionAccountRequirement?.providerID == .chatGPTCodex)
+    }
+
+    @Test func claudeAccountProviderExposesSubscriptionOAuthMetadata() {
+        let saved = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+        defer { Self.restoreProviderDefault(saved) }
+
+        let model = AgentViewModel()
+        model.selectedProvider = .anthropicSubscription
+
+        #expect(model.selectedProviderAccessMode == .existingSubscription)
+        #expect(model.selectedProvider.displayName == "Claude subscription")
+        #expect(!model.selectedProviderUsesAPIKey)
+        #expect(!model.selectedProviderRequiresAPIKey)
+        #expect(model.selectedModelDescriptor.identifier == "automatic")
+        #expect(!model.selectedModelDescriptor.supportsImageInput)
+        #expect(model.selectedSubscriptionAccountRequirement?.providerID == .anthropic)
+    }
+
+    @Test func subscriptionAccountProviderBlocksRunWhenSignedOut() {
+        let saved = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+        defer { Self.restoreProviderDefault(saved) }
+
+        let model = AgentViewModel()
+        model.selectedProvider = .chatGPTAccount
+        model.subscriptionAccountSignedInProvider = { _ in false }
+        model.selectedAppName = "NoSuchApp9X8Y7Z"
+        model.promptText = "Do something"
+
+        model.submit()
+
+        guard case .failed(let reason) = model.phase else {
+            Issue.record("expected signed-out account failure")
+            return
+        }
+        #expect(reason.contains("Sign in"))
+        #expect(reason.contains("ChatGPT subscription"))
+        #expect(!reason.contains("NoSuchApp9X8Y7Z"))
+    }
+
+    @Test func subscriptionAccountProviderBlocksRunUntilStatusIsKnown() {
+        let saved = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+        defer { Self.restoreProviderDefault(saved) }
+
+        let model = AgentViewModel()
+        model.selectedProvider = .chatGPTAccount
+        model.subscriptionAccountSignedInProvider = { _ in nil }
+        model.selectedAppName = "NoSuchApp9X8Y7Z"
+        model.promptText = "Do something"
+
+        model.submit()
+
+        guard case .failed(let reason) = model.phase else {
+            Issue.record("expected unknown account status failure")
+            return
+        }
+        #expect(reason.contains("Check"))
+        #expect(reason.contains("sign-in status"))
+        #expect(!reason.contains("NoSuchApp9X8Y7Z"))
+    }
+
+    @Test func subscriptionAccountProviderAllowsRunAfterKnownSignIn() {
+        let saved = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+        defer { Self.restoreProviderDefault(saved) }
+
+        let model = AgentViewModel()
+        model.selectedProvider = .chatGPTAccount
+        model.subscriptionAccountSignedInProvider = { _ in true }
+        model.selectedAppName = "NoSuchApp9X8Y7Z"
+        model.promptText = "Do something"
+
+        model.submit()
+
+        guard case .failed(let reason) = model.phase else {
+            Issue.record("expected app lookup failure after account readiness passed")
+            return
+        }
+        #expect(reason.contains("NoSuchApp9X8Y7Z"))
+        #expect(!reason.contains("Sign in"))
+    }
+
     @Test func hostedEndpointPointsAtTheDeployedProxy() {
         #expect(
             AgentViewModel.hostedEndpoint.absoluteString
@@ -224,7 +423,7 @@ struct AgentViewModelTests {
         )
     }
 
-    @Test func submitWithHostedProviderSkipsAPIKeyGuard() {
+    @Test func submitWithHostedProviderRequiresSignedInBasicAccountBeforeTargetLookup() {
         let saved = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
         defer { Self.restoreProviderDefault(saved) }
 
@@ -235,14 +434,156 @@ struct AgentViewModelTests {
         model.promptText = "Do something"
         model.submit()
 
-        // Hosted needs no key: submit clears the key guard and fails later at
-        // app resolution — never with the "API key" message.
         guard case .failed(let reason) = model.phase else {
-            Issue.record("expected a failure after the app lookup")
+            Issue.record("expected a hosted sign-in setup failure")
             return
         }
         #expect(!reason.contains("API key"))
+        #expect(reason.contains("Sign in"))
+        #expect(reason.contains("Mac Autopilot Basic"))
+        #expect(!reason.contains("NoSuchApp9X8Y7Z"))
+    }
+
+    @Test func submitWithHostedProviderAllowsTargetLookupAfterSignedInBasicAccount() {
+        let saved = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+        defer { Self.restoreProviderDefault(saved) }
+
+        let model = AgentViewModel()
+        model.selectedProvider = .hosted
+        model.hostedAccountStatusProvider = {
+            AgentViewModel.HostedAccountStatus(email: "user@example.com")
+        }
+        model.apiKey = ""
+        model.selectedAppName = "NoSuchApp9X8Y7Z"
+        model.promptText = "Do something"
+        model.submit()
+
+        guard case .failed(let reason) = model.phase else {
+            Issue.record("expected app lookup failure after hosted sign-in readiness passed")
+            return
+        }
+        #expect(!reason.contains("API key"))
+        #expect(!reason.contains("Sign in"))
         #expect(reason.contains("NoSuchApp9X8Y7Z"))
+    }
+
+    @Test func openAICompatibleProviderExposesCustomModelAndCapabilityState() {
+        let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+        let savedModel = UserDefaults.standard.string(forKey: Self.compatibleModelDefaultsKey)
+        let savedPreset = UserDefaults.standard.string(forKey: Self.compatiblePresetDefaultsKey)
+        let savedEndpoint = UserDefaults.standard.string(forKey: Self.compatibleEndpointDefaultsKey)
+        let savedImages = UserDefaults.standard.object(forKey: Self.compatibleImageSupportDefaultsKey)
+        defer {
+            Self.restoreProviderDefault(savedProvider)
+            Self.restoreDefault(savedModel, forKey: Self.compatibleModelDefaultsKey)
+            Self.restoreDefault(savedPreset, forKey: Self.compatiblePresetDefaultsKey)
+            Self.restoreDefault(savedEndpoint, forKey: Self.compatibleEndpointDefaultsKey)
+            Self.restoreObject(savedImages, forKey: Self.compatibleImageSupportDefaultsKey)
+        }
+
+        let model = AgentViewModel()
+        model.selectedProvider = .openAICompatible
+        model.openAICompatibleEndpoint = "http://localhost:11434/v1/chat/completions"
+        model.selectedModelID = "llama3.2-vision"
+        model.openAICompatibleSupportsImageInput = true
+
+        #expect(model.selectedProviderDescriptor.identifier == "openai-compatible")
+        #expect(model.selectedProviderAccessMode == .bringYourOwnKey)
+        #expect(model.selectedProviderUsesAPIKey)
+        #expect(!model.selectedProviderRequiresAPIKey)
+        #expect(model.openAICompatibleEndpointURL?.absoluteString == "http://localhost:11434/v1/chat/completions")
+        #expect(model.selectedModelDescriptor.identifier == "llama3.2-vision")
+        #expect(model.selectedModelDescriptor.displayName == "llama3.2-vision")
+        #expect(model.selectedModelDescriptor.supportsToolCalls)
+        #expect(model.selectedModelDescriptor.supportsImageInput)
+        #expect(!model.selectedModelDescriptor.supportsPromptCaching)
+    }
+
+    @Test func applyingOpenAICompatiblePresetUpdatesEndpointAndKeyRequirement() {
+        let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+        let savedPreset = UserDefaults.standard.string(forKey: Self.compatiblePresetDefaultsKey)
+        let savedEndpoint = UserDefaults.standard.string(forKey: Self.compatibleEndpointDefaultsKey)
+        defer {
+            Self.restoreProviderDefault(savedProvider)
+            Self.restoreDefault(savedPreset, forKey: Self.compatiblePresetDefaultsKey)
+            Self.restoreDefault(savedEndpoint, forKey: Self.compatibleEndpointDefaultsKey)
+        }
+
+        let model = AgentViewModel()
+        model.selectedProvider = .openAICompatible
+        model.applyOpenAICompatiblePreset(id: "ollama")
+        #expect(model.openAICompatiblePresetID == "ollama")
+        #expect(model.openAICompatibleEndpoint == "http://localhost:11434/v1/chat/completions")
+        #expect(!model.selectedProviderRequiresAPIKey)
+
+        model.applyOpenAICompatiblePreset(id: "openrouter")
+        #expect(model.openAICompatiblePresetID == "openrouter")
+        #expect(model.openAICompatibleEndpoint == "https://openrouter.ai/api/v1/chat/completions")
+        #expect(model.selectedProviderRequiresAPIKey)
+    }
+
+    @Test func openAICompatibleProviderValidatesEndpointAndModelBeforeRun() {
+        let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+        let savedModel = UserDefaults.standard.string(forKey: Self.compatibleModelDefaultsKey)
+        let savedPreset = UserDefaults.standard.string(forKey: Self.compatiblePresetDefaultsKey)
+        let savedEndpoint = UserDefaults.standard.string(forKey: Self.compatibleEndpointDefaultsKey)
+        defer {
+            Self.restoreProviderDefault(savedProvider)
+            Self.restoreDefault(savedModel, forKey: Self.compatibleModelDefaultsKey)
+            Self.restoreDefault(savedPreset, forKey: Self.compatiblePresetDefaultsKey)
+            Self.restoreDefault(savedEndpoint, forKey: Self.compatibleEndpointDefaultsKey)
+        }
+
+        let model = AgentViewModel()
+        model.selectedProvider = .openAICompatible
+        model.apiKey = ""
+        model.selectedModelID = "qwen/qwen3-coder"
+        model.openAICompatibleEndpoint = ""
+        model.promptText = "Do something"
+        model.submit()
+
+        guard case .failed(let missingEndpoint) = model.phase else {
+            Issue.record("expected missing endpoint failure")
+            return
+        }
+        #expect(missingEndpoint.contains("chat completions URL"))
+        #expect(!missingEndpoint.contains("API key"))
+
+        model.openAICompatibleEndpoint = "http://localhost:11434/v1/chat/completions"
+        model.selectedModelID = "   "
+        model.submit()
+
+        guard case .failed(let missingModel) = model.phase else {
+            Issue.record("expected missing model failure")
+            return
+        }
+        #expect(missingModel.contains("model ID"))
+    }
+
+    @Test func openAICompatibleCloudPresetRequiresAPIKeyBeforeRun() {
+        let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+        let savedPreset = UserDefaults.standard.string(forKey: Self.compatiblePresetDefaultsKey)
+        let savedEndpoint = UserDefaults.standard.string(forKey: Self.compatibleEndpointDefaultsKey)
+        defer {
+            Self.restoreProviderDefault(savedProvider)
+            Self.restoreDefault(savedPreset, forKey: Self.compatiblePresetDefaultsKey)
+            Self.restoreDefault(savedEndpoint, forKey: Self.compatibleEndpointDefaultsKey)
+        }
+
+        let model = AgentViewModel()
+        model.selectedProvider = .openAICompatible
+        model.applyOpenAICompatiblePreset(id: "groq")
+        model.selectedModelID = "llama-3.3-70b-versatile"
+        model.apiKey = ""
+        model.promptText = "Do something"
+        model.submit()
+
+        guard case .failed(let reason) = model.phase else {
+            Issue.record("expected API key failure")
+            return
+        }
+        #expect(reason.contains("Groq"))
+        #expect(reason.contains("API key"))
     }
 
     private static func restoreProviderDefault(_ saved: String?) {
@@ -252,10 +593,28 @@ struct AgentViewModelTests {
             UserDefaults.standard.removeObject(forKey: providerDefaultsKey)
         }
     }
+
+    private static func restoreDefault(_ saved: String?, forKey key: String) {
+        if let saved {
+            UserDefaults.standard.set(saved, forKey: key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
+
+    private static func restoreObject(_ saved: Any?, forKey key: String) {
+        if let saved {
+            UserDefaults.standard.set(saved, forKey: key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
 }
 
 @MainActor
 struct AgentViewModelWorkflowTests {
+    private static let providerDefaultsKey = "AutopilotLLMProvider"
+
     private func makeModel() -> (AgentViewModel, WorkflowStore) {
         let directory = URL.temporaryDirectory.appending(path: UUID().uuidString)
         let store = WorkflowStore(directory: directory)
@@ -265,6 +624,14 @@ struct AgentViewModelWorkflowTests {
             workflows: store
         )
         return (model, store)
+    }
+
+    private static func restoreProviderDefault(_ saved: String?) {
+        if let saved {
+            UserDefaults.standard.set(saved, forKey: providerDefaultsKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: providerDefaultsKey)
+        }
     }
 
     /// Wait for a fire-and-forget store write to land, without a fixed sleep.
@@ -302,7 +669,7 @@ struct AgentViewModelWorkflowTests {
         #expect(await store.all().isEmpty)
     }
 
-    @Test func saveRunAsWorkflowUsesTaskAsGoal() async {
+    @Test func saveRunAsWorkflowDoesNotPersistRedactedHistoryAsGoal() async {
         let (model, store) = makeModel()
         let run = RunRecord(
             task: "  Archive read mail in {{folder}}  ",
@@ -314,14 +681,11 @@ struct AgentViewModelWorkflowTests {
             finishedAt: Date()
         )
         model.saveRunAsWorkflow(run, name: "Archive")
-        await waitUntil { !(await store.all().isEmpty) }
+        // Give any incorrectly spawned write a chance to land.
+        try? await Task.sleep(nanoseconds: 20_000_000)
 
-        let stored = await store.all().first
-        #expect(stored?.goalTemplate == "Archive read mail in {{folder}}")
-        #expect(stored?.appName == "Mail")
-        #expect(stored?.variableNames == ["folder"])
-        #expect(stored?.source == .savedFromRun)
-        #expect(stored?.sourceRunID == run.id)
+        #expect(await store.all().isEmpty)
+        #expect(model.feed.contains { $0.text.contains("Run history is redacted") && $0.isError })
     }
 
     @Test func saveRunAsWorkflowNeedsNameTaskAndApp() async {
@@ -408,7 +772,10 @@ struct AgentViewModelWorkflowTests {
     }
 
     @Test func runWorkflowWithoutAPIKeyFails() {
+        let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
         let (model, _) = makeModel()
+        model.selectedProvider = .openai
+        Self.restoreProviderDefault(savedProvider)
         model.apiKey = ""
         model.runWorkflow(id: UUID(), bindings: [:])
         guard case .failed(let reason) = model.phase else {
@@ -418,9 +785,8 @@ struct AgentViewModelWorkflowTests {
         #expect(reason.contains("API key"))
     }
 
-    @Test func runWorkflowWithHostedProviderSkipsAPIKeyGuard() async {
-        let providerKey = "AutopilotLLMProvider"
-        let savedProvider = UserDefaults.standard.string(forKey: providerKey)
+    @Test func runWorkflowWithHostedProviderRequiresSignedInBasicAccountBeforeLookup() async {
+        let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
 
         let (model, _) = makeModel()
         model.selectedProvider = .hosted
@@ -429,28 +795,23 @@ struct AgentViewModelWorkflowTests {
         // The key guard runs synchronously above; restore the global default
         // before the first await so a parallel test never observes the persisted
         // "hosted" value (which would make it skip its own key guard).
-        if let savedProvider {
-            UserDefaults.standard.set(savedProvider, forKey: providerKey)
-        } else {
-            UserDefaults.standard.removeObject(forKey: providerKey)
-        }
+        Self.restoreProviderDefault(savedProvider)
 
-        // Hosted needs no key, so the run clears the key guard and fails later
-        // because the workflow id does not exist — not with the "API key" message.
-        await waitUntil {
-            if case .failed = model.phase { return true }
-            return false
-        }
         guard case .failed(let reason) = model.phase else {
-            Issue.record("expected a failure after the workflow lookup")
+            Issue.record("expected hosted sign-in failure before workflow lookup")
             return
         }
         #expect(!reason.contains("API key"))
-        #expect(reason.contains("could not be found"))
+        #expect(reason.contains("Sign in"))
+        #expect(reason.contains("Mac Autopilot Basic"))
+        #expect(!reason.contains("could not be found"))
     }
 
     @Test func runWorkflowWithMissingBindingsFailsBeforeAppLookup() async {
+        let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
         let (model, store) = makeModel()
+        model.selectedProvider = .openai
+        Self.restoreProviderDefault(savedProvider)
         model.apiKey = "test-key"
         let workflow = Workflow(
             name: "Needs field",
@@ -475,7 +836,10 @@ struct AgentViewModelWorkflowTests {
     }
 
     @Test func runWorkflowMarksPhaseRunningBeforeAsyncLookup() async {
+        let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
         let (model, store) = makeModel()
+        model.selectedProvider = .openai
+        Self.restoreProviderDefault(savedProvider)
         model.apiKey = "test-key"
         let workflow = Workflow(
             name: "Queued",
@@ -490,8 +854,11 @@ struct AgentViewModelWorkflowTests {
         #expect(model.phase == .running)
     }
 
-    @Test func runWorkflowAcceptsDefaultBindingsBeforeAppLookup() async {
+    @Test func runWorkflowIgnoresPersistedDefaultBindings() async {
+        let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
         let (model, store) = makeModel()
+        model.selectedProvider = .openai
+        Self.restoreProviderDefault(savedProvider)
         model.apiKey = "test-key"
         let workflow = Workflow(
             name: "Has default",
@@ -509,14 +876,17 @@ struct AgentViewModelWorkflowTests {
         }
 
         guard case .failed(let reason) = model.phase else {
-            Issue.record("expected app-running failure after defaults satisfy bindings")
+            Issue.record("expected missing field failure because defaults are not persisted")
             return
         }
-        #expect(reason.contains("not running"))
+        #expect(reason.contains("{{recipient}}"))
     }
 
     @Test func runWorkflowWithAppNotRunningFails() async {
+        let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
         let (model, store) = makeModel()
+        model.selectedProvider = .openai
+        Self.restoreProviderDefault(savedProvider)
         model.apiKey = "test-key"
         let workflow = Workflow(
             name: "Ghost",

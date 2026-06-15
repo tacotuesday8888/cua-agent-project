@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { estimateCostUsd, buildUsageRecord } from '../src/usage.js';
 
 describe('usage', () => {
-  it('estimates gpt-5.4-mini cost from token counts', () => {
+  it('estimates Mac Autopilot Basic gpt-5.4-mini cost from token counts', () => {
     // 1M input @ $0.75 + 1M output @ $4.50 = $5.25
     expect(
       estimateCostUsd('gpt-5.4-mini', { inputTokens: 1_000_000, outputTokens: 1_000_000 })

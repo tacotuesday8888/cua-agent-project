@@ -1,13 +1,15 @@
 import AppKit
+import AutopilotHistory
 import AutopilotUI
 import AutopilotWorkflows
 import SwiftUI
 
-/// A minimal test harness for the agent: pick a running app, type a task, and
-/// watch the live feed. The notch UI replaces this once the engine is proven.
+/// The primary Mac Autopilot control center: setup, one-app runs, approvals,
+/// saved workflows, local memory, trust, and recent run history.
 struct ContentView: View {
     @State private var model = AgentViewModel()
     @State private var auth = AuthModel()
+    @State private var subscriptionAuth = SubscriptionAccountAuthModel()
     @State private var newWorkflowName = ""
     @State private var newWorkflowGoal = ""
     @State private var workflowBindings: [UUID: [String: String]] = [:]
@@ -35,95 +37,397 @@ struct ContentView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Mac Autopilot")
-                .font(.title3.weight(.semibold))
-            Text("Test harness — pick an app, give the agent a task, watch it run.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            permissionsView
-
-            HStack {
-                Picker("Model", selection: $model.selectedProvider) {
-                    ForEach(AgentViewModel.Provider.allCases) { provider in
-                        Text(provider.displayName).tag(provider)
-                    }
-                }
-                .frame(maxWidth: 220)
-
-                if model.selectedProviderRequiresAPIKey {
-                    SecureField(model.apiKeyPlaceholder, text: $model.apiKey)
-                        .textFieldStyle(.roundedBorder)
-                } else {
-                    hostedAccountControls
-                }
+        VStack(alignment: .leading, spacing: 14) {
+            header
+            HStack(alignment: .top, spacing: 14) {
+                setupColumn
+                    .frame(width: 280)
+                runColumn
+                    .frame(minWidth: 360, maxWidth: .infinity)
+                libraryColumn
+                    .frame(width: 310)
             }
-            if !model.selectedProviderRequiresAPIKey, let status = auth.statusMessage {
-                Text(status)
+        }
+        .padding(16)
+        .frame(minWidth: 900, minHeight: 620, alignment: .top)
+        .onAppear {
+            model.refreshApps()
+            model.refreshPermissions()
+            model.hostedTokenProvider = hostedFirebaseToken
+            model.hostedAccountStatusProvider = {
+                AgentViewModel.HostedAccountStatus(
+                    email: auth.email,
+                    statusMessage: auth.statusMessage
+                )
+            }
+            wireSubscriptionAccountStatus()
+            auth.refresh()
+            refreshSubscriptionAccountIfNeeded()
+        }
+        .onChange(of: model.selectedProvider) { _, _ in
+            refreshSubscriptionAccountIfNeeded()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            model.refreshPermissions()
+            auth.refresh()
+            refreshSubscriptionAccountIfNeeded()
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Mac Autopilot Control Center")
+                    .font(.title3.weight(.semibold))
+                Text("One target app, one live AI workflow, local approvals and storage.")
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.secondary)
             }
+            Spacer()
+            runStateBadge
+        }
+    }
 
-            HStack {
-                Picker("Target app", selection: $model.selectedAppName) {
-                    ForEach(model.runningAppNames, id: \.self) { name in
-                        Text(name).tag(name)
-                    }
-                }
-                Button("Refresh") { model.refreshApps() }
+    private var setupColumn: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                permissionsView
+                aiAccessView
+                localPrivacyView
             }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
 
-            HStack {
-                TextField("What should I do?  (\"@App …\" or \"remember: …\")", text: $model.promptText)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit { model.submit() }
-                runButton
-            }
-
-            if let approval = model.pendingApproval {
-                approvalRow(approval)
-            }
-
-            if let memory = model.pendingMemory {
-                memoryRow(memory)
-            }
-
-            if let question = model.pendingQuestion {
-                questionRow(question)
-            }
-
+    private var runColumn: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            runPanel
+            pendingInteractionView
             phaseLine
-
             if let usage = model.tokenUsageText {
                 Text("Tokens — \(usage)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-
-            if !model.feed.isEmpty {
-                feedView
-            }
-
-            trustView
-
-            memoryView
-
-            workflowsView
-
+            feedView
             Spacer(minLength: 0)
         }
-        .padding()
-        .frame(width: 480)
-        .frame(minHeight: 440, alignment: .top)
-        .onAppear {
-            model.refreshApps()
-            model.refreshPermissions()
-            model.hostedTokenProvider = hostedFirebaseToken
-            auth.refresh()
+    }
+
+    private var libraryColumn: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                workflowsView
+                historyView
+                memoryView
+                trustView
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            model.refreshPermissions()
+    }
+
+    private var runPanel: some View {
+        GroupBox("Run") {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Picker("Target app", selection: $model.selectedAppName) {
+                        ForEach(model.runningAppNames, id: \.self) { name in
+                            Text(name).tag(name)
+                        }
+                    }
+                    Button("Refresh") { model.refreshApps() }
+                        .controlSize(.small)
+                }
+
+                TextField("Goal for one app, or use @App / remember: …", text: $model.promptText)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { model.submit() }
+
+                HStack {
+                    Text("Saved workflows are adaptive goals, not recorded clicks.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    runButton
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var pendingInteractionView: some View {
+        if let approval = model.pendingApproval {
+            approvalRow(approval)
+        }
+
+        if let memory = model.pendingMemory {
+            memoryRow(memory)
+        }
+
+        if let question = model.pendingQuestion {
+            questionRow(question)
+        }
+    }
+
+    private var runStateBadge: some View {
+        HStack(spacing: 6) {
+            statusDot
+            Text(runStateText)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(.quaternary.opacity(0.5), in: Capsule())
+    }
+
+    private var statusDot: some View {
+        Circle()
+            .fill(runStateColor)
+            .frame(width: 7, height: 7)
+    }
+
+    private var runStateText: String {
+        switch model.phase {
+        case .idle: "Ready"
+        case .running: "Running"
+        case .finished: "Finished"
+        case .failed: "Needs attention"
+        }
+    }
+
+    private var runStateColor: Color {
+        switch model.phase {
+        case .idle: .secondary
+        case .running: .blue
+        case .finished: .green
+        case .failed: .red
+        }
+    }
+
+    private var aiAccessView: some View {
+        GroupBox("AI Access") {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Picker("Mode", selection: $model.selectedProvider) {
+                        ForEach(AgentViewModel.Provider.allCases) { provider in
+                            Text("\(provider.displayName) · \(provider.accessMode.displayName)")
+                                .tag(provider)
+                        }
+                    }
+                    .frame(maxWidth: 260)
+
+                    providerCredentialControls
+                }
+
+                Text(accessModeSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if model.selectedProvider == .openAICompatible {
+                    openAICompatibleControls
+                } else {
+                    HStack {
+                        if model.availableModelDescriptors.count > 1 {
+                            Picker("Model", selection: $model.selectedModelID) {
+                                ForEach(model.availableModelDescriptors) { option in
+                                    Text(option.displayName).tag(option.identifier)
+                                }
+                            }
+                            .frame(maxWidth: 260)
+                        } else {
+                            LabeledContent("Model") {
+                                Text(model.selectedModelDescriptor.displayName)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        capabilityBadges
+                    }
+                }
+
+                providerStatusText
+
+                existingAccountAccessStatus
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var providerCredentialControls: some View {
+        if model.selectedProviderUsesAPIKey {
+            SecureField(model.apiKeyPlaceholder, text: $model.apiKey)
+                .textFieldStyle(.roundedBorder)
+        } else if model.selectedSubscriptionAccountRequirement != nil {
+            subscriptionAccountControls
+        } else {
+            hostedAccountControls
+        }
+    }
+
+    @ViewBuilder
+    private var subscriptionAccountControls: some View {
+        if let requirement = model.selectedSubscriptionAccountRequirement {
+            let state = subscriptionAuth.state(for: requirement.providerID)
+            if state.isBusy {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Checking \(requirement.providerName)…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else if state.isSignedIn {
+                HStack(spacing: 8) {
+                    Text("Signed in")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Sign out") {
+                        Task { await subscriptionAuth.signOut(provider: requirement.providerID) }
+                    }
+                }
+            } else {
+                HStack(spacing: 8) {
+                    Button("Sign in") {
+                        Task { await subscriptionAuth.signIn(provider: requirement.providerID) }
+                    }
+                    Button("Check") {
+                        Task { await subscriptionAuth.refresh(provider: requirement.providerID) }
+                    }
+                }
+            }
+        }
+    }
+
+    private var openAICompatibleControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker(
+                "Provider",
+                selection: Binding(
+                    get: { model.openAICompatiblePresetID },
+                    set: { model.applyOpenAICompatiblePreset(id: $0) }
+                )
+            ) {
+                ForEach(AgentViewModel.openAICompatiblePresets) { preset in
+                    Text(preset.displayName).tag(preset.id)
+                }
+            }
+            .frame(maxWidth: 280)
+
+            LabeledContent("Endpoint") {
+                TextField(
+                    "http://localhost:11434/v1/chat/completions",
+                    text: $model.openAICompatibleEndpoint
+                )
+                .textFieldStyle(.roundedBorder)
+            }
+
+            HStack {
+                LabeledContent("Model ID") {
+                    TextField("model-name", text: $model.selectedModelID)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                Toggle("Images", isOn: $model.openAICompatibleSupportsImageInput)
+                    .toggleStyle(.checkbox)
+
+                capabilityBadges
+            }
+        }
+    }
+
+    private var accessModeSummary: String {
+        switch model.selectedProviderAccessMode {
+        case .appManaged:
+            "Default hosted AI · Google sign-in · no API key"
+        case .bringYourOwnKey:
+            "Advanced · uses your provider account"
+        case .existingSubscription:
+            "Account connection · supported providers only"
+        }
+    }
+
+    private var capabilityBadges: some View {
+        HStack(spacing: 6) {
+            capabilityBadge("Tools", enabled: model.selectedModelDescriptor.supportsToolCalls)
+            capabilityBadge("Images", enabled: model.selectedModelDescriptor.supportsImageInput)
+            if model.selectedModelDescriptor.supportsPromptCaching {
+                capabilityBadge("Prompt cache", enabled: true)
+            }
+        }
+        .font(.caption)
+    }
+
+    private func capabilityBadge(_ title: String, enabled: Bool) -> some View {
+        Text(title)
+            .foregroundStyle(enabled ? .primary : .secondary)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(
+                (enabled ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.08)),
+                in: Capsule()
+            )
+    }
+
+    @ViewBuilder
+    private var providerStatusText: some View {
+        if let requirement = model.selectedSubscriptionAccountRequirement {
+            Text(requirement.setupSummary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let message = subscriptionAuth.state(for: requirement.providerID).statusMessage {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(message.localizedCaseInsensitiveContains("failed") ? .red : .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else if !model.selectedProviderUsesAPIKey, let status = auth.statusMessage {
+            Text(status)
+                .font(.caption)
+                .foregroundStyle(.red)
+        } else if model.selectedProviderUsesAPIKey {
+            Text("API keys are stored in Keychain on this Mac.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func refreshSubscriptionAccountIfNeeded() {
+        guard let requirement = model.selectedSubscriptionAccountRequirement else { return }
+        Task { await subscriptionAuth.refresh(provider: requirement.providerID) }
+    }
+
+    private func wireSubscriptionAccountStatus() {
+        let subscriptionAuth = subscriptionAuth
+        model.subscriptionAccountSignedInProvider = { provider in
+            guard let state = subscriptionAuth.knownState(for: provider), !state.isBusy else {
+                return nil
+            }
+            return state.isSignedIn
+        }
+    }
+
+    private var existingAccountAccessStatus: some View {
+        let status = model.existingAccountAccessStatus
+        return VStack(alignment: .leading, spacing: 4) {
+            Divider()
+            HStack(spacing: 6) {
+                Text(status.title)
+                    .font(.caption.weight(.semibold))
+                Text(status.accessMode.displayName)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(status.isAvailable ? "Available" : "Unavailable")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+            Text(status.summary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(status.detail)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -177,6 +481,7 @@ struct ContentView: View {
             Button("Stop", role: .destructive) { model.stop() }
         } else {
             Button("Run") { model.submit() }
+                .disabled(model.promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
     }
 
@@ -276,20 +581,101 @@ struct ContentView: View {
     }
 
     private var feedView: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(model.feed) { item in
-                    Text(item.text)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(item.isError ? Color.red : Color.primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+        GroupBox("Live Run") {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    if model.feed.isEmpty {
+                        Text("Run events, approvals, and verification notes appear here.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(model.feed) { item in
+                        Text(item.text)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(item.isError ? Color.red : Color.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(8)
+                .textSelection(.enabled)
+            }
+            .frame(minHeight: 180, maxHeight: .infinity)
+        }
+    }
+
+    private var localPrivacyView: some View {
+        GroupBox("Local Data & Privacy") {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Keys and account tokens stay in Keychain.", systemImage: "key.fill")
+                Label("History stores redacted metadata, not prompts or responses.", systemImage: "clock.arrow.circlepath")
+                Label("Workflow slot values are used for one run and not saved.", systemImage: "lock.doc")
+                Label("Hosted Basic stores usage metadata only on the backend.", systemImage: "cloud")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var historyView: some View {
+        DisclosureGroup("Recent runs (\(model.recentRuns.count))") {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Redacted local history")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Clear") { model.clearHistory() }
+                        .controlSize(.small)
+                        .disabled(model.recentRuns.isEmpty)
+                }
+                if model.recentRuns.isEmpty {
+                    Text("Finished runs appear here without raw prompts, screens, or model responses.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(model.recentRuns.prefix(8)) { run in
+                    runHistoryRow(run)
                 }
             }
-            .padding(8)
-            .textSelection(.enabled)
+            .padding(.top, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxHeight: 220)
-        .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
+        .font(.caption)
+    }
+
+    private func runHistoryRow(_ run: RunRecord) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: historyIcon(for: run.status))
+                .foregroundStyle(historyColor(for: run.status))
+                .frame(width: 14)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(run.task)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                Text("\(run.summary) · \(run.model) · \(run.actionCount) actions · \(run.compactTokens) tokens")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func historyIcon(for status: RunStatus) -> String {
+        switch status {
+        case .completed: "checkmark.circle.fill"
+        case .stopped: "stop.circle.fill"
+        case .failed: "xmark.circle.fill"
+        }
+    }
+
+    private func historyColor(for status: RunStatus) -> Color {
+        switch status {
+        case .completed: .green
+        case .stopped: .orange
+        case .failed: .red
+        }
     }
 
     private var memoryView: some View {
@@ -345,14 +731,6 @@ struct ContentView: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                         Spacer()
-                        if let run = model.recentRuns.first {
-                            Button("Save last run") {
-                                model.saveRunAsWorkflow(run, name: newWorkflowName)
-                                newWorkflowName = ""
-                            }
-                            .controlSize(.small)
-                            .disabled(newWorkflowName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        }
                         Button("Create") {
                             model.createWorkflow(
                                 name: newWorkflowName,

@@ -8,13 +8,13 @@
 
 /* Begin PBXBuildFile section */
 		0A234545A4775E4289E39A25 /* AutopilotAgent in Frameworks */ = {isa = PBXBuildFile; productRef = E2C1701687B09E7182366316 /* AutopilotAgent */; };
-		D1E2F3A4B5C6D7E8F9A0B1C2 /* AutopilotUI in Frameworks */ = {isa = PBXBuildFile; productRef = C2B1A0F9E8D7C6B5A4F3E2D1 /* AutopilotUI */; };
 		A5D7F6E0EF733CE249BBEE96 /* AutopilotCore in Frameworks */ = {isa = PBXBuildFile; productRef = 8FF2EC3426FF996A35B951FF /* AutopilotCore */; };
 		B18B37A2430BA4993177A607 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D8FF34B626C1F73BBCB7465 /* ContentView.swift */; };
 		C40A9F4B7F9F4F6E9D0C1001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C40A9F4B7F9F4F6E9D0C1000 /* Assets.xcassets */; };
 		C40A9F4B7F9F4F6E9D0C1003 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = C40A9F4B7F9F4F6E9D0C1004 /* GoogleService-Info.plist */; };
 		CB4671DB015FAA38964052DC /* MacAutopilotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D0BF057B2091CE0320A5958 /* MacAutopilotTests.swift */; };
 		CE9A5658CB90F9C2375E368C /* MacAutopilotApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E7DB48C234ECB4F9FD5A111 /* MacAutopilotApp.swift */; };
+		D1E2F3A4B5C6D7E8F9A0B1C2 /* AutopilotUI in Frameworks */ = {isa = PBXBuildFile; productRef = C2B1A0F9E8D7C6B5A4F3E2D1 /* AutopilotUI */; };
 		D8372C345B3276B9AE06800B /* AutopilotLLM in Frameworks */ = {isa = PBXBuildFile; productRef = 4C6C024C9585F7102B43F33D /* AutopilotLLM */; };
 		DEADBEEF0000000000000001 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = CAFEF00D0000000000000001 /* FirebaseAuth */; };
 		DEADBEEF0000000000000002 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = CAFEF00D0000000000000002 /* GoogleSignIn */; };
@@ -35,7 +35,7 @@
 		3D0BF057B2091CE0320A5958 /* MacAutopilotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacAutopilotTests.swift; sourceTree = "<group>"; };
 		5D8FF34B626C1F73BBCB7465 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		7E7DB48C234ECB4F9FD5A111 /* MacAutopilotApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacAutopilotApp.swift; sourceTree = "<group>"; };
-		8715E2D30943EF6543CEAB25 /* AutopilotKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = AutopilotKit; path = AutopilotKit; sourceTree = SOURCE_ROOT; };
+		8715E2D30943EF6543CEAB25 /* AutopilotKit */ = {isa = PBXFileReference; lastKnownFileType = folder; path = AutopilotKit; sourceTree = SOURCE_ROOT; };
 		A646B4FE57A1CE79B5371FE0 /* MacAutopilotTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MacAutopilotTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		BE75A44D29DB0A0EBA24C4E8 /* MacAutopilot.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MacAutopilot.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C40A9F4B7F9F4F6E9D0C1000 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -163,6 +163,11 @@
 				TargetAttributes = {
 					4857B33A1BBE12372CE92711 = {
 						ProvisioningStyle = Automatic;
+						SystemCapabilities = {
+							com.apple.Keychain = {
+								enabled = 1;
+							};
+						};
 					};
 					CA94C5EBDC60AC38645C41FC = {
 						ProvisioningStyle = Automatic;
@@ -513,10 +518,6 @@
 			isa = XCSwiftPackageProductDependency;
 			productName = AutopilotCore;
 		};
-		E2C1701687B09E7182366316 /* AutopilotAgent */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = AutopilotAgent;
-		};
 		C2B1A0F9E8D7C6B5A4F3E2D1 /* AutopilotUI */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = AutopilotUI;
@@ -530,6 +531,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = FACEFEED0000000000000002 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
 			productName = GoogleSignIn;
+		};
+		E2C1701687B09E7182366316 /* AutopilotAgent */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AutopilotAgent;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

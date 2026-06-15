@@ -4,16 +4,18 @@ import AutopilotCore
 import AutopilotWorkflows
 import SwiftUI
 
-/// Placeholder notch-resident assistant surface.
+/// Compact assistant surface for quick prompts and urgent in-run decisions.
 ///
-/// This is intentionally simple: the shape, motion, and visual language are
-/// expected to be replaced by the final designer-owned UI, while the data flow
-/// and interaction contracts stay in place.
+/// The Control Center is the primary product surface; this panel stays focused
+/// on quick prompts, approvals, questions, and status.
 public struct NotchAssistantView: View {
     public static let expandedWidth: CGFloat = 460
     public static let expandedHeight: CGFloat = 488
 
     @Bindable private var model: AgentViewModel
+    @State private var subscriptionAuth = SubscriptionAccountAuthModel()
+    @State private var hostedAccountStatus = AgentViewModel.HostedAccountStatus()
+    @State private var hostedSignInBusy = false
     private let onExpansionChange: @MainActor (Bool) -> Void
     private let onHighlightChange: @MainActor (ActionTarget?) -> Void
 
@@ -48,10 +50,19 @@ public struct NotchAssistantView: View {
         .onAppear {
             model.refreshApps()
             model.refreshPermissions()
+            wireSubscriptionAccountStatus()
+            refreshHostedAccountStatus()
+            refreshSubscriptionAccountIfNeeded()
             onExpansionChange(model.isExpanded)
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             model.refreshPermissions()
+            refreshHostedAccountStatus()
+            refreshSubscriptionAccountIfNeeded()
+        }
+        .onChange(of: model.selectedProvider) { _, _ in
+            refreshHostedAccountStatus()
+            refreshSubscriptionAccountIfNeeded()
         }
         .onChange(of: model.isExpanded) { _, expanded in
             onExpansionChange(expanded)
@@ -141,42 +152,82 @@ public struct NotchAssistantView: View {
     }
 
     private var controls: some View {
-        HStack(spacing: 8) {
-            Picker("Model", selection: $model.selectedProvider) {
-                ForEach(AgentViewModel.Provider.allCases) { provider in
-                    Text(provider.displayName).tag(provider)
+        VStack(spacing: 6) {
+            HStack(spacing: 8) {
+                Picker("AI", selection: $model.selectedProvider) {
+                    ForEach(AgentViewModel.Provider.allCases) { provider in
+                        Text("\(provider.displayName) · \(provider.accessMode.displayName)")
+                            .tag(provider)
+                    }
                 }
-            }
-            .labelsHidden()
-            .frame(width: 170)
+                .labelsHidden()
+                .frame(width: 190)
 
-            Picker("Target", selection: $model.selectedAppName) {
-                ForEach(model.runningAppNames, id: \.self) { name in
-                    Text(name).tag(name)
+                Picker("Target", selection: $model.selectedAppName) {
+                    ForEach(model.runningAppNames, id: \.self) { name in
+                        Text(name).tag(name)
+                    }
                 }
-            }
-            .labelsHidden()
-            .frame(maxWidth: .infinity)
+                .labelsHidden()
+                .frame(maxWidth: .infinity)
 
-            Button {
-                model.refreshApps()
-            } label: {
-                Image(systemName: "arrow.clockwise")
+                Button {
+                    model.refreshApps()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .help("Refresh apps")
             }
-            .buttonStyle(.borderless)
-            .help("Refresh apps")
+
+            modelCapabilityRow
         }
         .controlSize(.small)
     }
 
+    private var modelCapabilityRow: some View {
+        HStack(spacing: 6) {
+            Text(model.selectedProviderAccessMode.displayName)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.62))
+                .lineLimit(1)
+
+            Text(model.selectedModelDescriptor.displayName)
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.48))
+                .lineLimit(1)
+
+            Spacer(minLength: 4)
+
+            compactCapability("Tools", enabled: model.selectedModelDescriptor.supportsToolCalls)
+            compactCapability("Images", enabled: model.selectedModelDescriptor.supportsImageInput)
+        }
+    }
+
+    private func compactCapability(_ title: String, enabled: Bool) -> some View {
+        Text(title)
+            .font(.system(size: 9, weight: .medium))
+            .foregroundStyle(enabled ? .white.opacity(0.75) : .white.opacity(0.35))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(
+                (enabled ? Color.white.opacity(0.10) : Color.white.opacity(0.04)),
+                in: Capsule()
+            )
+    }
+
     private var promptRow: some View {
         VStack(spacing: 8) {
-            if model.selectedProviderRequiresAPIKey, model.apiKey.isEmpty {
+            if model.selectedProviderUsesAPIKey {
                 SecureField(model.apiKeyPlaceholder, text: $model.apiKey)
                     .textFieldStyle(.plain)
                     .padding(8)
                     .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
             }
+
+            openAICompatibleSetup
+            hostedAccountPrompt
+            subscriptionAccountPrompt
 
             HStack(spacing: 8) {
                 TextField("What should I do?", text: $model.promptText)
@@ -205,6 +256,181 @@ public struct NotchAssistantView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private var openAICompatibleSetup: some View {
+        if model.selectedProvider == .openAICompatible {
+            VStack(spacing: 6) {
+                HStack(spacing: 8) {
+                    Picker(
+                        "Provider",
+                        selection: Binding(
+                            get: { model.openAICompatiblePresetID },
+                            set: { model.applyOpenAICompatiblePreset(id: $0) }
+                        )
+                    ) {
+                        ForEach(AgentViewModel.openAICompatiblePresets) { preset in
+                            Text(preset.displayName).tag(preset.id)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity)
+
+                    Toggle("Images", isOn: $model.openAICompatibleSupportsImageInput)
+                        .toggleStyle(.checkbox)
+                        .font(.system(size: 10, weight: .medium))
+                }
+
+                TextField("Chat completions URL", text: $model.openAICompatibleEndpoint)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 10))
+                    .padding(7)
+                    .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+
+                TextField("Model ID", text: $model.selectedModelID)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 10))
+                    .padding(7)
+                    .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+            }
+            .padding(8)
+            .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    @ViewBuilder
+    private var hostedAccountPrompt: some View {
+        if model.selectedProvider == .hosted {
+            HStack(spacing: 8) {
+                Image(systemName: hostedAccountStatus.isSignedIn
+                    ? "checkmark.circle.fill"
+                    : "person.crop.circle.badge.plus")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(hostedAccountStatus.isSignedIn ? .green : .blue)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Mac Autopilot Basic")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.78))
+                        .lineLimit(1)
+                    Text(hostedAccountStatusText)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white.opacity(0.48))
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 4)
+
+                if hostedSignInBusy {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(.white)
+                } else if hostedAccountStatus.isSignedIn {
+                    Button("Sign out") {
+                        model.hostedSignOutHandler()
+                        refreshHostedAccountStatus()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.62))
+                } else {
+                    Button("Sign in") {
+                        Task {
+                            hostedSignInBusy = true
+                            await model.hostedSignInHandler()
+                            hostedSignInBusy = false
+                            refreshHostedAccountStatus()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.78))
+                }
+            }
+            .padding(8)
+            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private var hostedAccountStatusText: String {
+        if let message = hostedAccountStatus.statusMessage {
+            return message
+        }
+        if let email = hostedAccountStatus.email {
+            return "Signed in as \(email)."
+        }
+        return "Sign in to use the built-in AI option."
+    }
+
+    @ViewBuilder
+    private var subscriptionAccountPrompt: some View {
+        if let requirement = model.selectedSubscriptionAccountRequirement {
+            let state = subscriptionAuth.state(for: requirement.providerID)
+            HStack(spacing: 8) {
+                Image(systemName: state.isSignedIn ? "checkmark.circle.fill" : "person.crop.circle.badge.exclamationmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(state.isSignedIn ? .green : .orange)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(requirement.providerName)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.78))
+                        .lineLimit(1)
+                    Text(subscriptionAccountStatusText(requirement: requirement, state: state))
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white.opacity(0.48))
+                        .lineLimit(2)
+                }
+
+                Spacer(minLength: 4)
+
+                if state.isBusy {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(.white)
+                } else if state.isSignedIn {
+                    Button("Sign out") {
+                        Task { await subscriptionAuth.signOut(provider: requirement.providerID) }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.62))
+                } else {
+                    Button("Sign in") {
+                        Task { await subscriptionAuth.signIn(provider: requirement.providerID) }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.78))
+
+                    Button("Check") {
+                        Task { await subscriptionAuth.refresh(provider: requirement.providerID) }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.5))
+                }
+            }
+            .padding(8)
+            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private func subscriptionAccountStatusText(
+        requirement: AgentViewModel.SubscriptionAccountRequirement,
+        state: SubscriptionAccountAuthModel.AccountState
+    ) -> String {
+        if let message = state.statusMessage {
+            return message
+        }
+        if state.isBusy {
+            return "Checking sign-in status..."
+        }
+        if state.isSignedIn {
+            return "Ready through OAuth."
+        }
+        return "Sign-in opens your browser. Tokens stay in Keychain."
     }
 
     @ViewBuilder
@@ -466,6 +692,25 @@ public struct NotchAssistantView: View {
     private func setExpanded(_ expanded: Bool) {
         withAnimation(.snappy(duration: 0.22)) {
             model.isExpanded = expanded
+        }
+    }
+
+    private func refreshHostedAccountStatus() {
+        hostedAccountStatus = model.hostedAccountStatusProvider()
+    }
+
+    private func refreshSubscriptionAccountIfNeeded() {
+        guard let requirement = model.selectedSubscriptionAccountRequirement else { return }
+        Task { await subscriptionAuth.refresh(provider: requirement.providerID) }
+    }
+
+    private func wireSubscriptionAccountStatus() {
+        let subscriptionAuth = subscriptionAuth
+        model.subscriptionAccountSignedInProvider = { provider in
+            guard let state = subscriptionAuth.knownState(for: provider), !state.isBusy else {
+                return nil
+            }
+            return state.isSignedIn
         }
     }
 }

@@ -48,15 +48,24 @@ struct LLMResponseTests {
 }
 
 struct LLMProviderDescriptorTests {
+    @Test func accessModeDisplayNamesAreProductFacing() {
+        #expect(LLMAccessMode.appManaged.displayName == "Mac Autopilot Basic")
+        #expect(LLMAccessMode.bringYourOwnKey.displayName == "Bring Your Own Key")
+        #expect(LLMAccessMode.existingSubscription.displayName == "Existing AI Account")
+    }
+
     @Test func knownProviderCapabilitiesAreExplicit() {
         #expect(LLMProviderDescriptor.anthropic.identifier == "anthropic")
+        #expect(LLMProviderDescriptor.anthropic.accessMode == .bringYourOwnKey)
         #expect(LLMProviderDescriptor.anthropic.supportsToolCalls)
         #expect(LLMProviderDescriptor.anthropic.supportsImageInput)
         #expect(LLMProviderDescriptor.anthropic.supportsPromptCaching)
         #expect(LLMProviderDescriptor.anthropic.apiKeyEnvironment == "ANTHROPIC_API_KEY")
         #expect(LLMProviderDescriptor.anthropic.keychainAccount == "AutopilotAnthropicAPIKey")
+        #expect(LLMProviderDescriptor.anthropic.defaultModelDescriptor.identifier == "claude-sonnet-4-6")
 
         #expect(LLMProviderDescriptor.openai.identifier == "openai")
+        #expect(LLMProviderDescriptor.openai.accessMode == .bringYourOwnKey)
         #expect(LLMProviderDescriptor.openai.defaultModel == "gpt-5.4-mini")
         #expect(LLMProviderDescriptor.openai.supportsToolCalls)
         #expect(LLMProviderDescriptor.openai.supportsImageInput)
@@ -64,14 +73,346 @@ struct LLMProviderDescriptorTests {
         #expect(!LLMProviderDescriptor.openai.supportsPromptCaching)
         #expect(LLMProviderDescriptor.openai.apiKeyEnvironment == "OPENAI_API_KEY")
         #expect(LLMProviderDescriptor.openai.keychainAccount == "AutopilotOpenAIAPIKey")
+        #expect(LLMProviderDescriptor.openai.defaultModelDescriptor.supportsImageInput)
+
+        #expect(LLMProviderDescriptor.openAICompatible.identifier == "openai-compatible")
+        #expect(LLMProviderDescriptor.openAICompatible.displayName == "OpenAI-compatible endpoint")
+        #expect(LLMProviderDescriptor.openAICompatible.accessMode == .bringYourOwnKey)
+        #expect(LLMProviderDescriptor.openAICompatible.allowsCustomModelID)
+        #expect(LLMProviderDescriptor.openAICompatible.defaultModel == "custom-model")
+        #expect(LLMProviderDescriptor.openAICompatible.supportsToolCalls)
+        #expect(!LLMProviderDescriptor.openAICompatible.supportsImageInput)
+        #expect(LLMProviderDescriptor.openAICompatible.apiKeyEnvironment.isEmpty)
+        #expect(LLMProviderDescriptor.openAICompatible.keychainAccount == "AutopilotOpenAICompatibleAPIKey")
 
         // Hosted uses sign-in, not a local API key, so the key fields are empty.
         #expect(LLMProviderDescriptor.hosted.identifier == "hosted")
+        #expect(LLMProviderDescriptor.hosted.displayName == "Mac Autopilot Basic")
+        #expect(LLMProviderDescriptor.hosted.accessMode == .appManaged)
         #expect(LLMProviderDescriptor.hosted.defaultModel == "gpt-5.4-mini")
+        #expect(LLMProviderDescriptor.hosted.defaultModelDescriptor.displayName == "GPT-5.4 Mini")
         #expect(LLMProviderDescriptor.hosted.supportsToolCalls)
         #expect(LLMProviderDescriptor.hosted.supportsImageInput)
         #expect(LLMProviderDescriptor.hosted.apiKeyEnvironment.isEmpty)
         #expect(LLMProviderDescriptor.hosted.keychainAccount.isEmpty)
+
+        #expect(LLMProviderDescriptor.chatGPTAccount.identifier == "chatgpt-account")
+        #expect(LLMProviderDescriptor.chatGPTAccount.displayName == "ChatGPT subscription")
+        #expect(LLMProviderDescriptor.chatGPTAccount.accessMode == .existingSubscription)
+        #expect(LLMProviderDescriptor.chatGPTAccount.supportsToolCalls)
+        #expect(!LLMProviderDescriptor.chatGPTAccount.supportsImageInput)
+        #expect(LLMProviderDescriptor.chatGPTAccount.apiKeyEnvironment.isEmpty)
+        #expect(LLMProviderDescriptor.chatGPTAccount.keychainAccount.isEmpty)
+
+        #expect(LLMProviderDescriptor.anthropicSubscription.accessMode == .existingSubscription)
+        #expect(LLMProviderDescriptor.anthropicSubscription.displayName == "Claude subscription")
+        #expect(LLMProviderDescriptor.anthropicSubscription.defaultModel == "automatic")
+        #expect(LLMProviderDescriptor.anthropicSubscription.supportsToolCalls)
+        #expect(!LLMProviderDescriptor.anthropicSubscription.supportsImageInput)
+        #expect(!LLMProviderDescriptor.anthropicSubscription.supportsPromptCaching)
+        #expect(LLMProviderDescriptor.anthropicSubscription.keychainAccount.isEmpty)
+    }
+
+    @Test func modelLookupFallsBackToTheDefaultModel() {
+        let model = LLMProviderDescriptor.openai.modelDescriptor(for: "unknown-model")
+        #expect(model.identifier == "gpt-5.4-mini")
+        #expect(model.supportsToolCalls)
+        #expect(model.supportsImageInput)
+    }
+
+    @Test func customModelLookupPreservesCompatibleModelIDs() {
+        let model = LLMProviderDescriptor.openAICompatible.modelDescriptor(for: "qwen/qwen3-coder")
+        #expect(model.identifier == "qwen/qwen3-coder")
+        #expect(model.displayName == "qwen/qwen3-coder")
+        #expect(model.supportsToolCalls)
+        #expect(!model.supportsImageInput)
+        #expect(!model.supportsPromptCaching)
+    }
+}
+
+struct SubscriptionOAuthTests {
+    @Test func chatGPTSubscriptionOAuthMatchesCodexStyleFlowWithoutExternalStorage() {
+        let config = SubscriptionOAuthProviderID.chatGPTCodex.configuration
+        let url = config.authorizationURL(codeChallenge: "challenge", state: "state")
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        let query = Dictionary(uniqueKeysWithValues: (components?.queryItems ?? []).map {
+            ($0.name, $0.value ?? "")
+        })
+
+        #expect(config.clientID == "app_EMoamEEZ73f0CkXaXp7hrann")
+        #expect(config.redirectURI == "http://localhost:1455/auth/callback")
+        #expect(config.tokenRequestEncoding == .form)
+        #expect(query["client_id"] == config.clientID)
+        #expect(query["scope"] == "openid profile email offline_access")
+        #expect(query["codex_cli_simplified_flow"] == "true")
+        #expect(query["originator"] == "mac-autopilot")
+        #expect(SubscriptionOAuthProviderID.chatGPTCodex.keychainAccount.contains("openai-codex"))
+    }
+
+    @Test func claudeSubscriptionOAuthMatchesAnthropicSubscriptionFlow() {
+        let config = SubscriptionOAuthProviderID.anthropic.configuration
+        let url = config.authorizationURL(codeChallenge: "challenge", state: "verifier")
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        let query = Dictionary(uniqueKeysWithValues: (components?.queryItems ?? []).map {
+            ($0.name, $0.value ?? "")
+        })
+
+        #expect(config.clientID == "9d1c250a-e61b-44d9-88ed-5944d1962f5e")
+        #expect(config.redirectURI == "http://localhost:53692/callback")
+        #expect(config.tokenRequestEncoding == .json)
+        #expect(query["code"] == "true")
+        #expect(query["state"] == "verifier")
+        #expect(query["scope"]?.contains("user:inference") == true)
+        #expect(SubscriptionOAuthProviderID.anthropic.keychainAccount.contains("anthropic"))
+    }
+
+    @Test func refreshUsesProviderSpecificTokenEncodingAndExtractsChatGPTAccountID() async throws {
+        let recorder = OAuthTransportRecorder(
+            responseBody: """
+            {"access_token":"\(Self.jwt(accountID: "acct_123"))","refresh_token":"next-refresh","expires_in":3600}
+            """
+        )
+        let client = SubscriptionOAuthTokenClient { request in
+            await recorder.respond(to: request)
+        }
+        let credential = SubscriptionOAuthCredential(
+            provider: .chatGPTCodex,
+            accessToken: "old",
+            refreshToken: "old-refresh",
+            expiresAt: .distantPast
+        )
+
+        let refreshed = try await client.refresh(credential)
+
+        #expect(refreshed.refreshToken == "next-refresh")
+        #expect(refreshed.accountID == "acct_123")
+        let request = await recorder.requests.first
+        #expect(request?.value(forHTTPHeaderField: "Content-Type") == "application/x-www-form-urlencoded")
+        let body = String(data: request?.httpBody ?? Data(), encoding: .utf8) ?? ""
+        #expect(body.contains("grant_type=refresh_token"))
+        #expect(body.contains("client_id=app_EMoamEEZ73f0CkXaXp7hrann"))
+    }
+
+    @Test func anthropicRefreshUsesJSONTokenBody() async throws {
+        let recorder = OAuthTransportRecorder(
+            responseBody: """
+            {"access_token":"sk-ant-oat-test","refresh_token":"next-refresh","expires_in":3600}
+            """
+        )
+        let client = SubscriptionOAuthTokenClient { request in
+            await recorder.respond(to: request)
+        }
+        let credential = SubscriptionOAuthCredential(
+            provider: .anthropic,
+            accessToken: "old",
+            refreshToken: "old-refresh",
+            expiresAt: .distantPast
+        )
+
+        let refreshed = try await client.refresh(credential)
+
+        #expect(refreshed.accessToken == "sk-ant-oat-test")
+        let request = await recorder.requests.first
+        #expect(request?.value(forHTTPHeaderField: "Content-Type") == "application/json")
+        let body = try JSONSerialization.jsonObject(with: request?.httpBody ?? Data()) as? [String: String]
+        #expect(body?["grant_type"] == "refresh_token")
+        #expect(body?["client_id"] == "9d1c250a-e61b-44d9-88ed-5944d1962f5e")
+    }
+
+    @Test func anthropicBrowserSignInUsesPKCEVerifierAsOAuthState() async throws {
+        let recorder = OAuthTransportRecorder(
+            responseBody: """
+            {"access_token":"sk-ant-oat-test","refresh_token":"next-refresh","expires_in":3600}
+            """
+        )
+        let client = SubscriptionOAuthTokenClient { request in
+            await recorder.respond(to: request)
+        }
+        let flow = SubscriptionOAuthBrowserSignIn(
+            tokenClient: client,
+            timeoutSeconds: 10
+        ) { authorizationURL in
+            let components = URLComponents(url: authorizationURL, resolvingAgainstBaseURL: false)
+            let query = Dictionary(uniqueKeysWithValues: (components?.queryItems ?? []).map {
+                ($0.name, $0.value ?? "")
+            })
+            let redirectURI = try #require(query["redirect_uri"])
+            let state = try #require(query["state"])
+
+            var callback = try #require(URLComponents(string: redirectURI))
+            callback.queryItems = [
+                URLQueryItem(name: "code", value: "test-code"),
+                URLQueryItem(name: "state", value: state)
+            ]
+            _ = try await URLSession.shared.data(from: try #require(callback.url))
+        }
+
+        let credential = try await flow.signIn(provider: .anthropic)
+
+        #expect(credential.accessToken == "sk-ant-oat-test")
+        let request = try #require(await recorder.requests.first)
+        let body = try #require(try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: String])
+        let codeVerifier = try #require(body["code_verifier"])
+        #expect(body["grant_type"] == "authorization_code")
+        #expect(body["code"] == "test-code")
+        #expect(body["state"] == codeVerifier)
+        #expect(!codeVerifier.isEmpty)
+    }
+
+    private static func jwt(accountID: String) -> String {
+        let payload: [String: Any] = [
+            "https://api.openai.com/auth": ["chatgpt_account_id": accountID]
+        ]
+        let data = try! JSONSerialization.data(withJSONObject: payload)
+        let encoded = data.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        return "header.\(encoded).signature"
+    }
+}
+
+@Suite(.serialized)
+struct ChatGPTSubscriptionProviderTests {
+    @Test func sendsCodexResponsesRequestWithOAuthHeadersAndDecodesText() async throws {
+        ChatGPTStubURLProtocol.capturedRequest = nil
+        ChatGPTStubURLProtocol.capturedBody = nil
+        ChatGPTStubURLProtocol.responder = { request in
+            let stream = """
+            data: {"type":"response.output_text.delta","delta":"Hi "}
+
+            data: {"type":"response.output_text.delta","delta":"there"}
+
+            data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":3,"output_tokens":2,"total_tokens":5}}}
+
+            """
+            let http = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["content-type": "text/event-stream"]
+            )!
+            return (http, Data(stream.utf8))
+        }
+        defer {
+            ChatGPTStubURLProtocol.responder = nil
+            ChatGPTStubURLProtocol.capturedRequest = nil
+            ChatGPTStubURLProtocol.capturedBody = nil
+        }
+
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ChatGPTStubURLProtocol.self]
+        let provider = ChatGPTSubscriptionProvider(
+            credentialProvider: { providerID in
+                #expect(providerID == .chatGPTCodex)
+                return SubscriptionOAuthCredential(
+                    provider: .chatGPTCodex,
+                    accessToken: "chatgpt-token",
+                    refreshToken: "refresh",
+                    expiresAt: Date().addingTimeInterval(3600),
+                    accountID: "acct_123"
+                )
+            },
+            urlSession: URLSession(configuration: config),
+            retryPolicy: RetryPolicy(maxRetries: 0, baseDelaySeconds: 0)
+        )
+
+        let response = try await provider.send(LLMRequest(
+            model: "automatic",
+            system: "sys",
+            messages: [.user("hello")]
+        ))
+
+        let request = try #require(ChatGPTStubURLProtocol.capturedRequest)
+        #expect(request.url?.absoluteString == "https://chatgpt.com/backend-api/codex/responses")
+        #expect(request.value(forHTTPHeaderField: "authorization") == "Bearer chatgpt-token")
+        #expect(request.value(forHTTPHeaderField: "chatgpt-account-id") == "acct_123")
+        #expect(request.value(forHTTPHeaderField: "OpenAI-Beta") == "responses=experimental")
+        #expect(request.value(forHTTPHeaderField: "originator") == "mac-autopilot")
+
+        let body = try #require(ChatGPTStubURLProtocol.capturedBody)
+        let payload = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(payload["model"] as? String == "gpt-5.4")
+        #expect(payload["instructions"] as? String == "sys")
+        #expect(payload["stream"] as? Bool == true)
+        #expect(payload["store"] as? Bool == false)
+
+        #expect(response.text == "Hi there")
+        #expect(response.stopReason == .endTurn)
+        #expect(response.usage.inputTokens == 3)
+        #expect(response.usage.outputTokens == 2)
+    }
+
+    @Test func decodesCodexFunctionCall() async throws {
+        ChatGPTStubURLProtocol.responder = { request in
+            let stream = """
+            data: {"type":"response.output_item.added","item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"click","arguments":""}}
+
+            data: {"type":"response.function_call_arguments.delta","delta":"{\\"element_index\\":"}
+
+            data: {"type":"response.function_call_arguments.done","arguments":"{\\"element_index\\":3}"}
+
+            data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":4,"output_tokens":1}}}
+
+            """
+            let http = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (http, Data(stream.utf8))
+        }
+        defer { ChatGPTStubURLProtocol.responder = nil }
+
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ChatGPTStubURLProtocol.self]
+        let provider = ChatGPTSubscriptionProvider(
+            credentialProvider: { _ in
+                SubscriptionOAuthCredential(
+                    provider: .chatGPTCodex,
+                    accessToken: "chatgpt-token",
+                    refreshToken: "refresh",
+                    expiresAt: Date().addingTimeInterval(3600),
+                    accountID: "acct_123"
+                )
+            },
+            urlSession: URLSession(configuration: config),
+            retryPolicy: RetryPolicy(maxRetries: 0, baseDelaySeconds: 0)
+        )
+
+        let response = try await provider.send(LLMRequest(
+            model: "gpt-5.4",
+            messages: [.user("Click")],
+            tools: [
+                ToolDefinition(
+                    name: "click",
+                    description: "Click an element.",
+                    inputSchema: ["type": "object"]
+                )
+            ]
+        ))
+
+        #expect(response.stopReason == .toolUse)
+        #expect(response.toolUses.first?.name == "click")
+        #expect(response.toolUses.first?.input["element_index"]?.intValue == 3)
+    }
+}
+
+private actor OAuthTransportRecorder {
+    private(set) var requests: [URLRequest] = []
+    private let responseBody: String
+
+    init(responseBody: String) {
+        self.responseBody = responseBody
+    }
+
+    func respond(to request: URLRequest) -> (Data, HTTPURLResponse) {
+        requests.append(request)
+        return (
+            Data(responseBody.utf8),
+            HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "application/json"]
+            )!
+        )
     }
 }
 
@@ -84,6 +425,10 @@ struct LLMErrorTests {
         #expect(
             LLMError.authenticationFailed(provider: "Anthropic").errorDescription
                 == "The saved Anthropic API key is invalid or expired. Update the API key and run again."
+        )
+        #expect(
+            LLMError.accountAuthenticationFailed(provider: "Claude").errorDescription
+                == "Sign in with Claude again, then run the task."
         )
     }
 
@@ -393,6 +738,46 @@ struct AnthropicProviderTests {
         #expect(toolCache?["type"] as? String == "ephemeral")
     }
 
+    @Test func oauthBearerAuthenticationUsesClaudeSubscriptionHeaders() async throws {
+        StubURLProtocol.capturedRequest = nil
+        StubURLProtocol.capturedBody = nil
+        StubURLProtocol.responder = { request in
+            let http = HTTPURLResponse(url: request.url!, statusCode: 200,
+                                       httpVersion: nil, headerFields: nil)!
+            return (http, Data(Self.cannedResponse.utf8))
+        }
+        defer {
+            StubURLProtocol.responder = nil
+            StubURLProtocol.capturedRequest = nil
+            StubURLProtocol.capturedBody = nil
+        }
+
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StubURLProtocol.self]
+        _ = try await AnthropicProvider(
+            oauthToken: "sk-ant-oat-test",
+            identifier: "anthropic-subscription",
+            urlSession: URLSession(configuration: config),
+            retryPolicy: RetryPolicy(maxRetries: 0, baseDelaySeconds: 0)
+        ).send(LLMRequest(
+            model: "claude-sonnet-4-6",
+            system: "sys",
+            messages: [.user("hello")]
+        ))
+
+        let request = try #require(StubURLProtocol.capturedRequest)
+        #expect(request.value(forHTTPHeaderField: "authorization") == "Bearer sk-ant-oat-test")
+        #expect(request.value(forHTTPHeaderField: "x-api-key") == nil)
+        #expect(request.value(forHTTPHeaderField: "anthropic-beta")?.contains("oauth-2025-04-20") == true)
+        #expect(request.value(forHTTPHeaderField: "x-app") == "cli")
+
+        let body = try #require(StubURLProtocol.capturedBody)
+        let payload = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let system = try #require(payload["system"] as? [[String: Any]])
+        #expect((system.first?["text"] as? String)?.contains("Claude Code") == true)
+        #expect(system.last?["text"] as? String == "sys")
+    }
+
     private static let cannedResponse = """
     {
       "id": "msg_1",
@@ -483,6 +868,45 @@ struct OpenAIProviderTests {
         let assistantToolCalls = try #require(messages[2]["tool_calls"] as? [[String: Any]])
         let function = try #require(assistantToolCalls.first?["function"] as? [String: Any])
         #expect(function["name"] as? String == "done")
+    }
+
+    @Test func compatibleEndpointCanUseMaxTokensAndOmitAuthorization() async throws {
+        OpenAIStubURLProtocol.capturedRequest = nil
+        OpenAIStubURLProtocol.capturedBody = nil
+        OpenAIStubURLProtocol.responder = { request in
+            let http = HTTPURLResponse(url: request.url!, statusCode: 200,
+                                       httpVersion: nil, headerFields: nil)!
+            return (http, Data(Self.cannedResponse.utf8))
+        }
+        defer {
+            OpenAIStubURLProtocol.responder = nil
+            OpenAIStubURLProtocol.capturedRequest = nil
+            OpenAIStubURLProtocol.capturedBody = nil
+        }
+
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [OpenAIStubURLProtocol.self]
+        let provider = OpenAIProvider(
+            apiKey: "",
+            endpoint: URL(string: "http://localhost:11434/v1/chat/completions")!,
+            urlSession: URLSession(configuration: config),
+            retryPolicy: RetryPolicy(maxRetries: 0, baseDelaySeconds: 0),
+            requiresAPIKey: false,
+            tokenLimitParameter: .maxTokens
+        )
+
+        _ = try await provider.send(LLMRequest(
+            model: "llama3.2",
+            messages: [.user("hello")],
+            maxTokens: 128
+        ))
+
+        let request = try #require(OpenAIStubURLProtocol.capturedRequest)
+        #expect(request.value(forHTTPHeaderField: "authorization") == nil)
+        let body = try #require(OpenAIStubURLProtocol.capturedBody)
+        let payload = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(payload["max_tokens"] as? Int == 128)
+        #expect(payload["max_completion_tokens"] == nil)
     }
 
     @Test func encodesImagesAndRelocatesToolResultImages() async throws {
@@ -663,7 +1087,7 @@ struct HostedProviderTests {
 
         do {
             _ = try await makeProvider(token: nil)
-                .send(LLMRequest(model: "gpt-5.4-mini", messages: [.user("hi")]))
+                .send(LLMRequest(model: "gpt-5.4", messages: [.user("hi")]))
             Issue.record("expected a sign-in error")
         } catch {
             #expect(error as? LLMError == .service(message: "Sign in to use hosted AI."))
@@ -682,7 +1106,7 @@ struct HostedProviderTests {
         defer { HostedStubURLProtocol.responder = nil }
 
         let response = try await makeProvider(token: "tok")
-            .send(LLMRequest(model: "gpt-5.4-mini", messages: [.user("hi")]))
+            .send(LLMRequest(model: "gpt-5.4", messages: [.user("hi")]))
         #expect(response.text == "Hi")
         #expect(response.stopReason == .toolUse)
         #expect(response.toolUses.first?.name == "done")
@@ -705,7 +1129,7 @@ struct HostedProviderTests {
         }
 
         _ = try await makeProvider(token: "tok").send(
-            LLMRequest(model: "gpt-5.4-mini", system: "sys", messages: [.user("hello")])
+            LLMRequest(model: "gpt-5.4", system: "sys", messages: [.user("hello")])
         )
 
         let request = try #require(HostedStubURLProtocol.capturedRequest)
@@ -714,7 +1138,7 @@ struct HostedProviderTests {
         let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
         let envelope = try #require(json)
         let data = try #require(envelope["data"] as? [String: Any])
-        #expect(data["model"] as? String == "gpt-5.4-mini")
+        #expect(data["model"] as? String == "gpt-5.4")
         #expect(data["system"] as? String == "sys")
         let messages = try #require(data["messages"] as? [[String: Any]])
         #expect(messages.first?["role"] as? String == "user")
@@ -733,7 +1157,7 @@ struct HostedProviderTests {
         }
 
         _ = try await makeProvider(token: "tok").send(LLMRequest(
-            model: "gpt-5.4-mini",
+            model: "gpt-5.4",
             messages: [
                 LLMMessage(role: .assistant, content: [
                     .toolUse(ToolUse(id: "c1", name: "get_app_state", input: .object([:]))),
@@ -781,7 +1205,7 @@ struct HostedProviderTests {
 
         do {
             _ = try await makeProvider(token: "tok", retryPolicy: RetryPolicy(maxRetries: 2, baseDelaySeconds: 0))
-                .send(LLMRequest(model: "gpt-5.4-mini", messages: [.user("hi")]))
+                .send(LLMRequest(model: "gpt-5.4", messages: [.user("hi")]))
             Issue.record("expected a service error")
         } catch {
             #expect(error as? LLMError == .service(message: "Monthly usage limit reached."))
@@ -793,7 +1217,7 @@ struct HostedProviderTests {
         HostedStubURLProtocol.responder = nil // makes the stub fail the request
         do {
             _ = try await makeProvider(token: "tok", retryPolicy: RetryPolicy(maxRetries: 0, baseDelaySeconds: 0))
-                .send(LLMRequest(model: "gpt-5.4-mini", messages: [.user("hi")]))
+                .send(LLMRequest(model: "gpt-5.4", messages: [.user("hi")]))
             Issue.record("expected a network error")
         } catch {
             guard case LLMError.network = error else {
@@ -852,6 +1276,51 @@ final class StubURLProtocol: URLProtocol {
 }
 
 final class OpenAIStubURLProtocol: URLProtocol {
+    nonisolated(unsafe) static var responder: (@Sendable (URLRequest) -> (HTTPURLResponse, Data))?
+    nonisolated(unsafe) static var capturedRequest: URLRequest?
+    nonisolated(unsafe) static var capturedBody: Data?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        Self.capturedRequest = request
+        Self.capturedBody = Self.bodyData(from: request)
+        guard let responder = Self.responder else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+        let (response, data) = responder(request)
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+
+    private static func bodyData(from request: URLRequest) -> Data? {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return nil }
+
+        stream.open()
+        defer { stream.close() }
+
+        var data = Data()
+        let bufferSize = 4096
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        defer { buffer.deallocate() }
+
+        while stream.hasBytesAvailable {
+            let count = stream.read(buffer, maxLength: bufferSize)
+            if count < 0 { return nil }
+            if count == 0 { break }
+            data.append(buffer, count: count)
+        }
+        return data
+    }
+}
+
+final class ChatGPTStubURLProtocol: URLProtocol {
     nonisolated(unsafe) static var responder: (@Sendable (URLRequest) -> (HTTPURLResponse, Data))?
     nonisolated(unsafe) static var capturedRequest: URLRequest?
     nonisolated(unsafe) static var capturedBody: Data?

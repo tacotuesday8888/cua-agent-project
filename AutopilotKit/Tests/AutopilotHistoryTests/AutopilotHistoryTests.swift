@@ -4,12 +4,49 @@ import Testing
 
 struct RunRecordTests {
     @Test func roundTripsThroughCodable() throws {
-        let record = makeRecord(task: "play jazz", actions: ["get_app_state", "click"])
+        let record = makeRecord(task: "play private jazz", actions: ["get_app_state", "click"])
         let decoded = try JSONDecoder().decode(
             RunRecord.self,
             from: JSONEncoder().encode(record)
         )
         #expect(decoded == record)
+        #expect(decoded.task == "Run in Music")
+        #expect(decoded.summary == "Completed")
+    }
+
+    @Test func encodedHistoryDoesNotPersistRawPromptOrProviderSummary() throws {
+        let record = makeRecord(
+            task: "Email the private acquisition note to Sam",
+            summary: "I sent the private acquisition note."
+        )
+        let json = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
+        #expect(!json.contains("private acquisition"))
+        #expect(!json.contains("Email the"))
+        #expect(!json.contains("I sent"))
+        #expect(json.contains("Run in Music"))
+        #expect(json.contains("Completed"))
+    }
+
+    @Test func decodingLegacyHistoryRedactsRawPromptAndSummary() throws {
+        let id = UUID()
+        let json = """
+        [{
+          "id": "\(id.uuidString)",
+          "task": "Delete the confidential draft",
+          "appName": "Mail",
+          "model": "gpt-5.4-mini",
+          "status": "failed",
+          "summary": "I could not delete the confidential draft.",
+          "actions": ["click"],
+          "inputTokens": 10,
+          "outputTokens": 5,
+          "startedAt": 100,
+          "finishedAt": 112
+        }]
+        """
+        let decoded = try JSONDecoder().decode([RunRecord].self, from: Data(json.utf8))
+        #expect(decoded.first?.task == "Run in Mail")
+        #expect(decoded.first?.summary == "Failed")
     }
 
     @Test func actionCountReflectsActions() {
@@ -44,7 +81,7 @@ struct RunHistoryStoreTests {
         await store.record(makeRecord(task: "play jazz"))
         let all = await store.all()
         #expect(all.count == 1)
-        #expect(all.first?.task == "play jazz")
+        #expect(all.first?.task == "Run in Music")
     }
 
     @Test func persistsAcrossInstances() async {
@@ -55,7 +92,7 @@ struct RunHistoryStoreTests {
         let second = RunHistoryStore(directory: directory)
         let all = await second.all()
         #expect(all.count == 1)
-        #expect(all.first?.task == "first run")
+        #expect(all.first?.task == "Run in Music")
     }
 
     @Test func allIsSortedNewestFirst() async {
@@ -65,8 +102,8 @@ struct RunHistoryStoreTests {
         await store.record(makeRecord(task: "newest", startedAt: base.addingTimeInterval(200)))
         await store.record(makeRecord(task: "middle", startedAt: base.addingTimeInterval(100)))
 
-        let tasks = await store.all().map(\.task)
-        #expect(tasks == ["newest", "middle", "oldest"])
+        let startedAt = await store.all().map(\.startedAt)
+        #expect(startedAt == [base.addingTimeInterval(200), base.addingTimeInterval(100), base])
     }
 
     @Test func recentReturnsNewestSubset() async {
@@ -80,7 +117,10 @@ struct RunHistoryStoreTests {
         }
 
         let recent = await store.recent(2)
-        #expect(recent.map(\.task) == ["run 4", "run 3"])
+        #expect(recent.map(\.startedAt) == [
+            base.addingTimeInterval(4 * 60),
+            base.addingTimeInterval(3 * 60)
+        ])
     }
 
     @Test func capDropsOldestPastLimit() async {
@@ -93,8 +133,12 @@ struct RunHistoryStoreTests {
             ))
         }
 
-        let tasks = await store.all().map(\.task)
-        #expect(tasks == ["run 5", "run 4", "run 3"])
+        let startedAt = await store.all().map(\.startedAt)
+        #expect(startedAt == [
+            base.addingTimeInterval(5 * 60),
+            base.addingTimeInterval(4 * 60),
+            base.addingTimeInterval(3 * 60)
+        ])
     }
 
     @Test func deleteRemovesRun() async {
@@ -162,7 +206,10 @@ struct RunHistoryStoreTests {
 
         #expect(try Data(contentsOf: backupURL) == originalData)
         let persisted = try JSONDecoder().decode([RunRecord].self, from: Data(contentsOf: fileURL))
-        #expect(persisted.map(\.task) == ["second run", "first run"])
+        let persistedJSON = String(decoding: try Data(contentsOf: fileURL), as: UTF8.self)
+        #expect(!persistedJSON.contains("second run"))
+        #expect(!persistedJSON.contains("first run"))
+        #expect(persisted.map(\.task) == ["Run in Music", "Run in Music"])
     }
 
     @Test func corruptFileIsBackedUpBeforeNextWrite() async throws {
@@ -179,7 +226,7 @@ struct RunHistoryStoreTests {
             as: UTF8.self
         )
         #expect(backup == "not valid json")
-        #expect(await store.all().map(\.task) == ["fresh run"])
+        #expect(await store.all().map(\.task) == ["Run in Music"])
     }
 }
 
