@@ -923,11 +923,17 @@ struct AgentViewModelWorkflowTests {
         await Task.yield()
         #expect(model.pendingWorkflow?.name == "Weekly report")
         #expect(model.pendingWorkflow?.goalTemplate == "Email {{recipient}} the report")
+        #expect(model.pendingWorkflowNameText == "Weekly report")
+        #expect(model.pendingWorkflowGoalText == "Email {{recipient}} the report")
+        #expect(model.pendingWorkflowRecipeText == "Open Compose first.")
 
         model.resolveWorkflow(true)
         let saved = await task.value
         #expect(saved == true)
         #expect(model.pendingWorkflow == nil)
+        #expect(model.pendingWorkflowNameText.isEmpty)
+        #expect(model.pendingWorkflowGoalText.isEmpty)
+        #expect(model.pendingWorkflowRecipeText.isEmpty)
 
         await waitUntil { !(await store.all().isEmpty) }
         let stored = await store.all().first
@@ -937,6 +943,101 @@ struct AgentViewModelWorkflowTests {
         #expect(stored?.recipe == "Open Compose first.")
         #expect(stored?.variableNames == ["recipient"])
         #expect(stored?.source == .proposed)
+    }
+
+    @Test func editedPendingWorkflowProposalIsSavedFromDraftText() async {
+        let (model, store) = makeModel()
+        model.selectedAppName = "Mail"
+        let task = Task { @MainActor in
+            await model.confirmWorkflow(WorkflowProposal(
+                name: "Weekly report",
+                goalTemplate: "Email {{old}}",
+                recipe: "Open Compose first."
+            ))
+        }
+
+        await Task.yield()
+        model.pendingWorkflowNameText = "  Morning update  "
+        model.pendingWorkflowGoalText = "  Email {{recipient}} about {{topic}}  "
+        model.pendingWorkflowRecipeText = "   "
+
+        model.resolveWorkflow(true)
+        let saved = await task.value
+        #expect(saved == true)
+
+        let stored = await store.all().first
+        #expect(stored?.name == "Morning update")
+        #expect(stored?.goalTemplate == "Email {{recipient}} about {{topic}}")
+        #expect(stored?.recipe == "")
+        #expect(stored?.variableNames == ["recipient", "topic"])
+        #expect(stored?.variables.allSatisfy { $0.defaultValue == nil } == true)
+        #expect(model.savedWorkflows.first?.name == "Morning update")
+    }
+
+    @Test func blankPendingWorkflowProposalStaysVisibleAndDoesNotResume() async {
+        let (model, store) = makeModel()
+        model.selectedAppName = "Mail"
+        var result: Bool?
+        let task = Task { @MainActor in
+            result = await model.confirmWorkflow(WorkflowProposal(
+                name: "Suggested",
+                goalTemplate: "Do {{thing}}"
+            ))
+        }
+
+        await Task.yield()
+        model.pendingWorkflowNameText = " "
+
+        model.resolveWorkflow(true)
+        await Task.yield()
+
+        #expect(result == nil)
+        #expect(model.pendingWorkflow != nil)
+        #expect(model.pendingWorkflowNameText == " ")
+        #expect(model.feed.contains { $0.text.contains("required") && $0.isError })
+        #expect(await store.all().isEmpty)
+
+        model.resolveWorkflow(false)
+        await task.value
+        #expect(result == false)
+        #expect(model.pendingWorkflow == nil)
+    }
+
+    @Test func duplicatePendingWorkflowProposalStaysVisibleAndDoesNotResume() async {
+        let (model, store) = makeModel()
+        model.selectedAppName = "Mail"
+        await store.add(Workflow(
+            name: "Daily",
+            appName: "Mail",
+            goalTemplate: "Do {{thing}}",
+            source: .manual
+        ))
+        var result: Bool?
+        let task = Task { @MainActor in
+            result = await model.confirmWorkflow(WorkflowProposal(
+                name: "Suggested",
+                goalTemplate: "Do {{other}}"
+            ))
+        }
+
+        await Task.yield()
+        model.pendingWorkflowNameText = "daily"
+
+        model.resolveWorkflow(true)
+        await waitUntil {
+            result != nil || model.feed.contains { $0.text.contains("already exists") }
+        }
+
+        #expect(result == nil)
+        #expect(model.pendingWorkflow != nil)
+        #expect(model.pendingWorkflowNameText == "daily")
+        #expect(model.feed.contains { $0.text.contains("already exists") && $0.isError })
+        #expect(await store.all().count == 1)
+
+        model.resolveWorkflow(false)
+        await task.value
+        #expect(result == false)
+        #expect(model.pendingWorkflow == nil)
     }
 
     @Test func confirmWorkflowDeclinedDoesNotSave() async {
@@ -953,6 +1054,9 @@ struct AgentViewModelWorkflowTests {
         let saved = await task.value
         #expect(saved == false)
         #expect(model.pendingWorkflow == nil)
+        #expect(model.pendingWorkflowNameText.isEmpty)
+        #expect(model.pendingWorkflowGoalText.isEmpty)
+        #expect(model.pendingWorkflowRecipeText.isEmpty)
 
         // Give any (incorrectly) spawned write a chance to land before asserting.
         try? await Task.sleep(nanoseconds: 20_000_000)
@@ -973,8 +1077,91 @@ struct AgentViewModelWorkflowTests {
         let saved = await task.value
         #expect(saved == false)
         #expect(model.pendingWorkflow == nil)
+        #expect(model.pendingWorkflowNameText.isEmpty)
+        #expect(model.pendingWorkflowGoalText.isEmpty)
+        #expect(model.pendingWorkflowRecipeText.isEmpty)
 
         try? await Task.sleep(nanoseconds: 20_000_000)
         #expect(await store.all().isEmpty)
+    }
+
+    @Test func updateWorkflowReDerivesVariablesAndPreservesMetadata() async {
+        let (model, store) = makeModel()
+        let createdAt = Date(timeIntervalSince1970: 1_000)
+        let updatedAt = Date(timeIntervalSince1970: 2_000)
+        let sourceRunID = UUID()
+        let workflow = Workflow(
+            name: "Original",
+            appName: "Mail",
+            goalTemplate: "Email {{old}}",
+            recipe: "Keep the message short.",
+            variables: [WorkflowVariable(name: "old", description: "Old value", defaultValue: "typed value")],
+            source: .savedFromRun,
+            sourceRunID: sourceRunID,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            runCount: 4,
+            successCount: 3
+        )
+        await store.add(workflow)
+
+        model.updateWorkflow(
+            id: workflow.id,
+            name: "  Edited  ",
+            appName: "  Notes  ",
+            goalTemplate: "  Send {{recipient}} the {{report}}  "
+        )
+        await waitUntil {
+            await store.get(id: workflow.id)?.name == "Edited"
+        }
+
+        let stored = await store.get(id: workflow.id)
+        #expect(stored?.id == workflow.id)
+        #expect(stored?.name == "Edited")
+        #expect(stored?.appName == "Notes")
+        #expect(stored?.goalTemplate == "Send {{recipient}} the {{report}}")
+        #expect(stored?.recipe == "Keep the message short.")
+        #expect(stored?.source == .savedFromRun)
+        #expect(stored?.sourceRunID == sourceRunID)
+        #expect(stored?.createdAt == createdAt)
+        #expect(stored?.updatedAt != updatedAt)
+        #expect(stored?.runCount == 4)
+        #expect(stored?.successCount == 3)
+        #expect(stored?.variableNames == ["recipient", "report"])
+        #expect(stored?.variables.allSatisfy { $0.defaultValue == nil } == true)
+        #expect(model.savedWorkflows.first?.name == "Edited")
+    }
+
+    @Test func duplicateWorkflowUpdateWarnsAndKeepsStoredWorkflow() async {
+        let (model, store) = makeModel()
+        let existing = Workflow(
+            name: "Daily",
+            appName: "Mail",
+            goalTemplate: "Do daily work",
+            source: .manual
+        )
+        let edited = Workflow(
+            name: "Weekly",
+            appName: "Mail",
+            goalTemplate: "Do weekly work",
+            source: .manual
+        )
+        await store.add(existing)
+        await store.add(edited)
+
+        model.updateWorkflow(
+            id: edited.id,
+            name: "daily",
+            appName: "Mail",
+            goalTemplate: "Do renamed work"
+        )
+        await waitUntil {
+            model.feed.contains { $0.text.contains("already exists") }
+        }
+
+        let stored = await store.get(id: edited.id)
+        #expect(model.feed.contains { $0.text.contains("already exists") && $0.isError })
+        #expect(stored?.name == "Weekly")
+        #expect(stored?.goalTemplate == "Do weekly work")
     }
 }

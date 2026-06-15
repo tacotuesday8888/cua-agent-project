@@ -370,6 +370,12 @@ public final class AgentViewModel: UserInteraction {
     public var pendingMemory: PendingMemory?
     /// A proposed workflow awaiting approval, or `nil`.
     public var pendingWorkflow: PendingWorkflow?
+    /// Editable draft name for a pending workflow proposal.
+    public var pendingWorkflowNameText: String = ""
+    /// Editable draft goal for a pending workflow proposal.
+    public var pendingWorkflowGoalText: String = ""
+    /// Editable draft recipe hints for a pending workflow proposal.
+    public var pendingWorkflowRecipeText: String = ""
     /// A clarifying question awaiting an answer, or `nil`.
     public var pendingQuestion: PendingQuestion?
     /// Draft answer for a pending clarification question.
@@ -581,6 +587,7 @@ public final class AgentViewModel: UserInteraction {
     private static let openAICompatibleSupportsImageInputDefaultsKey =
         "AutopilotOpenAICompatibleSupportsImageInput"
     private static let trustedAppsDefaultsKey = "AutopilotPermanentlyTrustedApps"
+    private static let workflowRequiredMessage = "Workflow name, app, and goal are required."
     /// The deployed `llmProxy` Firebase callable that backs hosted AI.
     static let hostedEndpoint = URL(
         string: "https://us-central1-macautopilot.cloudfunctions.net/llmProxy"
@@ -821,6 +828,7 @@ public final class AgentViewModel: UserInteraction {
         pendingApproval = nil
         pendingMemory = nil
         pendingWorkflow = nil
+        clearPendingWorkflowDraft()
         pendingQuestion = nil
         highlightedTarget = nil
         questionAnswerText = ""
@@ -881,6 +889,7 @@ public final class AgentViewModel: UserInteraction {
         if let continuation = workflowContinuation {
             workflowContinuation = nil
             pendingWorkflow = nil
+            clearPendingWorkflowDraft()
             continuation.resume(returning: false)
         }
         if let continuation = questionContinuation {
@@ -921,23 +930,63 @@ public final class AgentViewModel: UserInteraction {
     /// the current run's target app, deriving variables from its `{{slot}}`s.
     public func resolveWorkflow(_ save: Bool) {
         guard let continuation = workflowContinuation else { return }
-        workflowContinuation = nil
-        let proposed = pendingWorkflow
-        pendingWorkflow = nil
-        if save, let proposed {
-            let appName = pendingRun?.appName ?? selectedAppName
-            let variables = WorkflowRenderer.slotNames(in: proposed.goalTemplate)
-                .map { WorkflowVariable(name: $0) }
-            storeWorkflow(Workflow(
-                name: proposed.name,
-                appName: appName,
-                goalTemplate: proposed.goalTemplate,
-                recipe: proposed.recipe,
-                variables: variables,
-                source: .proposed
-            ))
+        guard save else {
+            workflowContinuation = nil
+            pendingWorkflow = nil
+            clearPendingWorkflowDraft()
+            continuation.resume(returning: false)
+            return
         }
-        continuation.resume(returning: save)
+        guard let proposed = pendingWorkflow else {
+            workflowContinuation = nil
+            clearPendingWorkflowDraft()
+            continuation.resume(returning: false)
+            return
+        }
+
+        let trimmedName = pendingWorkflowNameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedGoal = pendingWorkflowGoalText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedApp = (pendingRun?.appName ?? selectedAppName)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty, !trimmedGoal.isEmpty, !trimmedApp.isEmpty else {
+            append("Workflow warning — \(Self.workflowRequiredMessage)", isError: true)
+            return
+        }
+
+        let proposalID = proposed.id
+        let variables = Self.workflowVariables(in: trimmedGoal)
+        let trimmedRecipe = pendingWorkflowRecipeText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let workflow = Workflow(
+            name: trimmedName,
+            appName: trimmedApp,
+            goalTemplate: trimmedGoal,
+            recipe: trimmedRecipe,
+            variables: variables,
+            source: .proposed
+        )
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let result = await self.workflows.addReporting(workflow)
+            guard
+                self.pendingWorkflow?.id == proposalID,
+                let continuation = self.workflowContinuation
+            else {
+                return
+            }
+            switch result {
+            case .stored:
+                await self.loadWorkflows()
+                self.workflowContinuation = nil
+                self.pendingWorkflow = nil
+                self.clearPendingWorkflowDraft()
+                continuation.resume(returning: true)
+            case .updated, .cleared:
+                await self.loadWorkflows()
+            case .duplicate, .invalid, .failed:
+                self.appendWorkflowWriteWarning(result, workflowName: workflow.name)
+                await self.loadWorkflows()
+            }
+        }
     }
 
     /// Answer a pending clarification question.
@@ -1039,6 +1088,9 @@ public final class AgentViewModel: UserInteraction {
                 goalTemplate: proposal.goalTemplate,
                 recipe: proposal.recipe
             )
+            self.pendingWorkflowNameText = proposal.name
+            self.pendingWorkflowGoalText = proposal.goalTemplate
+            self.pendingWorkflowRecipeText = proposal.recipe
             self.workflowContinuation = continuation
         }
     }
@@ -1135,7 +1187,7 @@ public final class AgentViewModel: UserInteraction {
         let trimmedApp = appName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty, !trimmedGoal.isEmpty, !trimmedApp.isEmpty else { return }
         let derived = variables.isEmpty
-            ? WorkflowRenderer.slotNames(in: trimmedGoal).map { WorkflowVariable(name: $0) }
+            ? Self.workflowVariables(in: trimmedGoal)
             : variables
         storeWorkflow(Workflow(
             name: trimmedName,
@@ -1151,6 +1203,52 @@ public final class AgentViewModel: UserInteraction {
     /// through an explicit agent proposal.
     public func saveRunAsWorkflow(_ record: RunRecord, name: String) {
         append("Run history is redacted. Create a workflow from a goal template instead.", isError: true)
+    }
+
+    /// Update a saved workflow while preserving its local-only metadata.
+    public func updateWorkflow(
+        id: UUID,
+        name: String,
+        appName: String,
+        goalTemplate: String
+    ) {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedApp = appName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedGoal = goalTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty, !trimmedApp.isEmpty, !trimmedGoal.isEmpty else {
+            append("Workflow warning — \(Self.workflowRequiredMessage)", isError: true)
+            return
+        }
+        let variables = Self.workflowVariables(in: trimmedGoal)
+        Task { [weak self] in
+            guard let self else { return }
+            guard let existing = await self.workflows.get(id: id) else {
+                self.append("Workflow warning — That workflow could not be found.", isError: true)
+                await self.loadWorkflows()
+                return
+            }
+            let updated = Workflow(
+                id: existing.id,
+                name: trimmedName,
+                appName: trimmedApp,
+                goalTemplate: trimmedGoal,
+                recipe: existing.recipe,
+                variables: variables,
+                source: existing.source,
+                sourceRunID: existing.sourceRunID,
+                createdAt: existing.createdAt,
+                updatedAt: existing.updatedAt,
+                runCount: existing.runCount,
+                successCount: existing.successCount
+            )
+            let result = await self.workflows.update(updated)
+            if case .updated = result {
+                // Success is reflected by reloading the list below.
+            } else {
+                self.appendWorkflowWriteWarning(result, workflowName: trimmedName)
+            }
+            await self.loadWorkflows()
+        }
     }
 
     /// Delete a saved workflow, then refresh the list.
@@ -1176,17 +1274,40 @@ public final class AgentViewModel: UserInteraction {
     private func storeWorkflow(_ workflow: Workflow) {
         Task { [weak self] in
             guard let self else { return }
-            switch await self.workflows.addReporting(workflow) {
+            let result = await self.workflows.addReporting(workflow)
+            switch result {
             case .stored, .updated, .cleared:
                 break
-            case .duplicate:
-                self.append("A workflow named \"\(workflow.name)\" already exists.", isError: true)
-            case .invalid(let message):
-                self.append("Workflow warning — \(message)", isError: true)
-            case .failed(let message):
-                self.append("Storage warning — \(message)", isError: true)
+            case .duplicate, .invalid, .failed:
+                self.appendWorkflowWriteWarning(result, workflowName: workflow.name)
             }
             await self.loadWorkflows()
+        }
+    }
+
+    private static func workflowVariables(in goalTemplate: String) -> [WorkflowVariable] {
+        WorkflowRenderer.slotNames(in: goalTemplate).map { WorkflowVariable(name: $0) }
+    }
+
+    private func clearPendingWorkflowDraft() {
+        pendingWorkflowNameText = ""
+        pendingWorkflowGoalText = ""
+        pendingWorkflowRecipeText = ""
+    }
+
+    private func appendWorkflowWriteWarning(
+        _ result: WorkflowWriteResult,
+        workflowName: String
+    ) {
+        switch result {
+        case .stored, .updated, .cleared:
+            break
+        case .duplicate:
+            append("A workflow named \"\(workflowName)\" already exists.", isError: true)
+        case .invalid(let message):
+            append("Workflow warning — \(message)", isError: true)
+        case .failed(let message):
+            append("Storage warning — \(message)", isError: true)
         }
     }
 

@@ -4,7 +4,8 @@ import Foundation
 public enum WorkflowSource: String, Sendable, Hashable, Codable {
     /// The user built the workflow by hand.
     case manual
-    /// The user saved a finished run as a workflow.
+    /// Legacy or imported provenance from an earlier save-from-run flow.
+    /// Current product flows use manual creation or explicit agent proposals.
     case savedFromRun
     /// The agent proposed it mid-task and the user approved.
     case proposed

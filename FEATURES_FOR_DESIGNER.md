@@ -38,7 +38,10 @@ Workflows are adaptive goals, not recorded click scripts. A saved workflow store
 a single-app goal template with `{{slot}}` variables and optional secret-free
 recipe hints. Each run resolves slot values and goes back through the live
 perceive -> decide -> act -> verify loop with the same approval gates. Typed slot
-values are one-run inputs and are not persisted.
+values are one-run inputs and are not persisted. The Control Center is the place
+to edit a proposed workflow before saving and to edit saved workflows later; the
+compact assistant can show workflow state, but it should not be treated as the
+primary editing surface.
 
 ## Privacy Boundaries
 

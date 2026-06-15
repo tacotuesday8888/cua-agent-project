@@ -22,7 +22,11 @@ struct MacAutopilotApp: App {
 
     var body: some Scene {
         WindowGroup("Mac Autopilot", id: "control-center") {
-            ContentView()
+            ContentView(
+                model: appDelegate.model,
+                auth: appDelegate.auth,
+                subscriptionAuth: appDelegate.subscriptionAuth
+            )
         }
         .defaultSize(width: 920, height: 640)
 
@@ -58,17 +62,29 @@ private struct MenuBarControls: View {
 @MainActor
 private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notchController: NotchController?
-    private let auth = AuthModel()
+    let model = AgentViewModel()
+    let auth = AuthModel()
+    let subscriptionAuth = SubscriptionAccountAuthModel()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
 
-        // The compact assistant uses the signed-in account's token for hosted AI.
-        // Firebase is already configured in MacAutopilotApp.init().
-        let model = AgentViewModel()
-        model.hostedTokenProvider = hostedFirebaseToken
+        configureModel()
         auth.refresh()
+        let controller = NotchController(model: model, subscriptionAuth: subscriptionAuth)
+        notchController = controller
+        controller.start()
+    }
+
+    func showAssistant() {
+        notchController?.show(expanded: true)
+    }
+
+    private func configureModel() {
+        // Both app surfaces use this one model, so hosted/account setup and
+        // in-run approvals stay in sync.
+        model.hostedTokenProvider = hostedFirebaseToken
         model.hostedAccountStatusProvider = { [auth] in
             AgentViewModel.HostedAccountStatus(
                 email: auth.email,
@@ -82,13 +98,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         model.hostedSignOutHandler = { [auth] in
             auth.signOut()
         }
-        let controller = NotchController(model: model)
-        notchController = controller
-        controller.start()
-    }
-
-    func showAssistant() {
-        notchController?.show(expanded: true)
+        model.subscriptionAccountSignedInProvider = { [subscriptionAuth] provider in
+            guard let state = subscriptionAuth.knownState(for: provider), !state.isBusy else {
+                return nil
+            }
+            return state.isSignedIn
+        }
     }
 }
 

@@ -4,9 +4,19 @@ import Testing
 @testable import MacAutopilot
 
 @MainActor
+@Suite(.serialized)
 struct MacAutopilotTests {
     @Test func contentViewConstructs() {
         _ = ContentView()
+    }
+
+    @Test func contentViewAndNotchControllerAcceptSharedState() {
+        let model = AgentViewModel()
+        let auth = AuthModel()
+        let subscriptionAuth = SubscriptionAccountAuthModel()
+
+        _ = ContentView(model: model, auth: auth, subscriptionAuth: subscriptionAuth)
+        _ = NotchController(model: model, subscriptionAuth: subscriptionAuth)
     }
 
     @Test func viewModelStartsInAppManagedMode() {

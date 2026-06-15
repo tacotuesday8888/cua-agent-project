@@ -1,17 +1,21 @@
 # Mac Autopilot
 
 Native macOS AI workflow assistant built on an Accessibility-tree-first
-computer-use agent. Run a one-off task from chat, then save a successful task as
-a reusable **workflow** the agent re-reasons each time it runs — so it adapts to
-messy app state instead of breaking like a recorded macro. Under the hood it
-reads a target app's accessibility tree, decides with an LLM, acts through
-Accessibility actions and synthesized input, then verifies the result — one app
-at a time.
+computer-use agent. Run a one-off task from the Control Center or compact
+assistant, then save an explicit workflow proposal when the agent finds a
+repeatable goal. A reusable **workflow** is re-reasoned each time it runs — so
+it adapts to messy app state instead of breaking like a recorded macro. Under
+the hood it reads a target app's accessibility tree, decides with an LLM, acts
+through Accessibility actions and synthesized input, then verifies the result —
+one app at a time.
 
 ## How It Works
 
 - The agent runs a perceive → decide → act → verify loop (`AutopilotAgent`)
   against a single app the user picks, or names inline with `@App` in the task.
+- The Mac app owns one `AgentViewModel` for the live run and shares it with the
+  Control Center and compact assistant, so phase, approvals, questions, memory
+  proposals, workflow proposals, and stop requests stay in sync.
 - Perception is the accessibility tree rendered to compact text, with
   screenshots as a fallback. The transcript keeps only recent observations, so a
   long run's token cost stays bounded.
@@ -23,11 +27,13 @@ at a time.
   surfaced for the user to approve. Finished runs are kept in a redacted local
   history. API keys live in the Keychain; nothing leaves the machine except the
   chosen LLM provider's calls.
-- A successful task can be saved as a reusable **workflow**: a goal template with
-  `{{slot}}` variables you fill in at run time. Re-running a workflow feeds the
-  resolved goal back through the same agent loop and approval gate — it is not a
-  recorded click-script and is never auto-trusted. Workflows are single-app for
-  now, stored locally in `workflows.json`, and hold no secrets.
+- The agent can propose a reusable **workflow** after a repeatable task. In the
+  Control Center, the user can edit the proposed name, goal template, slots, and
+  secret-free recipe hints before saving, then edit saved workflows later
+  through the same local store. Re-running a workflow feeds the resolved goal
+  back through the same agent loop and approval gate — it is not a recorded
+  click-script and is never auto-trusted. Workflows are single-app for now,
+  stored locally in `workflows.json`, and hold no secrets or typed slot values.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the Control Center product
 shape, safety model, local session-state approach, and backend/account plan.

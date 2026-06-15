@@ -252,15 +252,35 @@ trace of any failure.
   subscription account path. Confirm image input is enabled only where supported
   and prompt caching is reported correctly for Anthropic.
 
+## Shared State And Workflow Validation
+
+These are manual app checks for the shared-state workflow milestone.
+
+- **Shared run state.** Start a safe one-app run from the Control Center, then
+  open the compact assistant. Confirm both surfaces show the same target app,
+  phase, feed updates, pending approvals/questions/proposals, and stop state.
+  Answering or stopping from one surface should update the other.
+- **Editable proposed workflow.** Run a repeatable safe task that causes the
+  model to call `propose_workflow` (or use a local test provider/scenario that
+  returns that tool call). In the Control Center, edit the proposed workflow
+  before saving: name, goal template, slots, and any secret-free recipe hints.
+  Confirm the saved workflow uses the edited values, not the raw proposal.
+- **Saved workflow edit and slot privacy.** Edit an existing saved workflow in
+  the Control Center, relaunch the app, and confirm the change was persisted
+  through the local workflow store. Run it with distinctive slot values, then
+  inspect `~/Library/Application Support/MacAutopilot/workflows.json`; it should
+  contain the template, slot names, and optional secret-free hints, but not the
+  typed slot values used for that run.
+
 ## Privacy Storage Checks
 
 Inspect Application Support after a run:
 
-- `history.json` stores redacted task labels, app/model/status/tool metadata, and
-  timestamps only.
+- `run-history.json` stores redacted task labels, app/model/status/tool
+  metadata, and timestamps only.
 - `workflows.json` stores single-app goal templates, slot names, and optional
   secret-free recipe hints; typed slot values are not persisted.
-- `memories.json` stores only user-approved durable memories.
+- `memory.json` stores only user-approved durable memories.
 - Provider API keys and OAuth credentials are in Keychain, not `UserDefaults`,
   local JSON, logs, or source files.
 - Firestore direct client rules remain deny-all unless a new architecture

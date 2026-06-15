@@ -9,12 +9,17 @@ import SwiftUI
 @MainActor
 public final class NotchController {
     private let model: AgentViewModel
+    private let subscriptionAuth: SubscriptionAccountAuthModel
     private var window: NotchWindow?
     private let actionHighlight = ActionHighlightController()
     private var screenObserver: NSObjectProtocol?
 
-    public init(model: AgentViewModel = AgentViewModel()) {
+    public init(
+        model: AgentViewModel = AgentViewModel(),
+        subscriptionAuth: SubscriptionAccountAuthModel = SubscriptionAccountAuthModel()
+    ) {
         self.model = model
+        self.subscriptionAuth = subscriptionAuth
     }
 
     /// Create and show the collapsed notch panel.
@@ -25,7 +30,10 @@ public final class NotchController {
         }
 
         model.refreshApps()
-        let rootView = NotchAssistantView(model: model) { [weak self] expanded in
+        let rootView = NotchAssistantView(
+            model: model,
+            subscriptionAuth: subscriptionAuth
+        ) { [weak self] expanded in
             self?.applyLayout(expanded: expanded, animated: true)
         } onHighlightChange: { [weak self] target in
             self?.actionHighlight.show(target)
