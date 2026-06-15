@@ -613,6 +613,8 @@ struct AgentViewModelTests {
 
 @MainActor
 struct AgentViewModelWorkflowTests {
+    private static let providerDefaultsKey = "AutopilotLLMProvider"
+
     private func makeModel() -> (AgentViewModel, WorkflowStore) {
         let directory = URL.temporaryDirectory.appending(path: UUID().uuidString)
         let store = WorkflowStore(directory: directory)
@@ -622,6 +624,14 @@ struct AgentViewModelWorkflowTests {
             workflows: store
         )
         return (model, store)
+    }
+
+    private static func restoreProviderDefault(_ saved: String?) {
+        if let saved {
+            UserDefaults.standard.set(saved, forKey: providerDefaultsKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: providerDefaultsKey)
+        }
     }
 
     /// Wait for a fire-and-forget store write to land, without a fixed sleep.
@@ -762,7 +772,10 @@ struct AgentViewModelWorkflowTests {
     }
 
     @Test func runWorkflowWithoutAPIKeyFails() {
+        let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
         let (model, _) = makeModel()
+        model.selectedProvider = .openai
+        Self.restoreProviderDefault(savedProvider)
         model.apiKey = ""
         model.runWorkflow(id: UUID(), bindings: [:])
         guard case .failed(let reason) = model.phase else {
@@ -773,8 +786,7 @@ struct AgentViewModelWorkflowTests {
     }
 
     @Test func runWorkflowWithHostedProviderRequiresSignedInBasicAccountBeforeLookup() async {
-        let providerKey = "AutopilotLLMProvider"
-        let savedProvider = UserDefaults.standard.string(forKey: providerKey)
+        let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
 
         let (model, _) = makeModel()
         model.selectedProvider = .hosted
@@ -783,11 +795,7 @@ struct AgentViewModelWorkflowTests {
         // The key guard runs synchronously above; restore the global default
         // before the first await so a parallel test never observes the persisted
         // "hosted" value (which would make it skip its own key guard).
-        if let savedProvider {
-            UserDefaults.standard.set(savedProvider, forKey: providerKey)
-        } else {
-            UserDefaults.standard.removeObject(forKey: providerKey)
-        }
+        Self.restoreProviderDefault(savedProvider)
 
         guard case .failed(let reason) = model.phase else {
             Issue.record("expected hosted sign-in failure before workflow lookup")
@@ -800,7 +808,10 @@ struct AgentViewModelWorkflowTests {
     }
 
     @Test func runWorkflowWithMissingBindingsFailsBeforeAppLookup() async {
+        let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
         let (model, store) = makeModel()
+        model.selectedProvider = .openai
+        Self.restoreProviderDefault(savedProvider)
         model.apiKey = "test-key"
         let workflow = Workflow(
             name: "Needs field",
@@ -825,7 +836,10 @@ struct AgentViewModelWorkflowTests {
     }
 
     @Test func runWorkflowMarksPhaseRunningBeforeAsyncLookup() async {
+        let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
         let (model, store) = makeModel()
+        model.selectedProvider = .openai
+        Self.restoreProviderDefault(savedProvider)
         model.apiKey = "test-key"
         let workflow = Workflow(
             name: "Queued",
@@ -841,7 +855,10 @@ struct AgentViewModelWorkflowTests {
     }
 
     @Test func runWorkflowIgnoresPersistedDefaultBindings() async {
+        let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
         let (model, store) = makeModel()
+        model.selectedProvider = .openai
+        Self.restoreProviderDefault(savedProvider)
         model.apiKey = "test-key"
         let workflow = Workflow(
             name: "Has default",
@@ -866,7 +883,10 @@ struct AgentViewModelWorkflowTests {
     }
 
     @Test func runWorkflowWithAppNotRunningFails() async {
+        let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
         let (model, store) = makeModel()
+        model.selectedProvider = .openai
+        Self.restoreProviderDefault(savedProvider)
         model.apiKey = "test-key"
         let workflow = Workflow(
             name: "Ghost",
