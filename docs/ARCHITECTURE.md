@@ -15,11 +15,14 @@ adaptive workflow system, not the notch.
 
 That product shape implies a few hard technical boundaries:
 
-- The agent run must be independent of the visible panel state.
-- Approvals, questions, memory proposals, and stop requests must be resumable
-  interactions the Control Center and compact assistant can both render.
-- The agent must emit structured events that both a test harness and the notch
-  surface can render.
+- The Mac app owns one live `AgentViewModel` and injects it into both the
+  Control Center and compact assistant. The visible surfaces render and mutate
+  the same run instead of creating separate session state.
+- Approvals, questions, memory proposals, workflow proposals, and stop requests
+  must be resumable interactions the Control Center and compact assistant can
+  both render.
+- The agent must emit structured events that the shared model, a test harness,
+  and the compact assistant surface can render.
 - The action layer must expose target metadata before acting so the UI can show
   what will be clicked, typed into, overwritten, or deleted.
 - The run model remains single-app and single-run-at-a-time. Multi-app,
@@ -46,8 +49,10 @@ That product shape implies a few hard technical boundaries:
   prompt-cache creation and read counts alongside fresh input, and the run's
   cumulative input tally sums all three, so a cached Anthropic run is reported at
   its true input cost instead of only its uncached remainder.
-- `AutopilotUI.AgentViewModel` bridges agent events and user interactions for
-  the Control Center and compact assistant surfaces.
+- `AutopilotUI.AgentViewModel` bridges agent events and user interactions. The
+  app target owns one instance for the Control Center and compact assistant, so
+  phase, feed, approvals, questions, memory proposals, workflow proposals,
+  selected access path, and stop requests are shared.
 - `AutopilotUI.NotchController` owns the notch panel lifecycle and keeps the
   placeholder notch surface aligned to the physical notch (or a top-center
   fallback on non-notch Macs).
@@ -58,18 +63,19 @@ That product shape implies a few hard technical boundaries:
 - `AutopilotHistory` persists a redacted log of finished runs (`RunRecord`)
   under Application Support, capped to the most recent entries.
 - `AutopilotWorkflows` persists reusable workflows (`Workflow`) under Application
-  Support, capped and secrets-free. A workflow is a goal template plus the
-  variables that fill it, and an optional `recipe` of learned hints. On a re-run,
-  the recipe is injected into the system prompt as a prior (guidance, not a
-  script); the agent still re-reads and verifies the live screen. The module
-  depends only on Foundation, and only `AutopilotUI` consumes it — the agent loop
-  stays storage-agnostic for workflows: the `propose_workflow` tool produces a
-  `WorkflowProposal` (defined in `AutopilotAgent`) that the UI maps onto a stored
-  `Workflow`, so the engine never depends on the workflow store.
+  Support, capped and secrets-free. A workflow is a goal template plus the slot
+  variables it expects, and an optional `recipe` of secret-free hints. Typed slot
+  values are one-run inputs and are not persisted. On a re-run, the recipe is
+  injected into the system prompt as a prior (guidance, not a script); the agent
+  still re-reads and verifies the live screen. The module depends only on
+  Foundation, and only `AutopilotUI` consumes it — the agent loop stays
+  storage-agnostic for workflows: the `propose_workflow` tool produces a
+  `WorkflowProposal` (defined in `AutopilotAgent`) that the shared model exposes
+  for UI review/editing before it is mapped onto a stored `Workflow`.
 - Local JSON stores write atomically and keep a `.backup` sibling of the
-  previous file before overwriting existing memory, history, or workflow state.
-  If a corrupt file is later replaced, the corrupt bytes are still retained for
-  manual recovery instead of being silently lost.
+  previous file before overwriting existing `memory.json`, `run-history.json`,
+  or `workflows.json` state. If a corrupt file is later replaced, the corrupt
+  bytes are still retained for manual recovery instead of being silently lost.
 
 ## LLM providers
 
@@ -172,18 +178,24 @@ Scope and guarantees for the current phase:
 - **Not auto-trusted.** A re-run goes through the same risk gate as any task —
   destructive steps still ask for approval.
 - **Local and secrets-free.** Workflows live in `workflows.json` under
-  Application Support and store a goal template, variable names, and (later) a
-  recipe — never typed values or passwords. Variable values entered at run time
-  are used transiently and never persisted.
+  Application Support and store a goal template, variable names, and optional
+  secret-free recipe hints — never typed values or passwords. Variable values
+  entered at run time are used transiently and never persisted.
 - **Store-guarded.** The workflow store trims simple boundary whitespace, drops
   invalid records read from disk, and rejects writes missing a name, app, or
-  goal. The UI still validates early for a nicer user flow, but persistence is
-  the final integrity boundary.
-- **Capture.** Workflows are captured by hand or by the agent itself: after a
-  repeatable task it may call `propose_workflow`, and on approval the goal
-  template and learned, secret-free hints are saved (`source: .proposed`). Raw
-  run history is redacted and is not used as a workflow goal source. The saved
-  recipe is injected as a prompt prior on re-runs.
+  goal. Manual creates, proposal saves, and saved-workflow edits all go through
+  the local `WorkflowStore`; UI validation is for a nicer user flow, but
+  persistence is the final integrity boundary.
+- **Proposal/edit flow.** Workflows are created by hand or from an explicit
+  `propose_workflow` call after a repeatable task. The proposal becomes pending
+  workflow state on the shared `AgentViewModel`. The Control Center is the
+  editing surface: the user can review and adjust the saved name, goal template,
+  slots, and secret-free recipe hints before saving. The compact assistant can
+  render the proposal state, but it is not the primary editor.
+- **No history-to-workflow conversion.** Raw run history is redacted and is not
+  used as a workflow goal source. A finished run can inspire an explicit
+  proposal, but the app must not reconstruct a saved workflow from
+  `run-history.json`. The saved recipe is injected as a prompt prior on re-runs.
 
 ## Session State
 
@@ -191,16 +203,19 @@ The agent should treat a run as a durable state machine:
 
 - `idle`: waiting for a prompt.
 - `running`: the loop is active.
-- `awaiting input`: approval, clarification, or memory proposal.
+- `awaiting input`: approval, clarification, memory proposal, or workflow
+  proposal.
 - `finished`: completed with a summary.
 - `failed`: stopped, permission-blocked, provider-blocked, or errored.
 
-Live run state is in `AgentViewModel` and the event stream. `AutopilotHistory`
-persists the redacted record of each finished run: a generic task label, target
-app, model, status, ordered tool names, and timestamps. Raw prompts, model
-summaries, AX trees, screenshots, clarifying-question answers, provider
-responses, and typed workflow variable values are never stored — they can
-contain private user data.
+Live run state is in the app-owned `AgentViewModel` and the event stream. The
+same model is passed to the Control Center and compact assistant so both
+surfaces show the same phase, pending interaction, feed, and stop control.
+`AutopilotHistory` persists the redacted record of each finished run to
+`run-history.json`: a generic task label, target app, model, status, ordered
+tool names, and timestamps. Raw prompts, model summaries, AX trees, screenshots,
+clarifying-question answers, provider responses, API/OAuth secrets, and typed
+workflow variable values are never stored — they can contain private user data.
 
 ## Backend And Accounts
 
@@ -230,8 +245,8 @@ What's shipped:
   errors back into `LLMError` for the UI. Hosted is the default user-facing path;
   BYOK remains available as the advanced local/provider-controlled path. The app
   target injects hosted account status and sign-in/sign-out actions into the
-  shared model so the notch can show the default path without linking Firebase
-  into `AutopilotUI`.
+  shared app-owned model so the compact assistant can show the default path
+  without linking Firebase into `AutopilotUI`.
 
 Security stays server-side: Firestore rules are deny-all (clients never read
 or write directly), the OpenAI key lives in **Cloud Secret Manager**, and the
@@ -241,6 +256,7 @@ client-shipped `GoogleService-Info.plist` carries only client identifiers.
 
 - Payments and entitlements.
 - Multi-provider routing on the backend (e.g. Anthropic via the same proxy).
+- Voice input, file attachments, and unattended scheduling.
 - Optional remote sync of memories, history, or workflows — deliberately
   postponed; today's persistence stays local + redacted.
 
@@ -248,7 +264,8 @@ client-shipped `GoogleService-Info.plist` carries only client identifiers.
 
 - Better prompt/tool-choice recovery for stale or missing AX elements.
 - More robust driver diagnostics for permission and target-window failures.
-- App-picker polish around duplicate app names and saved workflow target edits.
+- App-picker polish around duplicate app names and saved workflow target-app
+  edits.
 - Refining `NotchAssistantView` behind the existing `AgentViewModel` and
   `NotchController` contracts.
 - More safety tests around destructive labels, overwrites, and app trust.

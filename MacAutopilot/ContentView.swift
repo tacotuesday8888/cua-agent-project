@@ -7,12 +7,26 @@ import SwiftUI
 /// The primary Mac Autopilot control center: setup, one-app runs, approvals,
 /// saved workflows, local memory, trust, and recent run history.
 struct ContentView: View {
-    @State private var model = AgentViewModel()
-    @State private var auth = AuthModel()
-    @State private var subscriptionAuth = SubscriptionAccountAuthModel()
+    @Bindable private var model: AgentViewModel
+    @Bindable private var auth: AuthModel
+    @Bindable private var subscriptionAuth: SubscriptionAccountAuthModel
     @State private var newWorkflowName = ""
     @State private var newWorkflowGoal = ""
+    @State private var editingWorkflowID: UUID?
+    @State private var editWorkflowName = ""
+    @State private var editWorkflowAppName = ""
+    @State private var editWorkflowGoal = ""
     @State private var workflowBindings: [UUID: [String: String]] = [:]
+
+    init(
+        model: AgentViewModel = AgentViewModel(),
+        auth: AuthModel = AuthModel(),
+        subscriptionAuth: SubscriptionAccountAuthModel = SubscriptionAccountAuthModel()
+    ) {
+        self.model = model
+        self.auth = auth
+        self.subscriptionAuth = subscriptionAuth
+    }
 
     /// Sign-in controls shown in place of the API-key field for hosted AI.
     @ViewBuilder
@@ -162,6 +176,10 @@ struct ContentView: View {
 
         if let memory = model.pendingMemory {
             memoryRow(memory)
+        }
+
+        if let workflow = model.pendingWorkflow {
+            workflowProposalRow(workflow)
         }
 
         if let question = model.pendingQuestion {
@@ -542,6 +560,41 @@ struct ContentView: View {
         .background(.purple.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
     }
 
+    private func workflowProposalRow(_ workflow: AgentViewModel.PendingWorkflow) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Image(systemName: "wand.and.stars")
+                    .foregroundStyle(.teal)
+                Text("Save adaptive workflow?")
+                    .font(.callout.weight(.medium))
+                Spacer()
+                Text("LOCAL")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.teal)
+            }
+            TextField("Workflow name", text: $model.pendingWorkflowNameText)
+                .textFieldStyle(.roundedBorder)
+            TextField("Goal template with {{slot}} variables", text: $model.pendingWorkflowGoalText)
+                .textFieldStyle(.roundedBorder)
+            if !workflow.recipe.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                TextField("Recipe hints (optional, saved locally)", text: $model.pendingWorkflowRecipeText)
+                    .textFieldStyle(.roundedBorder)
+                Text("Keep recipe hints secret-free; typed slot values are not saved.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            HStack {
+                Spacer()
+                Button("Skip") { model.resolveWorkflow(false) }
+                Button("Save") { model.resolveWorkflow(true) }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canSavePendingWorkflow)
+            }
+        }
+        .padding(8)
+        .background(.teal.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+    }
+
     private func questionRow(_ question: AgentViewModel.PendingQuestion) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Label(question.text, systemImage: "questionmark.bubble.fill")
@@ -745,41 +798,48 @@ struct ContentView: View {
                     }
                 }
                 if model.savedWorkflows.isEmpty {
-                    Text("No workflows yet. Create one above, or save a finished run.")
+                    Text("No workflows yet. Create one above, or approve an agent proposal after a run.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 ForEach(model.savedWorkflows) { workflow in
                     VStack(alignment: .leading, spacing: 4) {
-                        HStack(alignment: .top) {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(workflow.name)
-                                    .font(.caption.weight(.medium))
-                                Text(workflowDetail(workflow))
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
+                        if editingWorkflowID == workflow.id {
+                            workflowEditForm(workflow)
+                        } else {
+                            HStack(alignment: .top) {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(workflow.name)
+                                        .font(.caption.weight(.medium))
+                                    Text(workflowDetail(workflow))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button("Run") {
+                                    let bindings = workflowBindings[workflow.id] ?? [:]
+                                    model.runWorkflow(id: workflow.id, bindings: bindings)
+                                    workflowBindings[workflow.id] = [:]
+                                }
+                                .controlSize(.small)
+                                .disabled(model.phase == .running)
+                                Button("Edit") {
+                                    beginEditing(workflow)
+                                }
+                                .controlSize(.small)
+                                Button("Delete") {
+                                    workflowBindings[workflow.id] = nil
+                                    model.deleteWorkflow(id: workflow.id)
+                                }
+                                .controlSize(.small)
                             }
-                            Spacer()
-                            Button("Run") {
-                                model.runWorkflow(
-                                    id: workflow.id,
-                                    bindings: workflowBindings[workflow.id] ?? [:]
+                            ForEach(workflow.variables) { variable in
+                                TextField(
+                                    placeholder(for: variable),
+                                    text: workflowBinding(workflowID: workflow.id, variable: variable)
                                 )
+                                .textFieldStyle(.roundedBorder)
                             }
-                            .controlSize(.small)
-                            .disabled(model.phase == .running)
-                            Button("Delete") {
-                                workflowBindings[workflow.id] = nil
-                                model.deleteWorkflow(id: workflow.id)
-                            }
-                            .controlSize(.small)
-                        }
-                        ForEach(workflow.variables) { variable in
-                            TextField(
-                                placeholder(for: variable),
-                                text: workflowBinding(workflowID: workflow.id, variable: variable)
-                            )
-                            .textFieldStyle(.roundedBorder)
                         }
                     }
                     .onAppear {
@@ -791,6 +851,36 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .font(.caption)
+    }
+
+    private func workflowEditForm(_ workflow: AgentViewModel.StoredWorkflow) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            TextField("Workflow name", text: $editWorkflowName)
+                .textFieldStyle(.roundedBorder)
+            TextField("Target app", text: $editWorkflowAppName)
+                .textFieldStyle(.roundedBorder)
+            TextField("Goal template with {{slot}} variables", text: $editWorkflowGoal)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                Spacer()
+                Button("Cancel") { clearWorkflowEdit() }
+                Button("Save") {
+                    workflowBindings[workflow.id] = nil
+                    model.updateWorkflow(
+                        id: workflow.id,
+                        name: editWorkflowName,
+                        appName: editWorkflowAppName,
+                        goalTemplate: editWorkflowGoal
+                    )
+                    clearWorkflowEdit()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!canSaveWorkflowEdit)
+            }
+            .controlSize(.small)
+        }
+        .padding(8)
+        .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func workflowBinding(
@@ -829,10 +919,35 @@ struct ContentView: View {
             : workflow.appName
     }
 
+    private func beginEditing(_ workflow: AgentViewModel.StoredWorkflow) {
+        editingWorkflowID = workflow.id
+        editWorkflowName = workflow.name
+        editWorkflowAppName = workflow.appName
+        editWorkflowGoal = workflow.goalTemplate
+    }
+
+    private func clearWorkflowEdit() {
+        editingWorkflowID = nil
+        editWorkflowName = ""
+        editWorkflowAppName = ""
+        editWorkflowGoal = ""
+    }
+
     private var canCreateWorkflow: Bool {
         !newWorkflowName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !newWorkflowGoal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !model.selectedAppName.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private var canSaveWorkflowEdit: Bool {
+        !editWorkflowName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !editWorkflowAppName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !editWorkflowGoal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var canSavePendingWorkflow: Bool {
+        !model.pendingWorkflowNameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !model.pendingWorkflowGoalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var trustView: some View {
