@@ -74,8 +74,10 @@ public actor AgentSession {
     private let configuration: AgentConfiguration
     private let memory: MemoryStore
     private let emit: @Sendable (AgentEvent) -> Void
+    private let recorder: (any AgentRunRecording)?
     private let classifier = RiskClassifier()
     private let promptParser = PromptParser()
+    private let verifier = ActionEffectVerifier()
 
     /// The model conversation, which keeps its own context bounded.
     private var transcript = Transcript()
@@ -116,6 +118,9 @@ public actor AgentSession {
     private static let loopGuardedTools: Set<AgentTool> = [
         .click, .setValue, .drag, .performSecondaryAction
     ]
+    private static let effectVerifiedTools: Set<AgentTool> = [
+        .click, .setValue, .typeText, .pressKey, .drag, .performSecondaryAction
+    ]
 
     public init(
         llm: any LLMProvider,
@@ -123,6 +128,7 @@ public actor AgentSession {
         interaction: any UserInteraction,
         configuration: AgentConfiguration,
         memory: MemoryStore,
+        recorder: (any AgentRunRecording)? = nil,
         permanentlyTrustedApps: Set<String> = [],
         eventHandler: @escaping @Sendable (AgentEvent) -> Void = { _ in }
     ) {
@@ -131,8 +137,12 @@ public actor AgentSession {
         self.interaction = interaction
         self.configuration = configuration
         self.memory = memory
+        self.recorder = recorder
         self.trust = TrustStore(permanentlyTrusted: permanentlyTrustedApps)
-        self.emit = eventHandler
+        self.emit = { event in
+            eventHandler(event)
+            recorder?.record(AgentTraceEvent(agentEvent: event))
+        }
     }
 
     /// Run `task` to completion and return the outcome.
@@ -661,7 +671,27 @@ public actor AgentSession {
         }
 
         do {
-            let content = try await execute(tool: tool, input: use.input)
+            let beforeSnapshot = latestSnapshot
+            var content = try await execute(tool: tool, input: use.input)
+            if let verification = verificationResult(
+                tool: tool,
+                input: use.input,
+                target: target,
+                before: beforeSnapshot,
+                after: latestSnapshot
+            ) {
+                recorder?.record(AgentTraceEvent(
+                    kind: .actionVerified,
+                    appName: computer.appName,
+                    summary: verification.summary,
+                    tool: tool.rawValue,
+                    target: target,
+                    verification: verification
+                ))
+                if verification.shouldWarnModel {
+                    content.append(.text(verificationRecoveryText(verification)))
+                }
+            }
             emit(.performed(tool: tool, summary: target.description))
             // Every tool but `list_apps` returns the freshly-read tree, so its
             // result is an observation the transcript can later prune.
@@ -827,6 +857,15 @@ public actor AgentSession {
                 """))
             }
             if let screenshot = state.screenshot {
+                let artifact = recorder?.recordArtifact(
+                    data: screenshot,
+                    suggestedFilename: "screenshot-\(state.snapshot.turnIdentifier ?? 0).png"
+                )
+                recorder?.record(AgentTraceEvent(
+                    kind: .screenshotCaptured,
+                    appName: computer.appName,
+                    artifactPath: artifact
+                ))
                 content.append(.image(ImageBlock(base64Data: screenshot.base64EncodedString())))
             }
             return content
@@ -920,6 +959,31 @@ public actor AgentSession {
         Updated state of \(computer.appName):
         \(UITreeRenderer.compactText(tree))
         """)]
+    }
+
+    private func verificationResult(
+        tool: AgentTool,
+        input: JSONValue,
+        target: ActionTarget,
+        before: UITreeSnapshot?,
+        after: UITreeSnapshot?
+    ) -> ActionVerificationResult? {
+        guard Self.effectVerifiedTools.contains(tool) else { return nil }
+        return verifier.verify(
+            tool: tool,
+            input: input,
+            target: target,
+            before: before,
+            after: after
+        )
+    }
+
+    private func verificationRecoveryText(_ result: ActionVerificationResult) -> String {
+        """
+        Action-effect check: \(result.summary) If the task is not complete, \
+        wait once, re-read, choose a different current element, or ask the user \
+        for clarification. Do not blindly repeat the same old element_index.
+        """
     }
 
     private func buildRequest() -> LLMRequest {

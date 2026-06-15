@@ -80,6 +80,51 @@ The same fixture checks can be run with:
 ./script/validate_fixture.sh --include-screenshot
 ```
 
+## Trajectory And Scenario Validation
+
+For real-world reliability work, run agent loops with opt-in trajectory output.
+Trajectory files are developer diagnostics and may contain private UI/task text;
+do not commit them.
+
+```sh
+swift run --package-path AutopilotKit AutopilotSmokeCLI \
+  --app AutopilotFixtureApp \
+  --agent-loop \
+  --record-trajectory .build/trajectories/fixture-agent-loop
+```
+
+Scenario JSON can make manual real-app checks repeatable:
+
+```json
+{
+  "id": "textedit-note",
+  "app": "TextEdit",
+  "task": "Type hello into the current document, then finish.",
+  "provider": "openai",
+  "maxSteps": 12,
+  "includeScreenshot": false,
+  "expect": {
+    "finalStatus": "completed",
+    "stateContainsText": "hello",
+    "toolUsed": "type_text",
+    "noActionFailures": true
+  }
+}
+```
+
+Run it with:
+
+```sh
+swift run --package-path AutopilotKit AutopilotSmokeCLI \
+  --scenario scenario.json \
+  --record-trajectory \
+  --report-json .build/validation/textedit-note-report.json
+```
+
+The CLI writes `trace.jsonl` plus screenshot artifacts when screenshots are
+requested. The JSON report contains pass/fail checks for the scenario's expected
+status, visible text, tool usage, action failures, and window title.
+
 ## AI Access Validation
 
 Do not commit keys, OAuth tokens, Firebase ID tokens, or provider responses.
