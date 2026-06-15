@@ -6,8 +6,9 @@ keys never live in the client and usage can be metered.
 
 - **Runtime:** Firebase Cloud Functions (2nd gen), Node 22.
 - **Orchestration:** Genkit — one flow (`llmProxyFlow`) wrapped in `onCallGenkit`.
-- **Model:** OpenAI GPT‑5.4 Mini via `@genkit-ai/compat-oai` (provider-agnostic;
-  the client sends a logical model id).
+- **Model:** OpenAI GPT‑5.4 Mini via `@genkit-ai/compat-oai`. The backend
+  resolves Mac Autopilot Basic requests to `gpt-5.4-mini`; legacy hosted aliases
+  such as `automatic` are accepted only as aliases for that model.
 - **Auth:** the `onCallGenkit` auth policy requires a signed-in Firebase user, so
   an unauthenticated caller can never reach the model or the key.
 - **Tools:** the model **returns** tool calls (`returnToolRequests: true`) for the
@@ -15,7 +16,9 @@ keys never live in the client and usage can be metered.
 - **Privacy:** only usage **metadata** (uid, model, token counts, cost, latency,
   status) is stored — never prompts, responses, or screen content.
 
-This is opt-in. The app's default remains BYOK (the user's own key, local-only).
+This is the app's default simple path, branded **Mac Autopilot Basic**. BYOK
+remains available in the Mac app for users who want their own provider key or
+OpenAI-compatible endpoint.
 
 ## Layout
 

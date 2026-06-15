@@ -16,6 +16,18 @@ struct WorkflowTests {
             from: JSONEncoder().encode(workflow)
         )
         #expect(decoded == workflow)
+        #expect(decoded.variables.first?.defaultValue == nil)
+    }
+
+    @Test func variableEncodingDoesNotPersistDefaultValues() throws {
+        let variable = WorkflowVariable(
+            name: "password",
+            description: "Account password",
+            defaultValue: "typed-secret"
+        )
+        let json = String(decoding: try JSONEncoder().encode(variable), as: UTF8.self)
+        #expect(!json.contains("typed-secret"))
+        #expect(!json.contains("defaultValue"))
     }
 
     @Test func recipeIsTruncatedToMaxLength() {
@@ -106,15 +118,15 @@ struct WorkflowRendererTests {
         )
     }
 
-    @Test func resolvedBindingsUseDefaultsWhenNoRunValueExists() {
+    @Test func resolvedBindingsDoNotUseStoredDefaults() {
         let bindings = WorkflowRenderer.resolvedBindings(
             variables: [WorkflowVariable(name: "recipient", defaultValue: "Maya")],
             bindings: [:]
         )
-        #expect(bindings["recipient"] == "Maya")
+        #expect(bindings["recipient"] == nil)
     }
 
-    @Test func resolvedBindingsPreferRunValuesOverDefaults() {
+    @Test func resolvedBindingsUseOnlyRunValues() {
         let bindings = WorkflowRenderer.resolvedBindings(
             variables: [WorkflowVariable(name: "recipient", defaultValue: "Maya")],
             bindings: ["recipient": "Sam"]
@@ -140,13 +152,13 @@ struct WorkflowRendererTests {
         #expect(missing == ["recipient"])
     }
 
-    @Test func missingSlotNamesAcceptsDefaults() {
+    @Test func missingSlotNamesIgnoresDefaults() {
         let missing = WorkflowRenderer.missingSlotNames(
             in: "Email {{recipient}}",
             variables: [WorkflowVariable(name: "recipient", defaultValue: "Maya")],
             bindings: [:]
         )
-        #expect(missing.isEmpty)
+        #expect(missing == ["recipient"])
     }
 
     @Test func summaryListsVariableSlots() {
@@ -256,6 +268,26 @@ struct WorkflowStoreTests {
         #expect(stored?.variables == [
             WorkflowVariable(name: "recipient", description: "Who to email")
         ])
+    }
+
+    @Test func addReportingStripsVariableDefaultsBeforePersistence() async throws {
+        let directory = tempDirectory()
+        let fileURL = directory.appending(path: "workflows.json")
+        let store = WorkflowStore(directory: directory)
+        let workflow = makeWorkflow(variables: [
+            WorkflowVariable(
+                name: "recipient",
+                description: "Who to email",
+                defaultValue: "typed-secret@example.com"
+            )
+        ])
+
+        #expect(await store.addReporting(workflow) == .stored)
+
+        let json = String(decoding: try Data(contentsOf: fileURL), as: UTF8.self)
+        #expect(!json.contains("typed-secret"))
+        #expect(!json.contains("defaultValue"))
+        #expect(await store.all().first?.variables.first?.defaultValue == nil)
     }
 
     @Test func updateReplacesWorkflow() async {

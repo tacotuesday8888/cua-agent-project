@@ -11,9 +11,13 @@ Run before every implementation batch:
 ```sh
 swift test --package-path AutopilotKit
 xcodebuild -project MacAutopilot.xcodeproj -scheme MacAutopilot -destination 'platform=macOS' -derivedDataPath .build/xcode build
+cd backend && npm run typecheck && npm test && npm run build
 ```
 
-Expected result: package tests pass and the app target builds.
+Expected result: package tests pass, the app target builds, and backend
+TypeScript/tests/build pass. Local Xcode builds may require a valid Apple
+Developer provisioning profile; for compile-only validation on a machine without
+that profile, run the same Xcode command with `CODE_SIGNING_ALLOWED=NO`.
 
 For local app launch verification, use the project run entrypoint:
 
@@ -76,15 +80,27 @@ The same fixture checks can be run with:
 ./script/validate_fixture.sh --include-screenshot
 ```
 
-## Live Provider Validation
+## AI Access Validation
 
-Requires a saved Keychain key from the app or a process-local environment key.
-Do not commit keys or write them into docs.
+Do not commit keys, OAuth tokens, Firebase ID tokens, or provider responses.
 
-```sh
-OPENAI_API_KEY=... swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp --live-provider openai
-ANTHROPIC_API_KEY=... swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp --live-provider anthropic
-```
+- **Mac Autopilot Basic.** Sign in with Google from the Control Center, confirm
+  the UI reports a signed-in Basic account, then run a fixture task through the
+  hosted path. Expected result: the app sends a Firebase-authenticated callable
+  request to `llmProxy`, the backend resolves the model to `gpt-5.4-mini`, and
+  Firestore receives only usage metadata.
+- **BYOK OpenAI / Anthropic.** Use a saved Keychain key from the app or a
+  process-local environment key for smoke validation:
+  ```sh
+  OPENAI_API_KEY=... swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp --live-provider openai
+  ANTHROPIC_API_KEY=... swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp --live-provider anthropic
+  ```
+- **OpenAI-compatible endpoint.** In the Control Center, choose a preset or
+  custom Chat Completions URL, set the model id, provide an API key only if the
+  endpoint requires one, and set image support only when the model supports it.
+- **Existing account access.** Choose ChatGPT subscription or Claude
+  subscription and complete the app-owned OAuth flow. Expected result: refreshable
+  credentials are stored in Keychain; browser cookies are not read or pasted.
 
 Expected result: the fixture input ends with `live smoke value`, the agent calls
 `done`, and the smoke CLI reports success.
@@ -186,9 +202,24 @@ trace of any failure.
   with one write and one destructive action. Confirm the prompt appears, Approve
   proceeds, and Decline stops the action without a retry. The smoke CLI
   auto-approves, so this is the only way to validate the safety gate. (Risk #6.)
-- **Live provider runs.** One live run on each BYOK provider (OpenAI and
-  Anthropic) and the hosted path, confirming image input and prompt caching
-  work end to end.
+- **Live provider runs.** One live run on Mac Autopilot Basic, each BYOK
+  provider (OpenAI and Anthropic), one OpenAI-compatible endpoint, and each
+  subscription account path. Confirm image input is enabled only where supported
+  and prompt caching is reported correctly for Anthropic.
+
+## Privacy Storage Checks
+
+Inspect Application Support after a run:
+
+- `history.json` stores redacted task labels, app/model/status/tool metadata, and
+  timestamps only.
+- `workflows.json` stores single-app goal templates, slot names, and optional
+  secret-free recipe hints; typed slot values are not persisted.
+- `memories.json` stores only user-approved durable memories.
+- Provider API keys and OAuth credentials are in Keychain, not `UserDefaults`,
+  local JSON, logs, or source files.
+- Firestore direct client rules remain deny-all unless a new architecture
+  decision explicitly changes them.
 
 ## Permission Checks
 

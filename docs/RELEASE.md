@@ -1,7 +1,7 @@
 # Release And Distribution Notes
 
-Mac Autopilot should ship local-first until hosted features are real product
-requirements. The first practical path is a signed and notarized direct
+Mac Autopilot should ship as a local-first Mac power tool with a small hosted AI
+path. The first practical distribution path is a signed and notarized direct
 download. A Mac App Store path needs a separate feasibility review because the
 product depends on Accessibility control and optional Screen Recording.
 
@@ -15,7 +15,8 @@ Required before a public build:
 - App archive exported as a signed `.app` or `.dmg`.
 - Notarization submitted and stapled.
 - Privacy copy explaining Accessibility, Screen Recording, local memory, local
-  run history, and provider API-key handling.
+  run history, hosted usage metadata, provider API-key handling, and subscription
+  OAuth credentials.
 
 Apple reference points:
 
@@ -27,7 +28,9 @@ Apple reference points:
 ## Current Build State
 
 - Bundle identifier: `com.langqi.MacAutopilot`.
-- Entitlements file exists but is empty.
+- Entitlements include Keychain access for local provider keys and OAuth
+  credentials. The app is intentionally not sandboxed while Accessibility
+  control is being validated.
 - Hardened Runtime is enabled in build settings, but local ad-hoc builds may
   disable it.
 - The app now has an asset catalog and `AppIcon` set.
@@ -37,7 +40,8 @@ Apple reference points:
 
 Default decision for now: direct notarized distribution first.
 
-Do not add accounts, subscriptions, hosted LLM credits, sync, or server-side key
-storage until the single-app local agent is validated with real users. If hosted
-features are added later, write a backend architecture decision before changing
-the agent loop to depend on a server.
+Ship direct notarized distribution first. Mac Autopilot Basic, BYOK, and
+subscription account access can ship only after the validation matrix passes and
+privacy copy is reviewed. Keep remote sync, multi-app workflows, scheduling,
+voice/files, and payment entitlements out of the first user-testable build unless
+a separate release decision is made.

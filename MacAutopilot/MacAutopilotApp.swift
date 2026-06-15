@@ -21,24 +21,36 @@ struct MacAutopilotApp: App {
     }
 
     var body: some Scene {
-        Settings {
+        WindowGroup("Mac Autopilot", id: "control-center") {
             ContentView()
         }
+        .defaultSize(width: 920, height: 640)
 
         MenuBarExtra("Mac Autopilot", systemImage: "sparkles") {
-            Button("Show Assistant") {
-                appDelegate.showAssistant()
-            }
+            MenuBarControls(appDelegate: appDelegate)
+        }
+    }
+}
 
-            SettingsLink {
-                Text("Debug Harness")
-            }
+private struct MenuBarControls: View {
+    @Environment(\.openWindow) private var openWindow
+    let appDelegate: AppDelegate
 
-            Divider()
+    var body: some View {
+        Button("Open Control Center") {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+            openWindow(id: "control-center")
+        }
 
-            Button("Quit") {
-                NSApplication.shared.terminate(nil)
-            }
+        Button("Show Compact Assistant") {
+            appDelegate.showAssistant()
+        }
+
+        Divider()
+
+        Button("Quit") {
+            NSApplication.shared.terminate(nil)
         }
     }
 }
@@ -46,14 +58,30 @@ struct MacAutopilotApp: App {
 @MainActor
 private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var notchController: NotchController?
+    private let auth = AuthModel()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
 
-        // The notch agent uses the signed-in account's token for hosted AI.
+        // The compact assistant uses the signed-in account's token for hosted AI.
         // Firebase is already configured in MacAutopilotApp.init().
         let model = AgentViewModel()
         model.hostedTokenProvider = hostedFirebaseToken
+        auth.refresh()
+        model.hostedAccountStatusProvider = { [auth] in
+            AgentViewModel.HostedAccountStatus(
+                email: auth.email,
+                statusMessage: auth.statusMessage
+            )
+        }
+        model.hostedSignInHandler = { [auth] in
+            guard let window = NSApp.keyWindow ?? NSApp.windows.first else { return }
+            await auth.signIn(presenting: window)
+        }
+        model.hostedSignOutHandler = { [auth] in
+            auth.signOut()
+        }
         let controller = NotchController(model: model)
         notchController = controller
         controller.start()
@@ -65,7 +93,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 /// The hosted-AI token source: the signed-in Firebase user's ID token, or `nil`
-/// when nobody is signed in. Shared by the notch and the test-harness window;
+/// when nobody is signed in. Shared by the compact assistant and Control Center;
 /// safe to call only after `FirebaseApp.configure()`.
 @Sendable
 func hostedFirebaseToken() async throws -> String? {

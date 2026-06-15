@@ -6,8 +6,7 @@ public enum WorkflowSource: String, Sendable, Hashable, Codable {
     case manual
     /// The user saved a finished run as a workflow.
     case savedFromRun
-    /// The agent proposed it mid-task and the user approved. Declared now so
-    /// stored JSON stays forward-compatible; only populated in a later phase.
+    /// The agent proposed it mid-task and the user approved.
     case proposed
 }
 
@@ -26,20 +25,19 @@ public enum WorkflowSource: String, Sendable, Hashable, Codable {
 /// never persisted here.
 public struct Workflow: Sendable, Hashable, Codable, Identifiable {
     /// The most characters a recipe keeps; longer recipes are truncated so the
-    /// prompt prior added in a later phase stays bounded.
+    /// prompt prior stays bounded.
     public static let maxRecipeLength = 1200
 
     /// Stable identifier, assigned on creation.
     public let id: UUID
     /// The user-facing name; also the case-insensitive de-duplication key.
     public let name: String
-    /// The single app this workflow operates. v1 runs exactly one app; a later
-    /// phase generalizes this to several.
+    /// The single app this workflow operates. Multi-app workflows are future
+    /// vision and require a different run contract.
     public let appName: String
     /// The goal in natural language, with `{{slot}}` tokens for its variables.
     public let goalTemplate: String
-    /// A learned, secret-free summary used as a prior on re-runs. Empty until a
-    /// later phase populates it, and never injected into a prompt before then.
+    /// A learned, secret-free summary used as guidance on re-runs.
     public let recipe: String
     /// The variables the goal template needs.
     public let variables: [WorkflowVariable]

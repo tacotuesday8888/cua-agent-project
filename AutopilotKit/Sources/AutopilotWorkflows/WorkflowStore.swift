@@ -229,8 +229,7 @@ public actor WorkflowStore {
             guard !name.isEmpty, seen.insert(name).inserted else { continue }
             normalized.append(WorkflowVariable(
                 name: name,
-                description: variable.description.trimmingCharacters(in: .whitespacesAndNewlines),
-                defaultValue: variable.defaultValue
+                description: variable.description.trimmingCharacters(in: .whitespacesAndNewlines)
             ))
         }
         return normalized

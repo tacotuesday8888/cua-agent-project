@@ -7,6 +7,7 @@ import { toGenkitMessages, fromGenkitResponse } from './translate.js';
 import { monthKey, isOverCap, DEFAULT_MONTHLY_REQUEST_CAP } from './quota.js';
 import { buildUsageRecord } from './usage.js';
 import { ProxyError, normalizeProviderError } from './errors.js';
+import { resolveHostedModel } from './hostedModel.js';
 
 /// The OpenAI key is read from process.env.OPENAI_API_KEY, which the function's
 /// declared secret (see index.ts) populates at runtime.
@@ -38,10 +39,11 @@ export const llmProxyFlow = ai.defineFlow(
       );
 
       const started = Date.now();
+      const model = resolveHostedModel(req.model);
       let response;
       try {
         response = await ai.generate({
-          model: openAI.model(req.model),
+          model: openAI.model(model),
           system: req.system,
           messages: toGenkitMessages(req),
           tools: dynamicTools,
@@ -54,7 +56,7 @@ export const llmProxyFlow = ai.defineFlow(
       const latencyMs = Date.now() - started;
 
       const out = fromGenkitResponse(response);
-      await recordUsage(uid, req.model, out.usage, latencyMs);
+      await recordUsage(uid, model, out.usage, latencyMs);
       return out;
     } catch (err) {
       throw toHttpsError(err);

@@ -10,7 +10,12 @@ import Foundation
 /// `tool` messages — which OpenAI's tool role cannot carry — into a following
 /// user message.
 public struct OpenAIProvider: LLMProvider {
-    public let identifier = "openai"
+    public enum TokenLimitParameter: Sendable {
+        case maxCompletionTokens
+        case maxTokens
+    }
+
+    public let identifier: String
 
     private let apiKey: String
     private let endpoint: URL
@@ -18,27 +23,41 @@ public struct OpenAIProvider: LLMProvider {
     private let retryPolicy: RetryPolicy
     /// Per-attempt request timeout, in seconds.
     private let requestTimeout: Double
+    private let requiresAPIKey: Bool
+    private let tokenLimitParameter: TokenLimitParameter
+    private let authenticationProviderName: String
 
     public init(
         apiKey: String,
+        identifier: String = "openai",
+        authenticationProviderName: String = "OpenAI",
         endpoint: URL = URL(string: "https://api.openai.com/v1/chat/completions")!,
         urlSession: URLSession = .shared,
         retryPolicy: RetryPolicy = .standard,
-        requestTimeout: Double = 60
+        requestTimeout: Double = 60,
+        requiresAPIKey: Bool = true,
+        tokenLimitParameter: TokenLimitParameter = .maxCompletionTokens
     ) {
+        self.identifier = identifier
+        self.authenticationProviderName = authenticationProviderName
         self.apiKey = apiKey
         self.endpoint = endpoint
         self.urlSession = urlSession
         self.retryPolicy = retryPolicy
         self.requestTimeout = max(1, requestTimeout)
+        self.requiresAPIKey = requiresAPIKey
+        self.tokenLimitParameter = tokenLimitParameter
     }
 
     public func send(_ request: LLMRequest) async throws -> LLMResponse {
-        guard !apiKey.isEmpty else { throw LLMError.missingAPIKey }
+        guard !requiresAPIKey || !apiKey.isEmpty else { throw LLMError.missingAPIKey }
 
         let body: Data
         do {
-            body = try JSONEncoder().encode(WireRequest(request))
+            body = try JSONEncoder().encode(WireRequest(
+                request,
+                tokenLimitParameter: tokenLimitParameter
+            ))
         } catch {
             throw LLMError.decodingFailed("request encoding failed: \(error)")
         }
@@ -51,7 +70,9 @@ public struct OpenAIProvider: LLMProvider {
         urlRequest.httpMethod = "POST"
         urlRequest.timeoutInterval = requestTimeout
         urlRequest.setValue("application/json", forHTTPHeaderField: "content-type")
-        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "authorization")
+        if !apiKey.isEmpty {
+            urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "authorization")
+        }
         urlRequest.httpBody = body
 
         let data: Data
@@ -71,7 +92,7 @@ public struct OpenAIProvider: LLMProvider {
                 throw LLMError.rateLimited(retryAfter: retryAfter)
             }
             if http.statusCode == 401 {
-                throw LLMError.authenticationFailed(provider: "OpenAI")
+                throw LLMError.authenticationFailed(provider: authenticationProviderName)
             }
             let body = String(data: data, encoding: .utf8) ?? "<unreadable body>"
             throw LLMError.http(status: http.statusCode, body: body)
@@ -95,7 +116,8 @@ private struct WireRequest: Encodable {
     let tools: [WireTool]?
     let toolChoice: String?
     // GPT-5.x Chat Completions rejects `max_tokens`; it requires this key.
-    let maxCompletionTokens: Int
+    let maxCompletionTokens: Int?
+    let maxTokens: Int?
     let temperature: Double?
     let stream = false
 
@@ -105,11 +127,12 @@ private struct WireRequest: Encodable {
         case tools
         case toolChoice = "tool_choice"
         case maxCompletionTokens = "max_completion_tokens"
+        case maxTokens = "max_tokens"
         case temperature
         case stream
     }
 
-    init(_ request: LLMRequest) {
+    init(_ request: LLMRequest, tokenLimitParameter: OpenAIProvider.TokenLimitParameter) {
         model = request.model
         messages = WireMessage.messages(from: request)
         if request.tools.isEmpty {
@@ -119,7 +142,14 @@ private struct WireRequest: Encodable {
             tools = request.tools.map(WireTool.init)
             toolChoice = "auto"
         }
-        maxCompletionTokens = request.maxTokens
+        switch tokenLimitParameter {
+        case .maxCompletionTokens:
+            maxCompletionTokens = request.maxTokens
+            maxTokens = nil
+        case .maxTokens:
+            maxCompletionTokens = nil
+            maxTokens = request.maxTokens
+        }
         temperature = request.temperature
     }
 }

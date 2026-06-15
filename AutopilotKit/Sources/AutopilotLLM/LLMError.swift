@@ -6,6 +6,8 @@ public enum LLMError: Error, Sendable, Equatable {
     case missingAPIKey
     /// The provider rejected the API key (HTTP 401) — invalid or expired.
     case authenticationFailed(provider: String)
+    /// An account-backed provider rejected or lost its account auth.
+    case accountAuthenticationFailed(provider: String)
     /// The provider returned a non-success HTTP status.
     case http(status: Int, body: String)
     /// The provider rate-limited the request.
@@ -28,6 +30,8 @@ extension LLMError: LocalizedError {
             return "No API key is configured for the LLM provider."
         case .authenticationFailed(let provider):
             return "The saved \(provider) API key is invalid or expired. Update the API key and run again."
+        case .accountAuthenticationFailed(let provider):
+            return "Sign in with \(provider) again, then run the task."
         case .http(let status, let body):
             return "The LLM provider returned HTTP \(status): \(body)"
         case .rateLimited:

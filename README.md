@@ -29,7 +29,7 @@ at a time.
   recorded click-script and is never auto-trusted. Workflows are single-app for
   now, stored locally in `workflows.json`, and hold no secrets.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the notch-led product
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the Control Center product
 shape, safety model, local session-state approach, and backend/account plan.
 Use [docs/VALIDATION.md](docs/VALIDATION.md) for repeatable fixture, live
 provider, and safe real-app validation. See [docs/RELEASE.md](docs/RELEASE.md)
@@ -119,15 +119,28 @@ accessibility tree:
 swift run --package-path AutopilotKit AutopilotSmokeCLI --app Safari --dump-tree
 ```
 
+## AI access
+
+The primary app window is the **Control Center**. It defaults to **Mac Autopilot
+Basic**, the app-managed hosted path: the user signs in with Google, the app gets
+a short-lived Firebase token, and the backend routes the request through
+`llmProxy` to `gpt-5.4-mini`. The hosted OpenAI key stays in Cloud Secret
+Manager, never in the Mac app.
+
+Advanced users can choose **Bring Your Own Key** for OpenAI, Anthropic, or an
+OpenAI-compatible Chat Completions endpoint. BYOK secrets stay in Keychain.
+Compatible endpoints can use a preset or custom URL, custom model id, optional
+API key, and a user-controlled image-capability toggle.
+
+Existing account paths are separate from BYOK: `ChatGPT subscription` and
+`Claude subscription` use app-owned OAuth credentials stored in Keychain. They do
+not scrape browser cookies or ask users to paste sessions.
+
 ## Live provider smoke test
 
-The default provider is OpenAI `gpt-5.4-mini`. Do not put keys in source files.
-Use one of these local paths:
-
-- App harness: choose `OpenAI GPT-5.4 Mini` (or `Anthropic Claude`), paste the
-  key into the secure field, and run a task; the app stores it in Keychain.
-- Smoke CLI: set `OPENAI_API_KEY` (or `ANTHROPIC_API_KEY`) only in the shell
-  session that runs the smoke test, or save the key through the app first.
+Do not put keys in source files. For local BYOK validation, set
+`OPENAI_API_KEY` or `ANTHROPIC_API_KEY` only in the shell session that runs the
+smoke test, or save the key through the app first.
 
 ```sh
 swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp --live-provider openai
@@ -142,6 +155,10 @@ The smoke runner process needs Accessibility permission in System Settings >
 Privacy & Security > Accessibility. Add `--include-screenshot` to also require
 Screen Recording and validate target-window screenshot bytes.
 
-Provider capabilities are explicit in code: OpenAI GPT-5.4 Mini and Anthropic
-Claude both support image input. OpenAI caches repeated prompt prefixes
-automatically; Anthropic uses explicit prompt caching.
+Provider capabilities are explicit in code: Mac Autopilot Basic, OpenAI
+GPT-5.4 Mini, and Anthropic Claude support image input. Existing subscription
+access is text-only in the direct OAuth providers, so screenshot fallback is
+disabled for those providers. The generic OpenAI-compatible path stores its
+endpoint/model settings locally and uses a user-controlled image capability
+toggle because router/local model capabilities vary. OpenAI caches repeated
+prompt prefixes automatically; Anthropic uses explicit prompt caching.

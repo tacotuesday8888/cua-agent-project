@@ -5,6 +5,7 @@ import type { ProxyUsage } from './types.js';
 
 /** USD per 1M tokens, by model. Extend as providers/models are added. */
 const PRICE_PER_MTOK: Record<string, { input: number; output: number }> = {
+  'gpt-5.4': { input: 2.5, output: 15 },
   'gpt-5.4-mini': { input: 0.75, output: 4.5 },
 };
 
