@@ -1,6 +1,7 @@
 import AutopilotAgent
 import AutopilotCore
 import AutopilotHistory
+import AutopilotMac
 import AutopilotMemory
 import AutopilotWorkflows
 import Foundation
@@ -626,6 +627,70 @@ struct AgentViewModelWorkflowTests {
         return (model, store)
     }
 
+    private func makeModelWithHistory() -> (
+        model: AgentViewModel,
+        workflows: WorkflowStore,
+        history: RunHistoryStore
+    ) {
+        let directory = URL.temporaryDirectory.appending(path: UUID().uuidString)
+        let workflows = WorkflowStore(directory: directory)
+        let history = RunHistoryStore(directory: directory)
+        let model = AgentViewModel(
+            memory: MemoryStore(directory: directory),
+            history: history,
+            workflows: workflows
+        )
+        return (model, workflows, history)
+    }
+
+    @MainActor
+    private final class SessionProbe {
+        var requests: [AgentViewModel.AgentRunRequest] = []
+        var immediateOutcome: AgentOutcome?
+        private var continuation: CheckedContinuation<AgentOutcome, Never>?
+
+        init(immediateOutcome: AgentOutcome? = nil) {
+            self.immediateOutcome = immediateOutcome
+        }
+
+        var isWaiting: Bool { continuation != nil }
+
+        func run(_ request: AgentViewModel.AgentRunRequest) async -> AgentOutcome {
+            requests.append(request)
+            if let immediateOutcome {
+                return immediateOutcome
+            }
+            return await withCheckedContinuation { continuation in
+                self.continuation = continuation
+            }
+        }
+
+        func finish(_ outcome: AgentOutcome) {
+            continuation?.resume(returning: outcome)
+            continuation = nil
+        }
+    }
+
+    private func configureRunnableWorkflowModel(
+        _ model: AgentViewModel,
+        sessionProbe: SessionProbe
+    ) {
+        let savedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+        model.selectedProvider = .openai
+        Self.restoreProviderDefault(savedProvider)
+        model.apiKey = "test-key"
+        model.runningAppResolverOverride = { query in
+            .matched(AppLocator.RunningApp(
+                name: query,
+                bundleIdentifier: "com.example.\(query.lowercased())",
+                processID: 42
+            ))
+        }
+        model.agentSessionRunnerOverride = { request in
+            await sessionProbe.run(request)
+        }
+    }
+
     private static func restoreProviderDefault(_ saved: String?) {
         if let saved {
             UserDefaults.standard.set(saved, forKey: providerDefaultsKey)
@@ -888,6 +953,111 @@ struct AgentViewModelWorkflowTests {
             return
         }
         #expect(finalReason == "Stopped.")
+    }
+
+    @Test func successfulWorkflowRunRecordsCountersHistoryAndResolvedGoal() async {
+        let (model, store, history) = makeModelWithHistory()
+        let probe = SessionProbe(immediateOutcome: AgentOutcome(status: .completed, summary: "Done."))
+        configureRunnableWorkflowModel(model, sessionProbe: probe)
+        let workflow = Workflow(
+            name: "Send update",
+            appName: "Mail",
+            goalTemplate: "Send {{recipient}} the update",
+            recipe: "Open compose first.",
+            variables: [WorkflowVariable(name: "recipient")],
+            source: .manual
+        )
+        await store.add(workflow)
+
+        model.runWorkflow(id: workflow.id, bindings: ["recipient": "Maya"])
+
+        await waitUntil {
+            guard case .finished("Done.") = model.phase else { return false }
+            let records = await history.all()
+            let stored = await store.get(id: workflow.id)
+            return records.count == 1 && stored?.runCount == 1
+        }
+
+        let stored = await store.get(id: workflow.id)
+        let record = await history.all().first
+        #expect(probe.requests.count == 1)
+        #expect(probe.requests.first?.task == "Send Maya the update")
+        #expect(probe.requests.first?.target.name == "Mail")
+        #expect(probe.requests.first?.modelIdentifier == model.selectedModelName)
+        #expect(probe.requests.first?.recipe == "Open compose first.")
+        #expect(stored?.runCount == 1)
+        #expect(stored?.successCount == 1)
+        #expect(stored?.variables.first?.defaultValue == nil)
+        #expect(record?.status == .completed)
+        #expect(record?.task == "Run in Mail")
+        #expect(record?.summary == "Completed")
+        #expect(record?.task.contains("Maya") == false)
+        #expect(record?.summary.contains("Maya") == false)
+    }
+
+    @Test func failedWorkflowRunRecordsFailureWithoutSuccessCounter() async {
+        let (model, store, history) = makeModelWithHistory()
+        let probe = SessionProbe(immediateOutcome: AgentOutcome(status: .failed, summary: "Provider blocked."))
+        configureRunnableWorkflowModel(model, sessionProbe: probe)
+        let workflow = Workflow(
+            name: "Blocked",
+            appName: "Mail",
+            goalTemplate: "Do it",
+            source: .manual
+        )
+        await store.add(workflow)
+
+        model.runWorkflow(id: workflow.id, bindings: [:])
+
+        await waitUntil {
+            guard case .failed("Provider blocked.") = model.phase else { return false }
+            let records = await history.all()
+            let stored = await store.get(id: workflow.id)
+            return records.count == 1 && stored?.runCount == 1
+        }
+
+        let stored = await store.get(id: workflow.id)
+        let record = await history.all().first
+        #expect(stored?.runCount == 1)
+        #expect(stored?.successCount == 0)
+        #expect(record?.status == .failed)
+        #expect(record?.summary == "Failed")
+    }
+
+    @Test func stoppedWorkflowRunIgnoresLateCompletionAndRecordsStopped() async {
+        let (model, store, history) = makeModelWithHistory()
+        let probe = SessionProbe()
+        configureRunnableWorkflowModel(model, sessionProbe: probe)
+        let workflow = Workflow(
+            name: "Cancelable active run",
+            appName: "Mail",
+            goalTemplate: "Do it",
+            source: .manual
+        )
+        await store.add(workflow)
+
+        model.runWorkflow(id: workflow.id, bindings: [:])
+        await waitUntil { probe.isWaiting }
+
+        model.stop()
+        #expect(model.phase == .stopping)
+        #expect(model.isRunInProgress)
+        probe.finish(AgentOutcome(status: .completed, summary: "Late success."))
+
+        await waitUntil {
+            guard case .failed("Stopped.") = model.phase else { return false }
+            let records = await history.all()
+            let stored = await store.get(id: workflow.id)
+            return records.count == 1 && stored?.runCount == 1
+        }
+
+        let stored = await store.get(id: workflow.id)
+        let record = await history.all().first
+        #expect(stored?.runCount == 1)
+        #expect(stored?.successCount == 0)
+        #expect(record?.status == .stopped)
+        #expect(record?.summary == "Stopped")
+        #expect(!model.isRunInProgress)
     }
 
     @Test func runWorkflowIgnoresPersistedDefaultBindings() async {

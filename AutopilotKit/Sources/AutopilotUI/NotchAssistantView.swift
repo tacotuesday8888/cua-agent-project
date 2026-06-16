@@ -96,7 +96,7 @@ public struct NotchAssistantView: View {
                 Text(headerTitle)
                     .font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
-                if model.phase == .running {
+                if model.isRunInProgress {
                     ProgressView()
                         .controlSize(.mini)
                         .tint(.white)
@@ -238,7 +238,7 @@ public struct NotchAssistantView: View {
                     .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
                     .onSubmit { submit() }
 
-                if model.phase == .running {
+                if model.isRunInProgress {
                     Button {
                         model.stop()
                     } label: {
@@ -565,6 +565,10 @@ public struct NotchAssistantView: View {
             Label("Running", systemImage: "bolt.fill")
                 .font(.caption)
                 .foregroundStyle(.white.opacity(0.72))
+        case .stopping:
+            Label("Stopping", systemImage: "stop.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.72))
         case .finished(let summary):
             Label(summary, systemImage: "checkmark.circle.fill")
                 .font(.caption)
@@ -671,6 +675,7 @@ public struct NotchAssistantView: View {
         switch model.phase {
         case .idle: "sparkles"
         case .running: "bolt.fill"
+        case .stopping: "stop.fill"
         case .finished: "checkmark"
         case .failed: "xmark"
         }
@@ -678,7 +683,7 @@ public struct NotchAssistantView: View {
 
     private var glyphColor: Color {
         switch model.phase {
-        case .idle, .running: .white
+        case .idle, .running, .stopping: .white
         case .finished: .green
         case .failed: .red
         }
@@ -688,6 +693,7 @@ public struct NotchAssistantView: View {
         switch model.phase {
         case .idle: "Autopilot"
         case .running: "Working"
+        case .stopping: "Stopping"
         case .finished: "Done"
         case .failed: "Needs attention"
         }
@@ -700,7 +706,7 @@ public struct NotchAssistantView: View {
 
     private func submit() {
         model.submit()
-        if model.phase == .running {
+        if model.isRunInProgress {
             setExpanded(false)
         }
     }
@@ -880,7 +886,7 @@ private struct WorkflowRow: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                .disabled(model.phase == .running)
+                .disabled(model.isRunInProgress)
             }
         }
         .padding(8)

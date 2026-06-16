@@ -21,6 +21,7 @@ public final class AgentViewModel: UserInteraction {
     public enum Phase: Sendable, Equatable {
         case idle
         case running
+        case stopping
         case finished(String)
         case failed(String)
     }
@@ -140,6 +141,15 @@ public final class AgentViewModel: UserInteraction {
             self.providerID = providerID
             self.setupSummary = setupSummary
         }
+    }
+
+    /// A fully-prepared agent run. Tests can replace the session runner while
+    /// still exercising workflow preflight, history, and workflow counters.
+    struct AgentRunRequest: Sendable {
+        let task: String
+        let target: AppLocator.RunningApp
+        let modelIdentifier: String
+        let recipe: String?
     }
 
     /// Minimal hosted-account state exposed by the app shell. The UI package
@@ -472,6 +482,11 @@ public final class AgentViewModel: UserInteraction {
     /// Signs out of the app-managed AI account.
     @ObservationIgnored
     public var hostedSignOutHandler: @MainActor () -> Void = {}
+    @ObservationIgnored
+    var runningAppResolverOverride: (@MainActor @Sendable (String) -> AppLocator.MatchResult)?
+    @ObservationIgnored
+    var agentSessionRunnerOverride:
+        (@MainActor @Sendable (AgentRunRequest) async -> AgentOutcome)?
     /// Returns the current OAuth sign-in state for a supported subscription
     /// provider, or `nil` when the UI has not checked yet.
     @ObservationIgnored
@@ -536,6 +551,14 @@ public final class AgentViewModel: UserInteraction {
         Self.openAICompatiblePresets.first { $0.id == openAICompatiblePresetID }
             ?? Self.openAICompatiblePresets[0]
     }
+    public var isRunInProgress: Bool {
+        switch phase {
+        case .running, .stopping:
+            true
+        case .idle, .finished, .failed:
+            false
+        }
+    }
     public var existingAccountAccessStatus: ExistingAccountAccessStatus {
         ExistingAccountAccessStatus(
             accessMode: .existingSubscription,
@@ -588,6 +611,10 @@ public final class AgentViewModel: UserInteraction {
         "AutopilotOpenAICompatibleSupportsImageInput"
     private static let trustedAppsDefaultsKey = "AutopilotPermanentlyTrustedApps"
     private static let workflowRequiredMessage = "Workflow name, app, and goal are required."
+    private static let stoppedOutcome = AgentOutcome(
+        status: .stopped,
+        summary: "Stopped by the user."
+    )
     /// The deployed `llmProxy` Firebase callable that backs hosted AI.
     static let hostedEndpoint = URL(
         string: "https://us-central1-macautopilot.cloudfunctions.net/llmProxy"
@@ -679,7 +706,7 @@ public final class AgentViewModel: UserInteraction {
     /// Run the current prompt as an agent task.
     public func submit() {
         let task = promptText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !task.isEmpty, phase != .running else { return }
+        guard !task.isEmpty, !isRunInProgress else { return }
 
         // A "remember:" prompt only stores memory — no app or API key needed.
         let explicitMemories = promptParser.explicitMemories(in: task)
@@ -695,7 +722,7 @@ public final class AgentViewModel: UserInteraction {
         // An "@app" mention in the task picks the target, overriding the picker.
         var note: String?
         if let mention = promptParser.appMention(in: task) {
-            switch locator.resolveRunningApp(matching: mention) {
+            switch resolveRunningApp(matching: mention) {
             case .matched(let resolved):
                 selectedAppName = resolved.name
                 note = "Targeting \(resolved.name) — named with @ in the task."
@@ -716,7 +743,7 @@ public final class AgentViewModel: UserInteraction {
             return
         }
         let target: AppLocator.RunningApp
-        switch locator.resolveRunningApp(matching: appName) {
+        switch resolveRunningApp(matching: appName) {
         case .matched(let resolved):
             target = resolved
         case .notFound:
@@ -737,7 +764,7 @@ public final class AgentViewModel: UserInteraction {
     /// through the normal single-app agent loop. A re-run is not trusted
     /// automatically — it goes through the same approval gate as any task.
     public func runWorkflow(id: UUID, bindings: [String: String]) {
-        guard phase != .running else { return }
+        guard !isRunInProgress else { return }
         activeWorkflowID = nil
         if let message = providerSetupErrorMessage() {
             phase = .failed(message)
@@ -777,7 +804,7 @@ public final class AgentViewModel: UserInteraction {
                 return
             }
             let target: AppLocator.RunningApp
-            switch self.locator.resolveRunningApp(matching: workflow.appName) {
+            switch self.resolveRunningApp(matching: workflow.appName) {
             case .matched(let resolved):
                 target = resolved
             case .notFound:
@@ -871,6 +898,20 @@ public final class AgentViewModel: UserInteraction {
             startedAt: Date()
         )
 
+        if let runAgentSession = agentSessionRunnerOverride {
+            let request = AgentRunRequest(
+                task: task,
+                target: target,
+                modelIdentifier: model.identifier,
+                recipe: recipe
+            )
+            runTask = Task { @MainActor [weak self] in
+                let outcome = await runAgentSession(request)
+                self?.finish(with: Task.isCancelled ? Self.stoppedOutcome : outcome)
+            }
+            return
+        }
+
         let session = AgentSession(
             llm: Self.makeLLMProvider(
                 provider: provider,
@@ -899,14 +940,18 @@ public final class AgentViewModel: UserInteraction {
 
         runTask = Task { @MainActor [weak self] in
             let outcome = await session.run(task: task)
-            self?.finish(with: outcome)
+            self?.finish(with: Task.isCancelled ? Self.stoppedOutcome : outcome)
         }
     }
 
     /// Stop a running task.
     public func stop() {
+        let hadRunTask = runTask != nil
         runTask?.cancel()
         highlightedTarget = nil
+        if hadRunTask, phase == .running {
+            phase = .stopping
+        }
         if let continuation = approvalContinuation {
             approvalContinuation = nil
             pendingApproval = nil
@@ -929,6 +974,13 @@ public final class AgentViewModel: UserInteraction {
             questionAnswerText = ""
             continuation.resume(returning: "")
         }
+    }
+
+    private func resolveRunningApp(matching query: String) -> AppLocator.MatchResult {
+        if let runningAppResolverOverride {
+            return runningAppResolverOverride(query)
+        }
+        return locator.resolveRunningApp(matching: query)
     }
 
     public func applyOpenAICompatiblePreset(id: String) {
@@ -1413,6 +1465,7 @@ public final class AgentViewModel: UserInteraction {
     }
 
     private func finish(with outcome: AgentOutcome) {
+        let outcome = phase == .stopping ? Self.stoppedOutcome : outcome
         switch outcome.status {
         case .completed: phase = .finished(outcome.summary)
         case .stopped: phase = .failed("Stopped.")
