@@ -22,8 +22,27 @@ public final class AgentViewModel: UserInteraction {
         case idle
         case running
         case stopping
+        case stopped(String)
         case finished(String)
         case failed(String)
+    }
+
+    /// Presentation tone shared by the Control Center and compact assistant.
+    public enum PresentationTone: Sendable, Equatable {
+        case neutral
+        case active
+        case waiting
+        case success
+        case danger
+    }
+
+    /// Product-facing run-state copy and icon metadata.
+    public struct RunPresentation: Sendable, Equatable {
+        public let badgeText: String
+        public let headerText: String
+        public let lineText: String?
+        public let systemImage: String
+        public let tone: PresentationTone
     }
 
     /// One line in the live status feed.
@@ -101,6 +120,64 @@ public final class AgentViewModel: UserInteraction {
         public let id = UUID()
         /// The question the model asked before it can continue.
         public let text: String
+    }
+
+    /// The single user interaction currently gating an agent run.
+    public enum PendingInteraction: Sendable, Identifiable {
+        case approval(PendingApproval)
+        case question(PendingQuestion)
+        case memory(PendingMemory)
+        case workflow(PendingWorkflow)
+
+        public var id: String {
+            switch self {
+            case .approval(let approval): "approval-\(approval.id.uuidString)"
+            case .question(let question): "question-\(question.id.uuidString)"
+            case .memory(let memory): "memory-\(memory.id.uuidString)"
+            case .workflow(let workflow): "workflow-\(workflow.id.uuidString)"
+            }
+        }
+
+        public var presentation: RunPresentation {
+            switch self {
+            case .approval(let approval):
+                RunPresentation(
+                    badgeText: "Waiting for You",
+                    headerText: "Waiting for You",
+                    lineText: approval.isDestructive
+                        ? "Waiting for destructive approval"
+                        : "Waiting for approval",
+                    systemImage: approval.isDestructive
+                        ? "exclamationmark.octagon.fill"
+                        : "hand.raised.fill",
+                    tone: approval.isDestructive ? .danger : .waiting
+                )
+            case .question:
+                RunPresentation(
+                    badgeText: "Waiting for You",
+                    headerText: "Waiting for You",
+                    lineText: "Waiting for your answer",
+                    systemImage: "questionmark.bubble.fill",
+                    tone: .waiting
+                )
+            case .memory:
+                RunPresentation(
+                    badgeText: "Waiting for You",
+                    headerText: "Waiting for You",
+                    lineText: "Waiting for memory review",
+                    systemImage: "brain",
+                    tone: .waiting
+                )
+            case .workflow:
+                RunPresentation(
+                    badgeText: "Waiting for You",
+                    headerText: "Waiting for You",
+                    lineText: "Waiting for workflow review",
+                    systemImage: "wand.and.stars",
+                    tone: .waiting
+                )
+            }
+        }
     }
 
     /// Product-facing status for consumer-account access.
@@ -551,11 +628,82 @@ public final class AgentViewModel: UserInteraction {
         Self.openAICompatiblePresets.first { $0.id == openAICompatiblePresetID }
             ?? Self.openAICompatiblePresets[0]
     }
+    public var pendingInteraction: PendingInteraction? {
+        if let pendingApproval { return .approval(pendingApproval) }
+        if let pendingQuestion { return .question(pendingQuestion) }
+        if let pendingMemory { return .memory(pendingMemory) }
+        if let pendingWorkflow { return .workflow(pendingWorkflow) }
+        return nil
+    }
+    public var runPresentation: RunPresentation {
+        if case .stopping = phase {
+            return RunPresentation(
+                badgeText: "Stopping",
+                headerText: "Stopping",
+                lineText: "Stopping",
+                systemImage: "stop.circle.fill",
+                tone: .waiting
+            )
+        }
+        if let pendingInteraction {
+            return pendingInteraction.presentation
+        }
+        switch phase {
+        case .idle:
+            return RunPresentation(
+                badgeText: "Ready",
+                headerText: "Autopilot",
+                lineText: nil,
+                systemImage: "circle",
+                tone: .neutral
+            )
+        case .running:
+            return RunPresentation(
+                badgeText: "Working",
+                headerText: "Working",
+                lineText: "Working",
+                systemImage: "bolt.fill",
+                tone: .active
+            )
+        case .stopping:
+            return RunPresentation(
+                badgeText: "Stopping",
+                headerText: "Stopping",
+                lineText: "Stopping",
+                systemImage: "stop.circle.fill",
+                tone: .waiting
+            )
+        case .stopped(let summary):
+            return RunPresentation(
+                badgeText: "Stopped",
+                headerText: "Stopped",
+                lineText: summary,
+                systemImage: "stop.circle.fill",
+                tone: .neutral
+            )
+        case .finished(let summary):
+            return RunPresentation(
+                badgeText: "Done",
+                headerText: "Done",
+                lineText: summary,
+                systemImage: "checkmark.circle.fill",
+                tone: .success
+            )
+        case .failed(let reason):
+            return RunPresentation(
+                badgeText: "Needs attention",
+                headerText: "Needs attention",
+                lineText: reason,
+                systemImage: "exclamationmark.triangle.fill",
+                tone: .danger
+            )
+        }
+    }
     public var isRunInProgress: Bool {
         switch phase {
         case .running, .stopping:
             true
-        case .idle, .finished, .failed:
+        case .idle, .stopped, .finished, .failed:
             false
         }
     }
@@ -613,7 +761,7 @@ public final class AgentViewModel: UserInteraction {
     private static let workflowRequiredMessage = "Workflow name, app, and goal are required."
     private static let stoppedOutcome = AgentOutcome(
         status: .stopped,
-        summary: "Stopped by the user."
+        summary: "Stopped."
     )
     /// The deployed `llmProxy` Firebase callable that backs hosted AI.
     static let hostedEndpoint = URL(
@@ -848,7 +996,7 @@ public final class AgentViewModel: UserInteraction {
     }
 
     private func finishStoppedWorkflowPreflight() {
-        phase = .failed("Stopped.")
+        phase = .stopped(Self.stoppedOutcome.summary)
         runTask = nil
         activeWorkflowID = nil
     }
@@ -1460,7 +1608,7 @@ public final class AgentViewModel: UserInteraction {
             append(reason, isError: true)
         case .stopped:
             highlightedTarget = nil
-            append("Stopped.", isError: true)
+            append("Stopped.")
         }
     }
 
@@ -1468,7 +1616,7 @@ public final class AgentViewModel: UserInteraction {
         let outcome = phase == .stopping ? Self.stoppedOutcome : outcome
         switch outcome.status {
         case .completed: phase = .finished(outcome.summary)
-        case .stopped: phase = .failed("Stopped.")
+        case .stopped: phase = .stopped(outcome.summary)
         case .failed: phase = .failed(outcome.summary)
         }
         runTask = nil

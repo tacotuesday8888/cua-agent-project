@@ -20,7 +20,8 @@ That product shape implies a few hard technical boundaries:
   the same run instead of creating separate session state.
 - Approvals, questions, memory proposals, workflow proposals, and stop requests
   must be resumable interactions the Control Center and compact assistant can
-  both render.
+  both render. These pending interactions are shared run state, not separate
+  per-surface queues.
 - The agent must emit structured events that the shared model, a test harness,
   and the compact assistant surface can render.
 - The action layer must expose target metadata before acting so the UI can show
@@ -199,21 +200,26 @@ Scope and guarantees for the current phase:
 
 ## Session State
 
-The agent should treat a run as a durable state machine:
+The agent should treat a run as a durable state machine. Internal phases map to
+these user-visible states:
 
-- `idle`: waiting for a prompt.
-- `running`: the loop is active.
-- `awaiting input`: approval, clarification, memory proposal, or workflow
-  proposal.
-- `stopping`: the user has pressed Stop and the UI is waiting for the
+- **Ready**: waiting for a prompt.
+- **Working**: the loop is active.
+- **Waiting for You**: the run is paused on a user interaction, such as an
+  approval, clarification, memory proposal, or workflow proposal.
+- **Stopping**: the user has pressed Stop and the UI is waiting for the
   cooperative agent task to wind down.
-- `finished`: completed with a summary.
-- `failed`: permission-blocked, provider-blocked, or errored. A stopped run is
-  displayed as stopped to the user and recorded with `RunStatus.stopped`.
+- **Done**: completed with a summary.
+- **Stopped**: the user stopped the run. This is a normal terminal state, not a
+  failure, and is recorded with `RunStatus.stopped`.
+- **Needs attention**: permission-blocked, provider-blocked, or errored.
 
 Live run state is in the app-owned `AgentViewModel` and the event stream. The
 same model is passed to the Control Center and compact assistant so both
 surfaces show the same phase, pending interaction, feed, and stop control.
+Pending interactions are shared state: answering an approval, question, memory
+proposal, or workflow proposal from either surface must clear or resume the same
+underlying interaction on the other surface.
 `AutopilotHistory` persists the redacted record of each finished run to
 `run-history.json`: a generic task label, target app, model, status, ordered
 tool names, and timestamps. Raw prompts, model summaries, AX trees, screenshots,
