@@ -205,8 +205,11 @@ The agent should treat a run as a durable state machine:
 - `running`: the loop is active.
 - `awaiting input`: approval, clarification, memory proposal, or workflow
   proposal.
+- `stopping`: the user has pressed Stop and the UI is waiting for the
+  cooperative agent task to wind down.
 - `finished`: completed with a summary.
-- `failed`: stopped, permission-blocked, provider-blocked, or errored.
+- `failed`: permission-blocked, provider-blocked, or errored. A stopped run is
+  displayed as stopped to the user and recorded with `RunStatus.stopped`.
 
 Live run state is in the app-owned `AgentViewModel` and the event stream. The
 same model is passed to the Control Center and compact assistant so both

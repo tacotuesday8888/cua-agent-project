@@ -209,6 +209,7 @@ struct ContentView: View {
         switch model.phase {
         case .idle: "Ready"
         case .running: "Running"
+        case .stopping: "Stopping"
         case .finished: "Finished"
         case .failed: "Needs attention"
         }
@@ -218,6 +219,7 @@ struct ContentView: View {
         switch model.phase {
         case .idle: .secondary
         case .running: .blue
+        case .stopping: .orange
         case .finished: .green
         case .failed: .red
         }
@@ -495,9 +497,13 @@ struct ContentView: View {
 
     @ViewBuilder
     private var runButton: some View {
-        if model.phase == .running {
+        switch model.phase {
+        case .running:
             Button("Stop", role: .destructive) { model.stop() }
-        } else {
+        case .stopping:
+            Button("Stopping…") {}
+                .disabled(true)
+        case .idle, .finished, .failed:
             Button("Run") { model.submit() }
                 .disabled(model.promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
@@ -623,6 +629,11 @@ struct ContentView: View {
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
                 Text("Running…").foregroundStyle(.secondary)
+            }
+        case .stopping:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Stopping…").foregroundStyle(.secondary)
             }
         case .finished(let summary):
             Label(summary, systemImage: "checkmark.circle.fill")
@@ -822,7 +833,7 @@ struct ContentView: View {
                                     workflowBindings[workflow.id] = [:]
                                 }
                                 .controlSize(.small)
-                                .disabled(model.phase == .running)
+                                .disabled(model.isRunInProgress)
                                 Button("Edit") {
                                     beginEditing(workflow)
                                 }
