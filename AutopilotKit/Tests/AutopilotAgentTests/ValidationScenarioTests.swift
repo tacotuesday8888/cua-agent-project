@@ -35,6 +35,35 @@ struct AgentValidationScenarioTests {
         #expect(scenario.expect.stateContainsText == "hello")
     }
 
+    @Test func committedScenarioFixturesDecodeAndHaveRunnableShape() throws {
+        let fixtureURLs = try FileManager.default.contentsOfDirectory(
+            at: committedScenarioDirectory(),
+            includingPropertiesForKeys: nil
+        )
+        .filter { $0.pathExtension == "json" }
+        .sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+        #expect(!fixtureURLs.isEmpty, "Expected at least one committed validation scenario fixture.")
+
+        var seenIDs = Set<String>()
+        for fixtureURL in fixtureURLs {
+            let scenario = try JSONDecoder().decode(
+                AgentValidationScenario.self,
+                from: Data(contentsOf: fixtureURL)
+            )
+            let expectedID = fixtureURL.deletingPathExtension().lastPathComponent
+
+            #expect(scenario.id == expectedID, "\(fixtureURL.lastPathComponent) id should match its file name.")
+            #expect(!scenario.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            #expect(seenIDs.insert(scenario.id).inserted, "Duplicate scenario id: \(scenario.id).")
+            #expect(!scenario.app.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            #expect(!scenario.task.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            #expect(scenario.provider?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != true)
+            #expect(scenario.maxSteps.map { $0 > 0 } ?? true)
+            #expect(scenario.expect.hasAtLeastOneCheck)
+        }
+    }
+
     @Test func evaluatorReportsPassingChecks() {
         let scenario = AgentValidationScenario(
             id: "fixture",
@@ -109,5 +138,43 @@ struct AgentValidationScenarioTests {
         root: UIElement
     ) -> UITreeSnapshot {
         UITreeSnapshot(appName: appName, windowTitle: windowTitle, root: root)
+    }
+
+    private func committedScenarioDirectory() throws -> URL {
+        var directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        var checkedPaths: [String] = []
+
+        for _ in 0..<6 {
+            let candidate = directory.appendingPathComponent("docs/validation/scenarios", isDirectory: true)
+            checkedPaths.append(candidate.path)
+
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: candidate.path, isDirectory: &isDirectory),
+               isDirectory.boolValue {
+                return candidate
+            }
+
+            directory.deleteLastPathComponent()
+        }
+
+        throw MissingScenarioDirectory(checkedPaths: checkedPaths)
+    }
+}
+
+private extension AgentValidationExpectations {
+    var hasAtLeastOneCheck: Bool {
+        finalStatus != nil
+            || stateContainsText != nil
+            || toolUsed != nil
+            || noActionFailures != nil
+            || windowTitleContainsText != nil
+    }
+}
+
+private struct MissingScenarioDirectory: Error, CustomStringConvertible {
+    var checkedPaths: [String]
+
+    var description: String {
+        "Could not find docs/validation/scenarios. Checked: \(checkedPaths.joined(separator: ", "))"
     }
 }

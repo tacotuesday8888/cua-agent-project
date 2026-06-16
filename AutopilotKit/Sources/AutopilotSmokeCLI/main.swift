@@ -24,6 +24,7 @@ struct AutopilotSmokeCLI {
         let includeScreenshot = arguments.contains("--include-screenshot")
         let runAgentLoop = arguments.contains("--agent-loop")
         let dumpTree = arguments.contains("--dump-tree")
+        let checkAppVisible = arguments.contains("--check-app-visible")
         let liveProvider = liveProvider(from: arguments)
         let recorder = makeRecorder(from: arguments, scenarioID: scenario?.id)
         let resolution = await MainActor.run {
@@ -42,6 +43,11 @@ struct AutopilotSmokeCLI {
             fputs("'\(resolvedTarget)' matched more than one running app: \(names).\n\n", stderr)
             printUsage()
             exit(2)
+        }
+
+        if checkAppVisible {
+            print("Matched \(app.name) [pid \(app.processID)]")
+            exit(0)
         }
 
         let computer = MacComputer(
@@ -629,10 +635,13 @@ struct AutopilotSmokeCLI {
         Usage:
           swift run --package-path AutopilotKit AutopilotFixtureApp
           swift run --package-path AutopilotKit AutopilotSmokeCLI [--app AutopilotFixtureApp] [--include-screenshot] [--agent-loop] [--record-trajectory [DIR]]
+          swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp --check-app-visible
           swift run --package-path AutopilotKit AutopilotSmokeCLI --app Safari --dump-tree
           swift run --package-path AutopilotKit AutopilotSmokeCLI --scenario scenario.json [--record-trajectory [DIR]] [--report-json report.json]
           swift run --package-path AutopilotKit AutopilotSmokeCLI --live-provider openai [--api-key-env OPENAI_API_KEY] [--model gpt-5.4-mini] [--task "…"] [--expect-text "live smoke value"] [--max-steps 15]
 
+        --check-app-visible exits after resolving the target app, before
+        Accessibility diagnostics or smoke actions run.
         --dump-tree prints the accessibility tree the agent would see for any
         running app, after the readiness checks pass.
         --scenario runs a JSON validation scenario with pass/fail expectations.

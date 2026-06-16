@@ -1,0 +1,15 @@
+{
+  "id": "fixture-scripted-agent-loop",
+  "app": "AutopilotFixtureApp",
+  "task": "Exercise the fixture app with the scripted one-app agent loop, then finish.",
+  "provider": "scripted-fixture",
+  "maxSteps": 12,
+  "includeScreenshot": false,
+  "expect": {
+    "finalStatus": "completed",
+    "stateContainsText": "Run clicked: direct smoke value",
+    "toolUsed": "set_value",
+    "noActionFailures": true,
+    "windowTitleContainsText": "Autopilot Fixture"
+  }
+}

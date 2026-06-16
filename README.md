@@ -115,8 +115,23 @@ swift run --package-path AutopilotKit AutopilotFixtureApp
 swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp
 swift run --package-path AutopilotKit AutopilotSmokeCLI --app AutopilotFixtureApp --include-screenshot
 ./script/validate_fixture.sh
+./script/validate_beta.sh
 ./script/validate_fixture.sh --live-provider openai
 ```
+
+For the beta validation pack, run:
+
+```sh
+./script/validate_beta.sh
+```
+
+It runs Swift package tests, deterministic fixture smokes, the fixture agent
+loop, and every committed scenario in `docs/validation/scenarios`. Logs,
+scenario reports, and trajectories are written under `.build/validation`, which
+can contain private UI/task text and should not be committed. Add
+`--include-screenshot` to cover screenshot capture, `--skip-swift-tests` when
+package tests already ran, or `--live-provider openai|anthropic` for an
+opt-in live provider fixture smoke.
 
 To inspect what the agent would see for any running app, dump its
 accessibility tree:

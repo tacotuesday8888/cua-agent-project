@@ -20,8 +20,8 @@ jobs:
       - name: Swift package tests
         run: swift test --package-path AutopilotKit
 
-      - name: macOS app build
-        run: xcodebuild build-for-testing -project MacAutopilot.xcodeproj -scheme MacAutopilot -destination 'platform=macOS' -derivedDataPath .build/xcode CODE_SIGNING_ALLOWED=NO
+      - name: macOS app tests
+        run: xcodebuild test -project MacAutopilot.xcodeproj -scheme MacAutopilot -destination 'platform=macOS' -derivedDataPath .build/xcode CODE_SIGNING_ALLOWED=NO
 
   backend:
     runs-on: ubuntu-latest
