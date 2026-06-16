@@ -20,7 +20,8 @@ one app at a time.
   screenshots as a fallback. The transcript keeps only recent observations, so a
   long run's token cost stays bounded.
 - Actions are risk-gated: reading is free, the first write to an app asks once,
-  and destructive actions (send, delete, pay, overwrite) always ask.
+  destructive actions (send, delete, pay, overwrite) always ask, and approval
+  prompts show live target details when the accessibility tree provides them.
 - The loop stops itself when it repeats one action with no progress, and warns
   the model as its step budget runs low.
 - The model can ask clarifying questions and propose durable memories, each
@@ -30,8 +31,9 @@ one app at a time.
 - The agent can propose a reusable **workflow** after a repeatable task. In the
   Control Center, the user can edit the proposed name, goal template, slots, and
   secret-free recipe hints before saving, then edit saved workflows later
-  through the same local store. Re-running a workflow feeds the resolved goal
-  back through the same agent loop and approval gate — it is not a recorded
+  through the same local store. The compact assistant can create and run these
+  local workflows too. Re-running a workflow feeds the resolved goal back
+  through the same agent loop and approval gate — it is not a recorded
   click-script and is never auto-trusted. Workflows are single-app for now,
   stored locally in `workflows.json`, and hold no secrets or typed slot values.
 

@@ -12,10 +12,12 @@ struct ContentView: View {
     @Bindable private var subscriptionAuth: SubscriptionAccountAuthModel
     @State private var newWorkflowName = ""
     @State private var newWorkflowGoal = ""
+    @State private var newWorkflowRecipe = ""
     @State private var editingWorkflowID: UUID?
     @State private var editWorkflowName = ""
     @State private var editWorkflowAppName = ""
     @State private var editWorkflowGoal = ""
+    @State private var editWorkflowRecipe = ""
     @State private var workflowBindings: [UUID: [String: String]] = [:]
 
     init(
@@ -524,6 +526,13 @@ struct ContentView: View {
                 : "First write to \(approval.appName) this session.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if let targetDetail = approval.targetDetailText {
+                Text(targetDetail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+            }
             HStack {
                 Button("Stop run", role: .destructive) { model.stop() }
                 Spacer()
@@ -797,6 +806,8 @@ struct ContentView: View {
                         .textFieldStyle(.roundedBorder)
                     TextField("Goal — use {{slot}} for fill-ins", text: $newWorkflowGoal)
                         .textFieldStyle(.roundedBorder)
+                    TextField("Recipe hints (optional, secret-free)", text: $newWorkflowRecipe)
+                        .textFieldStyle(.roundedBorder)
                     HStack {
                         Text(model.selectedAppName.isEmpty
                             ? "Pick a target app"
@@ -808,10 +819,12 @@ struct ContentView: View {
                             model.createWorkflow(
                                 name: newWorkflowName,
                                 appName: model.selectedAppName,
-                                goalTemplate: newWorkflowGoal
+                                goalTemplate: newWorkflowGoal,
+                                recipe: newWorkflowRecipe
                             )
                             newWorkflowName = ""
                             newWorkflowGoal = ""
+                            newWorkflowRecipe = ""
                         }
                         .controlSize(.small)
                         .disabled(!canCreateWorkflow)
@@ -834,6 +847,12 @@ struct ContentView: View {
                                     Text(workflowDetail(workflow))
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
+                                    if !workflow.recipe.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                        Text(workflow.recipe)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(2)
+                                    }
                                 }
                                 Spacer()
                                 Button("Run") {
@@ -881,6 +900,8 @@ struct ContentView: View {
                 .textFieldStyle(.roundedBorder)
             TextField("Goal template with {{slot}} variables", text: $editWorkflowGoal)
                 .textFieldStyle(.roundedBorder)
+            TextField("Recipe hints (optional, secret-free)", text: $editWorkflowRecipe)
+                .textFieldStyle(.roundedBorder)
             HStack {
                 Spacer()
                 Button("Cancel") { clearWorkflowEdit() }
@@ -890,7 +911,8 @@ struct ContentView: View {
                         id: workflow.id,
                         name: editWorkflowName,
                         appName: editWorkflowAppName,
-                        goalTemplate: editWorkflowGoal
+                        goalTemplate: editWorkflowGoal,
+                        recipe: editWorkflowRecipe
                     )
                     clearWorkflowEdit()
                 }
@@ -944,6 +966,7 @@ struct ContentView: View {
         editWorkflowName = workflow.name
         editWorkflowAppName = workflow.appName
         editWorkflowGoal = workflow.goalTemplate
+        editWorkflowRecipe = workflow.recipe
     }
 
     private func clearWorkflowEdit() {
@@ -951,6 +974,7 @@ struct ContentView: View {
         editWorkflowName = ""
         editWorkflowAppName = ""
         editWorkflowGoal = ""
+        editWorkflowRecipe = ""
     }
 
     private var canCreateWorkflow: Bool {

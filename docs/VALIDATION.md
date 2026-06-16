@@ -333,11 +333,17 @@ These are manual app checks for the shared-state workflow milestone.
   before saving: name, goal template, slots, and any secret-free recipe hints.
   Confirm the saved workflow uses the edited values, not the raw proposal.
 - **Saved workflow edit and slot privacy.** Edit an existing saved workflow in
-  the Control Center, relaunch the app, and confirm the change was persisted
-  through the local workflow store. Run it with distinctive slot values, then
-  inspect `~/Library/Application Support/MacAutopilot/workflows.json`; it should
-  contain the template, slot names, and optional secret-free hints, but not the
-  typed slot values used for that run.
+  the Control Center, including its optional recipe hints. Relaunch the app and
+  confirm the change was persisted through the local workflow store. Run it with
+  distinctive slot values, then inspect
+  `~/Library/Application Support/MacAutopilot/workflows.json`; it should contain
+  the template, slot names, and optional secret-free hints, but not the typed
+  slot values used for that run.
+- **Approval target context.** In the app, trigger a write approval against a
+  labeled control. Confirm the approval prompt shows the app, risk tier, action
+  summary, and available live target details such as label, role, accessibility
+  identifier or element id, value, and snapshot turn. Decline the action and
+  confirm the run tells the model not to retry that same action.
 
 ## Privacy Storage Checks
 

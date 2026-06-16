@@ -63,6 +63,80 @@ public final class AgentViewModel: UserInteraction {
         public let isDestructive: Bool
         /// The app the action operates.
         public let appName: String
+        /// Live target metadata from the current accessibility snapshot. This
+        /// is shown for trust, but never persisted into history or workflows.
+        public let targetAppName: String?
+        public let targetElementID: String?
+        public let targetRole: String?
+        public let targetLabel: String?
+        public let targetIdentifier: String?
+        public let targetValue: String?
+        public let targetTurnIdentifier: Int?
+        public let targetDescription: String?
+        public let targetFrame: ElementFrame?
+
+        public var targetDetailText: String? {
+            var details: [String] = []
+            if let label = Self.nonEmpty(targetLabel) {
+                details.append("Label: \(label)")
+            }
+            if let role = Self.nonEmpty(targetRole) {
+                details.append("Role: \(role)")
+            }
+            if let identifier = Self.nonEmpty(targetIdentifier) {
+                details.append("Identifier: \(identifier)")
+            } else if let elementID = Self.nonEmpty(targetElementID) {
+                details.append("Element: \(elementID)")
+            }
+            if let value = Self.nonEmpty(targetValue) {
+                details.append("Value: \(value)")
+            }
+            if let turnIdentifier = targetTurnIdentifier {
+                details.append("Snapshot: \(turnIdentifier)")
+            }
+            if details.isEmpty,
+               let description = Self.nonEmpty(targetDescription),
+               description != summary {
+                details.append(description)
+            }
+            guard !details.isEmpty else { return nil }
+            return details.joined(separator: " · ")
+        }
+
+        public init(
+            summary: String,
+            tier: String,
+            isDestructive: Bool,
+            appName: String,
+            targetAppName: String? = nil,
+            targetElementID: String? = nil,
+            targetRole: String? = nil,
+            targetLabel: String? = nil,
+            targetIdentifier: String? = nil,
+            targetValue: String? = nil,
+            targetTurnIdentifier: Int? = nil,
+            targetDescription: String? = nil,
+            targetFrame: ElementFrame? = nil
+        ) {
+            self.summary = summary
+            self.tier = tier
+            self.isDestructive = isDestructive
+            self.appName = appName
+            self.targetAppName = targetAppName
+            self.targetElementID = targetElementID
+            self.targetRole = targetRole
+            self.targetLabel = targetLabel
+            self.targetIdentifier = targetIdentifier
+            self.targetValue = targetValue
+            self.targetTurnIdentifier = targetTurnIdentifier
+            self.targetDescription = targetDescription
+            self.targetFrame = targetFrame
+        }
+
+        private static func nonEmpty(_ text: String?) -> String? {
+            let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return trimmed.isEmpty ? nil : trimmed
+        }
     }
 
     /// A memory the agent proposed, awaiting the user's approval.
@@ -107,6 +181,8 @@ public final class AgentViewModel: UserInteraction {
         public let appName: String
         /// The goal, with `{{slot}}` tokens for its variables.
         public let goalTemplate: String
+        /// Optional secret-free guidance injected when the workflow re-runs.
+        public let recipe: String
         /// The variables the user fills in before a run.
         public let variables: [WorkflowVariable]
         /// How many times it has been run.
@@ -1316,7 +1392,16 @@ public final class AgentViewModel: UserInteraction {
                 summary: request.summary,
                 tier: request.tier.rawValue,
                 isDestructive: request.tier == .destructive,
-                appName: request.appName
+                appName: request.appName,
+                targetAppName: request.target.appName,
+                targetElementID: request.target.elementID,
+                targetRole: request.target.role,
+                targetLabel: request.target.label,
+                targetIdentifier: request.target.identifier,
+                targetValue: request.target.value,
+                targetTurnIdentifier: request.target.turnIdentifier,
+                targetDescription: request.target.description,
+                targetFrame: request.target.frame
             )
             self.approvalContinuation = continuation
         }
@@ -1427,6 +1512,7 @@ public final class AgentViewModel: UserInteraction {
                 name: workflow.name,
                 appName: workflow.appName,
                 goalTemplate: workflow.goalTemplate,
+                recipe: workflow.recipe,
                 variables: workflow.variables,
                 runCount: workflow.runCount,
                 successCount: workflow.successCount
@@ -1439,11 +1525,13 @@ public final class AgentViewModel: UserInteraction {
         name: String,
         appName: String,
         goalTemplate: String,
+        recipe: String = "",
         variables: [WorkflowVariable] = []
     ) {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedGoal = goalTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedApp = appName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedRecipe = recipe.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty, !trimmedGoal.isEmpty, !trimmedApp.isEmpty else { return }
         let derived = variables.isEmpty
             ? Self.workflowVariables(in: trimmedGoal)
@@ -1452,6 +1540,7 @@ public final class AgentViewModel: UserInteraction {
             name: trimmedName,
             appName: trimmedApp,
             goalTemplate: trimmedGoal,
+            recipe: trimmedRecipe,
             variables: derived,
             source: .manual
         ))
@@ -1469,11 +1558,13 @@ public final class AgentViewModel: UserInteraction {
         id: UUID,
         name: String,
         appName: String,
-        goalTemplate: String
+        goalTemplate: String,
+        recipe: String? = nil
     ) {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedApp = appName.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedGoal = goalTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedRecipe = recipe?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty, !trimmedApp.isEmpty, !trimmedGoal.isEmpty else {
             append("Workflow warning — \(Self.workflowRequiredMessage)", isError: true)
             return
@@ -1491,7 +1582,7 @@ public final class AgentViewModel: UserInteraction {
                 name: trimmedName,
                 appName: trimmedApp,
                 goalTemplate: trimmedGoal,
-                recipe: existing.recipe,
+                recipe: trimmedRecipe ?? existing.recipe,
                 variables: variables,
                 source: existing.source,
                 sourceRunID: existing.sourceRunID,

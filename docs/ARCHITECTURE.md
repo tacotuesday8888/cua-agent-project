@@ -153,9 +153,13 @@ accessibility identifier; for `perform_secondary_action` the action name itself
 is also checked, so a context-menu "Delete" or `AXDelete` invoked on a plainly
 labeled row is still gated. Matching errs toward asking.
 
-The notch UI should surface approvals inline with the action summary, app name,
-risk tier, and target frame when available. Declined actions must return a tool
-result telling the model not to retry the same action.
+The UI should surface approvals inline with the action summary, app name, risk
+tier, and live target metadata when available: label, role, accessibility
+identifier or element id, value, and snapshot turn. The target frame drives the
+live highlight overlay rather than durable text. This target context is for trust
+and debugging only; it is not written to run history or workflow storage.
+Declined actions must return a tool result telling the model not to retry the
+same action.
 
 ## Workflows
 
@@ -190,9 +194,11 @@ Scope and guarantees for the current phase:
 - **Proposal/edit flow.** Workflows are created by hand or from an explicit
   `propose_workflow` call after a repeatable task. The proposal becomes pending
   workflow state on the shared `AgentViewModel`. The Control Center is the
-  editing surface: the user can review and adjust the saved name, goal template,
-  slots, and secret-free recipe hints before saving. The compact assistant can
-  render the proposal state, but it is not the primary editor.
+  primary editing surface: the user can review and adjust the saved name, goal
+  template, slots, and secret-free recipe hints before saving, then edit those
+  fields later on saved workflows. The compact assistant can create and run
+  workflows, show recipe hints, and render proposal state, but it is not the
+  primary editor.
 - **No history-to-workflow conversion.** Raw run history is redacted and is not
   used as a workflow goal source. A finished run can inspire an explicit
   proposal, but the app must not reconstruct a saved workflow from

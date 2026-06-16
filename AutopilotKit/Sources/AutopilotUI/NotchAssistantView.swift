@@ -455,6 +455,12 @@ public struct NotchAssistantView: View {
                 : "\(approval.tier.capitalized) action in \(approval.appName)")
                 .font(.system(size: 10))
                 .foregroundStyle(.white.opacity(0.52))
+            if let targetDetail = approval.targetDetailText {
+                Text(targetDetail)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.48))
+                    .lineLimit(2)
+            }
             HStack {
                 Button("Stop", role: .destructive) { model.stop() }
                 Spacer()
@@ -760,6 +766,7 @@ private struct WorkflowsPanel: View {
     @State private var mode: Mode = .none
     @State private var draftName = ""
     @State private var draftGoal = ""
+    @State private var draftRecipe = ""
 
     private enum Mode { case none, create }
 
@@ -803,6 +810,7 @@ private struct WorkflowsPanel: View {
         VStack(spacing: 6) {
             field("Workflow name", text: $draftName)
             field("Goal — use {{slot}} for fill-ins", text: $draftGoal)
+            field("Recipe hints (optional)", text: $draftRecipe)
             HStack {
                 Text(model.selectedAppName.isEmpty
                     ? "Pick a target app above"
@@ -814,7 +822,8 @@ private struct WorkflowsPanel: View {
                     model.createWorkflow(
                         name: draftName,
                         appName: model.selectedAppName,
-                        goalTemplate: draftGoal
+                        goalTemplate: draftGoal,
+                        recipe: draftRecipe
                     )
                     toggle(.none)
                 }
@@ -845,6 +854,7 @@ private struct WorkflowsPanel: View {
         mode = (mode == target) ? .none : target
         draftName = ""
         draftGoal = ""
+        draftRecipe = ""
     }
 }
 
@@ -887,6 +897,12 @@ private struct WorkflowRow: View {
             }
             ForEach(workflow.variables) { variable in
                 field(placeholder(for: variable), text: binding(for: variable.name))
+            }
+            if !workflow.recipe.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(workflow.recipe)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.42))
+                    .lineLimit(2)
             }
             HStack {
                 Spacer()

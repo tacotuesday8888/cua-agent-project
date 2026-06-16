@@ -221,6 +221,48 @@ struct AgentViewModelTests {
         #expect(model.pendingApproval == nil)
     }
 
+    @Test func requestApprovalSurfacesTargetDetailsForTrustCopy() async {
+        let model = AgentViewModel()
+        let frame = ElementFrame(x: 10, y: 20, width: 30, height: 40)
+        let target = ActionTarget(
+            appName: "Notes",
+            elementID: "save-button",
+            role: "AXButton",
+            label: "Save",
+            identifier: "toolbar.save",
+            value: "Unsaved",
+            turnIdentifier: 7,
+            description: "Save the current note",
+            frame: frame
+        )
+        let approvalTask = Task { @MainActor in
+            await model.requestApproval(ApprovalRequest(
+                appName: "Notes",
+                tier: .write,
+                target: target,
+                summary: "Click Save"
+            ))
+        }
+
+        await waitUntil { model.pendingApproval != nil }
+
+        let approval = model.pendingApproval
+        #expect(approval?.summary == "Click Save")
+        #expect(approval?.appName == "Notes")
+        #expect(approval?.targetAppName == "Notes")
+        #expect(approval?.targetElementID == "save-button")
+        #expect(approval?.targetRole == "AXButton")
+        #expect(approval?.targetLabel == "Save")
+        #expect(approval?.targetIdentifier == "toolbar.save")
+        #expect(approval?.targetValue == "Unsaved")
+        #expect(approval?.targetTurnIdentifier == 7)
+        #expect(approval?.targetDescription == "Save the current note")
+        #expect(approval?.targetFrame == frame)
+
+        model.resolveApproval(false)
+        _ = await approvalTask.value
+    }
+
     @Test func pendingInteractionPresentsApprovalWithStableID() async {
         let model = AgentViewModel()
         let approvalTask = Task { @MainActor in
@@ -964,6 +1006,7 @@ struct AgentViewModelWorkflowTests {
             name: "Seeded",
             appName: "Notes",
             goalTemplate: "do {{x}}",
+            recipe: "Open compose, attach PDF, then send.",
             variables: [WorkflowVariable(name: "x")],
             source: .manual
         ))
@@ -975,7 +1018,54 @@ struct AgentViewModelWorkflowTests {
         await waitUntil { !model.savedWorkflows.isEmpty }
 
         #expect(model.savedWorkflows.first?.name == "Seeded")
+        #expect(model.savedWorkflows.first?.recipe == "Open compose, attach PDF, then send.")
         #expect(model.savedWorkflows.first?.variables.map(\.name) == ["x"])
+    }
+
+    @Test func updateWorkflowUpdatesRecipeAndReDerivesVariables() async {
+        let (model, store) = makeModel()
+        let sourceRunID = UUID()
+        let createdAt = Date(timeIntervalSince1970: 123)
+        let workflow = Workflow(
+            name: "Original",
+            appName: "Mail",
+            goalTemplate: "Send {{old}}",
+            recipe: "Original hint.",
+            variables: [WorkflowVariable(name: "old", defaultValue: "legacy")],
+            source: .savedFromRun,
+            sourceRunID: sourceRunID,
+            createdAt: createdAt,
+            updatedAt: createdAt,
+            runCount: 4,
+            successCount: 3
+        )
+        await store.add(workflow)
+
+        model.updateWorkflow(
+            id: workflow.id,
+            name: "  Edited  ",
+            appName: "  Notes  ",
+            goalTemplate: "  Send {{recipient}} the {{report}}  ",
+            recipe: "  Use the sharing sheet, then confirm send.  "
+        )
+        await waitUntil {
+            let stored = await store.get(id: workflow.id)
+            return stored?.name == "Edited" && stored?.recipe == "Use the sharing sheet, then confirm send."
+        }
+
+        let stored = await store.get(id: workflow.id)
+        #expect(stored?.name == "Edited")
+        #expect(stored?.appName == "Notes")
+        #expect(stored?.goalTemplate == "Send {{recipient}} the {{report}}")
+        #expect(stored?.recipe == "Use the sharing sheet, then confirm send.")
+        #expect(stored?.variableNames == ["recipient", "report"])
+        #expect(stored?.variables.allSatisfy { $0.defaultValue == nil } == true)
+        #expect(stored?.source == .savedFromRun)
+        #expect(stored?.sourceRunID == sourceRunID)
+        #expect(stored?.createdAt == createdAt)
+        #expect(stored?.runCount == 4)
+        #expect(stored?.successCount == 3)
+        #expect(model.savedWorkflows.first?.recipe == "Use the sharing sheet, then confirm send.")
     }
 
     @Test func runWorkflowWithoutAPIKeyFails() {
