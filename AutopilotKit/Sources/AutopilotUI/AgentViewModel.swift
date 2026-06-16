@@ -435,6 +435,30 @@ public final class AgentViewModel: UserInteraction {
         )
     ]
 
+    /// Storage used for provider API keys. The app uses Keychain-backed
+    /// storage, while tests can inject a no-op store to avoid CI Keychain UI.
+    public struct APIKeyStorage: Sendable {
+        let load: @MainActor @Sendable (Provider) -> String
+        let save: @MainActor @Sendable (String, Provider) throws -> Void
+
+        public init(
+            load: @escaping @MainActor @Sendable (Provider) -> String,
+            save: @escaping @MainActor @Sendable (String, Provider) throws -> Void
+        ) {
+            self.load = load
+            self.save = save
+        }
+
+        public static let keychain = APIKeyStorage(
+            load: { provider in
+                AgentViewModel.savedAPIKey(for: provider)
+            },
+            save: { apiKey, provider in
+                try AgentViewModel.saveAPIKey(apiKey, for: provider)
+            }
+        )
+    }
+
     // MARK: - Observable state
 
     /// The free-text prompt the user is typing.
@@ -493,7 +517,7 @@ public final class AgentViewModel: UserInteraction {
             guard selectedProvider != oldValue else { return }
             UserDefaults.standard.set(selectedProvider.rawValue, forKey: Self.providerDefaultsKey)
             selectedModelID = Self.savedModelID(for: selectedProvider)
-            apiKey = Self.savedAPIKey(for: selectedProvider)
+            apiKey = apiKeyStorage.load(selectedProvider)
         }
     }
     /// The selected model id within the selected provider. This is persisted
@@ -579,6 +603,8 @@ public final class AgentViewModel: UserInteraction {
     @ObservationIgnored
     public var subscriptionOAuthCredentialProvider:
         SubscriptionOAuthCredentialProvider.Load = SubscriptionOAuthCredentialProvider.keychain()
+    @ObservationIgnored
+    private let apiKeyStorage: APIKeyStorage
 
     public var apiKeyPlaceholder: String { selectedProvider.apiKeyPlaceholder }
     public var selectedModelName: String { selectedModelDescriptor.identifier }
@@ -806,18 +832,20 @@ public final class AgentViewModel: UserInteraction {
     public init(
         memory: MemoryStore = MemoryStore(),
         history: RunHistoryStore = RunHistoryStore(),
-        workflows: WorkflowStore = WorkflowStore()
+        workflows: WorkflowStore = WorkflowStore(),
+        apiKeyStorage: APIKeyStorage = .keychain
     ) {
         self.memory = memory
         self.history = history
         self.workflows = workflows
+        self.apiKeyStorage = apiKeyStorage
         let storedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
             .flatMap(Provider.init(rawValue:))
         let savedProvider = storedProvider.flatMap { Provider.allCases.contains($0) ? $0 : nil }
             ?? .hosted
         self.selectedProvider = savedProvider
         self.selectedModelID = Self.savedModelID(for: savedProvider)
-        self.apiKey = Self.savedAPIKey(for: savedProvider)
+        self.apiKey = apiKeyStorage.load(savedProvider)
         let savedPreset = UserDefaults.standard.string(
             forKey: Self.openAICompatiblePresetDefaultsKey
         )
@@ -1017,7 +1045,7 @@ public final class AgentViewModel: UserInteraction {
         let subscriptionCredentialProvider = subscriptionOAuthCredentialProvider
         if provider.usesAPIKey {
             do {
-                try Self.saveAPIKey(apiKey, for: provider)
+                try apiKeyStorage.save(apiKey, provider)
             } catch {
                 phase = .failed("Could not save API key securely: \(error.localizedDescription)")
                 return

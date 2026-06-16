@@ -11,7 +11,7 @@ struct MacAutopilotTests {
     }
 
     @Test func contentViewAndNotchControllerAcceptSharedState() {
-        let model = AgentViewModel()
+        let model = makeModel()
         let auth = AuthModel()
         let subscriptionAuth = SubscriptionAccountAuthModel()
 
@@ -33,7 +33,7 @@ struct MacAutopilotTests {
             }
         }
 
-        let model = AgentViewModel()
+        let model = makeModel()
         #expect(model.phase == .idle)
         #expect(model.promptText.isEmpty)
         #expect(model.selectedProvider == .hosted)
@@ -44,10 +44,46 @@ struct MacAutopilotTests {
     }
 
     @Test func emptySubmitDoesNotStartRun() {
-        let model = AgentViewModel()
+        let model = makeModel()
         model.promptText = "   "
         model.submit()
         #expect(model.phase == .idle)
+    }
+
+    @Test func missingAPIKeyFailsBeforeStartingRun() {
+        // The default mode is app-managed AI, so select a BYOK provider
+        // explicitly before testing the key guard.
+        let providerKey = "AutopilotLLMProvider"
+        let savedProvider = UserDefaults.standard.string(forKey: providerKey)
+        UserDefaults.standard.removeObject(forKey: providerKey)
+        defer {
+            if let savedProvider {
+                UserDefaults.standard.set(savedProvider, forKey: providerKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: providerKey)
+            }
+        }
+
+        let model = makeModel()
+        model.selectedProvider = .openai
+        model.apiKey = ""
+        model.promptText = "Read the selected app"
+        model.submit()
+
+        guard case .failed(let reason) = model.phase else {
+            Issue.record("expected missing API key failure")
+            return
+        }
+        #expect(reason.contains("API key"))
+    }
+
+    private func makeModel() -> AgentViewModel {
+        AgentViewModel(
+            apiKeyStorage: AgentViewModel.APIKeyStorage(
+                load: { _ in "" },
+                save: { _, _ in }
+            )
+        )
     }
 
 }
