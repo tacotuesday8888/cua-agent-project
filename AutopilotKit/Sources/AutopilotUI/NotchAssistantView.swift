@@ -72,16 +72,7 @@ public struct NotchAssistantView: View {
         .onChange(of: model.highlightedTarget) { _, target in
             onHighlightChange(target)
         }
-        .onChange(of: model.pendingApproval?.id) { _, id in
-            if id != nil { expand() }
-        }
-        .onChange(of: model.pendingMemory?.id) { _, id in
-            if id != nil { expand() }
-        }
-        .onChange(of: model.pendingWorkflow?.id) { _, id in
-            if id != nil { expand() }
-        }
-        .onChange(of: model.pendingQuestion?.id) { _, id in
+        .onChange(of: model.pendingInteraction?.id) { _, id in
             if id != nil { expand() }
         }
         .accessibilityIdentifier("notch-assistant")
@@ -96,7 +87,7 @@ public struct NotchAssistantView: View {
                 Text(headerTitle)
                     .font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
-                if model.isRunInProgress {
+                if shouldShowHeaderProgress {
                     ProgressView()
                         .controlSize(.mini)
                         .tint(.white)
@@ -437,14 +428,17 @@ public struct NotchAssistantView: View {
 
     @ViewBuilder
     private var pendingInteraction: some View {
-        if let approval = model.pendingApproval {
-            approvalRow(approval)
-        } else if let question = model.pendingQuestion {
-            questionRow(question)
-        } else if let memory = model.pendingMemory {
-            memoryRow(memory)
-        } else if let workflow = model.pendingWorkflow {
-            workflowRow(workflow)
+        if let pendingInteraction = model.pendingInteraction {
+            switch pendingInteraction {
+            case .approval(let approval):
+                approvalRow(approval)
+            case .question(let question):
+                questionRow(question)
+            case .memory(let memory):
+                memoryRow(memory)
+            case .workflow(let workflow):
+                workflowRow(workflow)
+            }
         }
     }
 
@@ -456,10 +450,16 @@ public struct NotchAssistantView: View {
                 : "exclamationmark.triangle.fill")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(accent)
+            Text(approval.isDestructive
+                ? "Destructive action in \(approval.appName)"
+                : "\(approval.tier.capitalized) action in \(approval.appName)")
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.52))
             HStack {
+                Button("Stop", role: .destructive) { model.stop() }
                 Spacer()
-                Button("Skip") { model.resolveApproval(false) }
-                Button("Approve") { model.resolveApproval(true) }
+                Button("Don't Allow") { model.resolveApproval(false) }
+                Button("Allow") { model.resolveApproval(true) }
                     .buttonStyle(.borderedProminent)
             }
             .controlSize(.small)
@@ -479,6 +479,7 @@ public struct NotchAssistantView: View {
                     .padding(7)
                     .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
                     .onSubmit { model.resolveQuestion(model.questionAnswerText) }
+                Button("Stop", role: .destructive) { model.stop() }
                 Button("Skip") { model.resolveQuestion("") }
                 Button("Send") { model.resolveQuestion(model.questionAnswerText) }
                     .buttonStyle(.borderedProminent)
@@ -500,6 +501,7 @@ public struct NotchAssistantView: View {
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.purple)
                 Spacer()
+                Button("Stop", role: .destructive) { model.stop() }
                 Button("Skip") { model.resolveMemory(false) }
                 Button("Remember") { model.resolveMemory(true) }
                     .buttonStyle(.borderedProminent)
@@ -524,6 +526,7 @@ public struct NotchAssistantView: View {
                     .foregroundStyle(.white.opacity(0.45))
             }
             HStack {
+                Button("Stop", role: .destructive) { model.stop() }
                 Spacer()
                 Button("Skip") { model.resolveWorkflow(false) }
                 Button("Save") { model.resolveWorkflow(true) }
@@ -558,26 +561,28 @@ public struct NotchAssistantView: View {
 
     @ViewBuilder
     private var phaseLabel: some View {
+        let presentation = model.runPresentation
         switch model.phase {
         case .idle:
             EmptyView()
         case .running:
-            Label("Running", systemImage: "bolt.fill")
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.72))
+            if model.pendingInteraction == nil {
+                Label("Working", systemImage: presentation.systemImage)
+                    .font(.caption)
+                    .foregroundStyle(color(for: presentation.tone))
+            } else if let lineText = presentation.lineText {
+                Label(lineText, systemImage: presentation.systemImage)
+                    .font(.caption)
+                    .foregroundStyle(color(for: presentation.tone))
+            }
         case .stopping:
-            Label("Stopping", systemImage: "stop.circle.fill")
+            Label(presentation.lineText ?? "Stopping", systemImage: presentation.systemImage)
                 .font(.caption)
-                .foregroundStyle(.white.opacity(0.72))
-        case .finished(let summary):
-            Label(summary, systemImage: "checkmark.circle.fill")
+                .foregroundStyle(color(for: presentation.tone))
+        case .stopped, .finished, .failed:
+            Label(presentation.lineText ?? presentation.badgeText, systemImage: presentation.systemImage)
                 .font(.caption)
-                .foregroundStyle(.green)
-                .lineLimit(2)
-        case .failed(let reason):
-            Label(reason, systemImage: "xmark.circle.fill")
-                .font(.caption)
-                .foregroundStyle(.red)
+                .foregroundStyle(color(for: presentation.tone))
                 .lineLimit(2)
         }
     }
@@ -672,30 +677,35 @@ public struct NotchAssistantView: View {
     }
 
     private var glyphName: String {
-        switch model.phase {
-        case .idle: "sparkles"
-        case .running: "bolt.fill"
-        case .stopping: "stop.fill"
-        case .finished: "checkmark"
-        case .failed: "xmark"
-        }
+        model.runPresentation.systemImage
     }
 
     private var glyphColor: Color {
-        switch model.phase {
-        case .idle, .running, .stopping: .white
-        case .finished: .green
-        case .failed: .red
-        }
+        color(for: model.runPresentation.tone)
     }
 
     private var headerTitle: String {
+        model.runPresentation.headerText
+    }
+
+    private var shouldShowHeaderProgress: Bool {
         switch model.phase {
-        case .idle: "Autopilot"
-        case .running: "Working"
-        case .stopping: "Stopping"
-        case .finished: "Done"
-        case .failed: "Needs attention"
+        case .running:
+            return model.pendingInteraction == nil
+        case .stopping:
+            return true
+        case .idle, .stopped, .finished, .failed:
+            return false
+        }
+    }
+
+    private func color(for tone: AgentViewModel.PresentationTone) -> Color {
+        switch tone {
+        case .neutral: .white.opacity(0.65)
+        case .active: .white.opacity(0.9)
+        case .waiting: .orange
+        case .success: .green
+        case .danger: .red
         }
     }
 

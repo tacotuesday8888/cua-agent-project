@@ -258,8 +258,21 @@ These are manual app checks for the shared-state workflow milestone.
 
 - **Shared run state.** Start a safe one-app run from the Control Center, then
   open the compact assistant. Confirm both surfaces show the same target app,
-  phase, feed updates, pending approvals/questions/proposals, and stop state.
-  Answering or stopping from one surface should update the other.
+  phase, user-visible state label, feed updates, pending approvals/questions/
+  proposals, and stop state. Answering or stopping from one surface should
+  update the other because pending interactions are shared `AgentViewModel`
+  state, not separate Control Center and compact-assistant queues.
+- **User-visible state labels.** Exercise or simulate each user-visible state:
+  Ready before a prompt, Working during an active run, Waiting for You while an
+  approval/question/proposal is pending, Stopping immediately after Stop is
+  pressed, Done after a successful finish, Stopped after a cooperative stop, and
+  Needs attention after a permission, provider, or runtime error. Confirm the
+  Control Center and compact assistant use the same label for the same run.
+- **Stopped is not a failure.** Start a safe run, press Stop, and let the agent
+  wind down. Expected result: both surfaces show Stopping while the stop is in
+  progress, then Stopped after it completes; the history record stores
+  `RunStatus.stopped`, and the run is not presented as Needs attention or as an
+  error.
 - **Editable proposed workflow.** Run a repeatable safe task that causes the
   model to call `propose_workflow` (or use a local test provider/scenario that
   returns that tool call). In the Control Center, edit the proposed workflow

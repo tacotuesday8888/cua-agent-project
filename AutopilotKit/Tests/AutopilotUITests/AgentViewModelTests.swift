@@ -76,6 +76,64 @@ struct AgentViewModelTests {
         #expect(model.feed.last?.isError == true)
     }
 
+    @Test func stoppedEventAppearsInFeedWithoutError() {
+        let model = AgentViewModel()
+        model.ingestForTesting(.stopped)
+        #expect(model.feed.last?.text == "Stopped.")
+        #expect(model.feed.last?.isError == false)
+    }
+
+    @Test func stoppedPhaseUsesStoppedPresentation() {
+        let model = AgentViewModel()
+        model.phase = .stopped("Stopped.")
+        #expect(!model.isRunInProgress)
+        #expect(model.runPresentation.badgeText == "Stopped")
+        #expect(model.runPresentation.headerText == "Stopped")
+        #expect(model.runPresentation.lineText == "Stopped.")
+        #expect(model.runPresentation.systemImage == "stop.circle.fill")
+        #expect(model.runPresentation.tone == .neutral)
+    }
+
+    @Test func pendingInteractionPriorityMatchesSharedUISurfaces() {
+        let model = AgentViewModel()
+        model.pendingWorkflow = AgentViewModel.PendingWorkflow(
+            name: "Weekly report",
+            goalTemplate: "Email {{recipient}} the report",
+            recipe: "Open Compose first."
+        )
+        guard case .workflow = model.pendingInteraction else {
+            Issue.record("expected workflow when it is the only pending interaction")
+            return
+        }
+
+        model.pendingMemory = AgentViewModel.PendingMemory(
+            text: "Prefers dark mode",
+            scopeLabel: "Global"
+        )
+        guard case .memory = model.pendingInteraction else {
+            Issue.record("expected memory to outrank workflow")
+            return
+        }
+
+        model.pendingQuestion = AgentViewModel.PendingQuestion(text: "Which account?")
+        guard case .question = model.pendingInteraction else {
+            Issue.record("expected question to outrank memory")
+            return
+        }
+
+        model.pendingApproval = AgentViewModel.PendingApproval(
+            summary: "Delete file",
+            tier: "destructive",
+            isDestructive: true,
+            appName: "Finder"
+        )
+        guard case .approval = model.pendingInteraction else {
+            Issue.record("expected approval to outrank question")
+            return
+        }
+        #expect(model.pendingInteraction?.id == model.pendingInteraction?.id)
+    }
+
     @Test func askQuestionWaitsForResolvedAnswer() async {
         let model = AgentViewModel()
         let answerTask = Task { @MainActor in
@@ -92,6 +150,31 @@ struct AgentViewModelTests {
         #expect(answer == "Jazz")
         #expect(model.pendingQuestion == nil)
         #expect(model.questionAnswerText.isEmpty)
+    }
+
+    @Test func pendingInteractionPresentsQuestionWithStableID() async {
+        let model = AgentViewModel()
+        let answerTask = Task { @MainActor in
+            await model.askQuestion("Which playlist should I use?")
+        }
+
+        await waitUntil { model.pendingInteraction != nil }
+        guard case .question(let question) = model.pendingInteraction else {
+            Issue.record("expected pending question interaction")
+            model.stop()
+            _ = await answerTask.value
+            return
+        }
+        let id = model.pendingInteraction?.id
+        #expect(question.text == "Which playlist should I use?")
+        #expect(id == model.pendingInteraction?.id)
+        #expect(model.runPresentation.badgeText == "Waiting for You")
+        #expect(model.runPresentation.lineText == "Waiting for your answer")
+        #expect(model.runPresentation.systemImage == "questionmark.bubble.fill")
+        #expect(model.runPresentation.tone == .waiting)
+
+        model.resolveQuestion("Jazz")
+        _ = await answerTask.value
     }
 
     @Test func stopResumesPendingQuestionWithEmptyAnswer() async {
@@ -136,6 +219,32 @@ struct AgentViewModelTests {
         let approved = await approvalTask.value
         #expect(approved == true)
         #expect(model.pendingApproval == nil)
+    }
+
+    @Test func pendingInteractionPresentsApprovalWithStableID() async {
+        let model = AgentViewModel()
+        let approvalTask = Task { @MainActor in
+            await model.requestApproval(approvalRequest(tier: .destructive, summary: "Delete file"))
+        }
+
+        await waitUntil { model.pendingInteraction != nil }
+        guard case .approval(let approval) = model.pendingInteraction else {
+            Issue.record("expected pending approval interaction")
+            model.stop()
+            _ = await approvalTask.value
+            return
+        }
+        let id = model.pendingInteraction?.id
+        #expect(approval.summary == "Delete file")
+        #expect(approval.isDestructive)
+        #expect(id == model.pendingInteraction?.id)
+        #expect(model.runPresentation.badgeText == "Waiting for You")
+        #expect(model.runPresentation.lineText == "Waiting for destructive approval")
+        #expect(model.runPresentation.systemImage == "exclamationmark.octagon.fill")
+        #expect(model.runPresentation.tone == .danger)
+
+        model.resolveApproval(false)
+        _ = await approvalTask.value
     }
 
     @Test func requestApprovalResolvesDeclined() async {
@@ -187,6 +296,32 @@ struct AgentViewModelTests {
         let saved = await memoryTask.value
         #expect(saved == true)
         #expect(model.pendingMemory == nil)
+    }
+
+    @Test func pendingInteractionPresentsMemoryWithStableID() async {
+        let model = AgentViewModel()
+        let memoryTask = Task { @MainActor in
+            await model.confirmMemory(MemoryProposal(text: "Prefers dark mode", scope: .global))
+        }
+
+        await waitUntil { model.pendingInteraction != nil }
+        guard case .memory(let memory) = model.pendingInteraction else {
+            Issue.record("expected pending memory interaction")
+            model.stop()
+            _ = await memoryTask.value
+            return
+        }
+        let id = model.pendingInteraction?.id
+        #expect(memory.text == "Prefers dark mode")
+        #expect(memory.scopeLabel == "Global")
+        #expect(id == model.pendingInteraction?.id)
+        #expect(model.runPresentation.badgeText == "Waiting for You")
+        #expect(model.runPresentation.lineText == "Waiting for memory review")
+        #expect(model.runPresentation.systemImage == "brain")
+        #expect(model.runPresentation.tone == .waiting)
+
+        model.resolveMemory(false)
+        _ = await memoryTask.value
     }
 
     @Test func confirmMemoryResolvesDeclined() async {
@@ -610,6 +745,13 @@ struct AgentViewModelTests {
             UserDefaults.standard.removeObject(forKey: key)
         }
     }
+
+    private func waitUntil(_ condition: @MainActor () async -> Bool) async {
+        for _ in 0..<200 {
+            if await condition() { return }
+            try? await Task.sleep(nanoseconds: 2_000_000)
+        }
+    }
 }
 
 @MainActor
@@ -938,17 +1080,18 @@ struct AgentViewModelWorkflowTests {
 
         model.stop()
         await waitUntil {
-            guard case .failed(let reason) = model.phase else { return false }
+            guard case .stopped(let reason) = model.phase else { return false }
             return reason == "Stopped."
         }
 
-        guard case .failed(let reason) = model.phase else {
+        guard case .stopped(let reason) = model.phase else {
             Issue.record("expected stop to end workflow preflight")
             return
         }
         #expect(reason == "Stopped.")
+        #expect(!model.isRunInProgress)
         try? await Task.sleep(nanoseconds: 20_000_000)
-        guard case .failed(let finalReason) = model.phase else {
+        guard case .stopped(let finalReason) = model.phase else {
             Issue.record("expected stopped state to remain stable")
             return
         }
@@ -1045,7 +1188,7 @@ struct AgentViewModelWorkflowTests {
         probe.finish(AgentOutcome(status: .completed, summary: "Late success."))
 
         await waitUntil {
-            guard case .failed("Stopped.") = model.phase else { return false }
+            guard case .stopped("Stopped.") = model.phase else { return false }
             let records = await history.all()
             let stored = await store.get(id: workflow.id)
             return records.count == 1 && stored?.runCount == 1
@@ -1149,6 +1292,41 @@ struct AgentViewModelWorkflowTests {
         #expect(stored?.recipe == "Open Compose first.")
         #expect(stored?.variableNames == ["recipient"])
         #expect(stored?.source == .proposed)
+    }
+
+    @Test func pendingInteractionPresentsWorkflowWithStableID() async {
+        let (model, store) = makeModel()
+        model.selectedAppName = "Mail"
+        let task = Task { @MainActor in
+            await model.confirmWorkflow(WorkflowProposal(
+                name: "Weekly report",
+                goalTemplate: "Email {{recipient}} the report",
+                recipe: "Open Compose first."
+            ))
+        }
+
+        await waitUntil { model.pendingInteraction != nil }
+        guard case .workflow(let workflow) = model.pendingInteraction else {
+            Issue.record("expected pending workflow interaction")
+            model.stop()
+            _ = await task.value
+            return
+        }
+        let id = model.pendingInteraction?.id
+        #expect(workflow.name == "Weekly report")
+        #expect(workflow.goalTemplate == "Email {{recipient}} the report")
+        #expect(workflow.recipe == "Open Compose first.")
+        #expect(id == model.pendingInteraction?.id)
+        #expect(model.runPresentation.badgeText == "Waiting for You")
+        #expect(model.runPresentation.lineText == "Waiting for workflow review")
+        #expect(model.runPresentation.systemImage == "wand.and.stars")
+        #expect(model.runPresentation.tone == .waiting)
+
+        model.resolveWorkflow(false)
+        let saved = await task.value
+        #expect(saved == false)
+        #expect(model.pendingInteraction == nil)
+        #expect(await store.all().isEmpty)
     }
 
     @Test func editedPendingWorkflowProposalIsSavedFromDraftText() async {

@@ -170,20 +170,17 @@ struct ContentView: View {
 
     @ViewBuilder
     private var pendingInteractionView: some View {
-        if let approval = model.pendingApproval {
-            approvalRow(approval)
-        }
-
-        if let memory = model.pendingMemory {
-            memoryRow(memory)
-        }
-
-        if let workflow = model.pendingWorkflow {
-            workflowProposalRow(workflow)
-        }
-
-        if let question = model.pendingQuestion {
-            questionRow(question)
+        if let pendingInteraction = model.pendingInteraction {
+            switch pendingInteraction {
+            case .approval(let approval):
+                approvalRow(approval)
+            case .question(let question):
+                questionRow(question)
+            case .memory(let memory):
+                memoryRow(memory)
+            case .workflow(let workflow):
+                workflowProposalRow(workflow)
+            }
         }
     }
 
@@ -206,22 +203,20 @@ struct ContentView: View {
     }
 
     private var runStateText: String {
-        switch model.phase {
-        case .idle: "Ready"
-        case .running: "Running"
-        case .stopping: "Stopping"
-        case .finished: "Finished"
-        case .failed: "Needs attention"
-        }
+        model.runPresentation.badgeText
     }
 
     private var runStateColor: Color {
-        switch model.phase {
-        case .idle: .secondary
-        case .running: .blue
-        case .stopping: .orange
-        case .finished: .green
-        case .failed: .red
+        color(for: model.runPresentation.tone)
+    }
+
+    private func color(for tone: AgentViewModel.PresentationTone) -> Color {
+        switch tone {
+        case .neutral: .secondary
+        case .active: .blue
+        case .waiting: .orange
+        case .success: .green
+        case .danger: .red
         }
     }
 
@@ -503,7 +498,7 @@ struct ContentView: View {
         case .stopping:
             Button("Stopping…") {}
                 .disabled(true)
-        case .idle, .finished, .failed:
+        case .idle, .stopped, .finished, .failed:
             Button("Run") { model.submit() }
                 .disabled(model.promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
@@ -530,9 +525,10 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack {
+                Button("Stop run", role: .destructive) { model.stop() }
                 Spacer()
-                Button("Skip") { model.resolveApproval(false) }
-                Button("Approve") { model.resolveApproval(true) }
+                Button("Don't Allow") { model.resolveApproval(false) }
+                Button("Allow") { model.resolveApproval(true) }
                     .buttonStyle(.borderedProminent)
             }
         }
@@ -556,8 +552,9 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack {
+                Button("Stop run", role: .destructive) { model.stop() }
                 Spacer()
-                Button("Skip") { model.resolveMemory(false) }
+                Button("Skip and continue") { model.resolveMemory(false) }
                 Button("Remember") { model.resolveMemory(true) }
                     .buttonStyle(.borderedProminent)
             }
@@ -590,8 +587,9 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
             HStack {
+                Button("Stop run", role: .destructive) { model.stop() }
                 Spacer()
-                Button("Skip") { model.resolveWorkflow(false) }
+                Button("Skip and continue") { model.resolveWorkflow(false) }
                 Button("Save") { model.resolveWorkflow(true) }
                     .buttonStyle(.borderedProminent)
                     .disabled(!canSavePendingWorkflow)
@@ -610,7 +608,8 @@ struct ContentView: View {
                 TextField("Answer", text: $model.questionAnswerText)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { model.resolveQuestion(model.questionAnswerText) }
-                Button("Skip") { model.resolveQuestion("") }
+                Button("Stop run", role: .destructive) { model.stop() }
+                Button("Skip and continue") { model.resolveQuestion("") }
                 Button("Send") { model.resolveQuestion(model.questionAnswerText) }
                     .buttonStyle(.borderedProminent)
                     .disabled(model.questionAnswerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -622,30 +621,40 @@ struct ContentView: View {
 
     @ViewBuilder
     private var phaseLine: some View {
+        let presentation = model.runPresentation
         switch model.phase {
         case .idle:
             EmptyView()
         case .running:
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.small)
-                Text("Running…").foregroundStyle(.secondary)
+            if model.pendingInteraction == nil {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Working…").foregroundStyle(.secondary)
+                }
+            } else if let lineText = presentation.lineText {
+                Label(lineText, systemImage: presentation.systemImage)
+                    .foregroundStyle(color(for: presentation.tone))
             }
         case .stopping:
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
                 Text("Stopping…").foregroundStyle(.secondary)
             }
-        case .finished(let summary):
-            Label(summary, systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-        case .failed(let reason):
-            Label(reason, systemImage: "xmark.circle.fill")
-                .foregroundStyle(.red)
+        case .stopped:
+            if let lineText = presentation.lineText {
+                Label(lineText, systemImage: presentation.systemImage)
+                    .foregroundStyle(color(for: presentation.tone))
+            }
+        case .finished, .failed:
+            if let lineText = presentation.lineText {
+                Label(lineText, systemImage: presentation.systemImage)
+                    .foregroundStyle(color(for: presentation.tone))
+            }
         }
     }
 
     private var feedView: some View {
-        GroupBox("Live Run") {
+        GroupBox("Activity") {
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
                     if model.feed.isEmpty {
