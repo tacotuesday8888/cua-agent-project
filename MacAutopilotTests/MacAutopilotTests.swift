@@ -11,7 +11,7 @@ struct MacAutopilotTests {
     }
 
     @Test func contentViewAndNotchControllerAcceptSharedState() {
-        let model = AgentViewModel()
+        let model = makeModel()
         let auth = AuthModel()
         let subscriptionAuth = SubscriptionAccountAuthModel()
 
@@ -33,7 +33,7 @@ struct MacAutopilotTests {
             }
         }
 
-        let model = AgentViewModel()
+        let model = makeModel()
         #expect(model.phase == .idle)
         #expect(model.promptText.isEmpty)
         #expect(model.selectedProvider == .hosted)
@@ -44,7 +44,7 @@ struct MacAutopilotTests {
     }
 
     @Test func emptySubmitDoesNotStartRun() {
-        let model = AgentViewModel()
+        let model = makeModel()
         model.promptText = "   "
         model.submit()
         #expect(model.phase == .idle)
@@ -64,7 +64,7 @@ struct MacAutopilotTests {
             }
         }
 
-        let model = AgentViewModel()
+        let model = makeModel()
         model.selectedProvider = .openai
         model.apiKey = ""
         model.promptText = "Read the selected app"
@@ -75,6 +75,15 @@ struct MacAutopilotTests {
             return
         }
         #expect(reason.contains("API key"))
+    }
+
+    private func makeModel() -> AgentViewModel {
+        AgentViewModel(
+            apiKeyStorage: AgentViewModel.APIKeyStorage(
+                load: { _ in "" },
+                save: { _, _ in }
+            )
+        )
     }
 
 }

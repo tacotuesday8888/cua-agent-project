@@ -6,9 +6,14 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-test:
     runs-on: macos-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
@@ -18,13 +23,20 @@ jobs:
           xcodebuild -version
 
       - name: Swift package tests
+        timeout-minutes: 15
         run: swift test --package-path AutopilotKit
 
-      - name: macOS app build
+      - name: macOS app build for testing
+        timeout-minutes: 25
         run: xcodebuild build-for-testing -project MacAutopilot.xcodeproj -scheme MacAutopilot -destination 'platform=macOS' -derivedDataPath .build/xcode CODE_SIGNING_ALLOWED=NO
+
+      - name: macOS app tests
+        timeout-minutes: 8
+        run: xcodebuild test-without-building -project MacAutopilot.xcodeproj -scheme MacAutopilot -destination 'platform=macOS' -derivedDataPath .build/xcode CODE_SIGNING_ALLOWED=NO
 
   backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: backend

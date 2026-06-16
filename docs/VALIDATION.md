@@ -28,6 +28,37 @@ For local app launch verification, use the project run entrypoint:
 Expected result: the app builds into `.build/xcode`, launches as
 `MacAutopilot`, and the process is visible to `pgrep`.
 
+## Beta Validation Pack
+
+For beta readiness, use the committed validation entrypoint:
+
+```sh
+./script/validate_beta.sh
+```
+
+It runs Swift package tests, deterministic fixture driver validation, the
+scripted fixture agent loop, and every JSON scenario committed under
+`docs/validation/scenarios`. Reports, logs, JSON summaries, and trajectories are
+written to `.build/validation/beta-<timestamp>` by default; set
+`AUTOPILOT_VALIDATION_DIR=/path/to/report-dir` to choose a specific output
+directory. Custom directories inside the repo are rejected unless they live
+under `.build`, because these outputs may contain private UI or task text and
+must not be committed.
+
+Useful options:
+
+- `--skip-swift-tests` when the package tests already passed in the same build.
+- `--include-screenshot` to add the target-window screenshot smoke. Run this
+  serially because ScreenCaptureKit can hang when separate screenshot processes
+  overlap.
+- `--live-provider openai|anthropic` to add one real API-backed fixture smoke;
+  use `--api-key-env NAME`, `--model MODEL`, or `--max-steps N` when needed.
+
+Expected result: the script prints a PASS line for each step and ends with the
+report directory path. A failure prints the failing log path; set
+`AUTOPILOT_VALIDATION_PRINT_FAILURE_LOGS=1` only when you want to echo local
+private validation details in your terminal.
+
 ## Fixture Driver Validation
 
 Requires Accessibility permission for the fixture app and the smoke CLI process.
@@ -116,14 +147,37 @@ Run it with:
 
 ```sh
 swift run --package-path AutopilotKit AutopilotSmokeCLI \
-  --scenario scenario.json \
+  --scenario docs/validation/scenarios/fixture-scripted-agent-loop.json \
   --record-trajectory \
-  --report-json .build/validation/textedit-note-report.json
+  --report-json .build/validation/fixture-scripted-agent-loop-report.json
 ```
 
 The CLI writes `trace.jsonl` plus screenshot artifacts when screenshots are
 requested. The JSON report contains pass/fail checks for the scenario's expected
 status, visible text, tool usage, action failures, and window title.
+Committed scenarios live under `docs/validation/scenarios/` and are decoded by
+the Swift package test suite so invalid fixture shapes fail early.
+
+For a one-command local beta pack, run:
+
+```sh
+./script/validate_beta.sh
+```
+
+It runs Swift package tests, starts `AutopilotFixtureApp`, runs the deterministic
+driver smoke, runs the scripted one-app agent loop, executes committed scenarios,
+and writes logs, trajectories, and JSON reports under
+`.build/validation/beta-<timestamp>`. Add `--include-screenshot` when Screen
+Recording permission is available. Add `--live-provider openai|anthropic` only
+when the matching provider key is available through the environment or
+Mac Autopilot Keychain entry.
+
+Committed scenario fixtures live in `docs/validation/scenarios`. Each fixture
+file should be named `<scenario-id>.json`, decode as `AgentValidationScenario`,
+target a non-empty app/task, use a positive `maxSteps` when present, and include
+at least one expectation field. The package tests load these committed fixtures
+directly so malformed or accidentally empty scenarios fail before beta
+validation is run by hand.
 
 ## AI Access Validation
 
@@ -334,6 +388,7 @@ in System Settings → **Re-check permissions**.
 A release candidate must pass:
 
 - automated baseline
+- `./script/validate_beta.sh` fixture and scripted-scenario reports
 - fixture driver validation
 - one live smoke for each enabled provider
 - at least three safe real-app tasks
