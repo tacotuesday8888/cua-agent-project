@@ -1,12 +1,12 @@
 import type { ProxyUsage } from './types.js';
+import { HOSTED_BASIC_POLICY } from './hostedModel.js';
 
 /// Pure usage accounting — builds the metadata-only record we persist (never any
 /// prompt/response content) and estimates cost. Kept Firestore-free for testing.
 
 /** USD per 1M tokens, by model. Extend as providers/models are added. */
 const PRICE_PER_MTOK: Record<string, { input: number; output: number }> = {
-  'gpt-5.4': { input: 2.5, output: 15 },
-  'gpt-5.4-mini': { input: 0.75, output: 4.5 },
+  [HOSTED_BASIC_POLICY.model]: HOSTED_BASIC_POLICY.pricingUsdPerMillionTokens,
 };
 
 /// Tracks which unknown models we've already warned about, so adding a new

@@ -7,11 +7,33 @@ import { toGenkitMessages, fromGenkitResponse } from './translate.js';
 import { monthKey, isOverCap, DEFAULT_MONTHLY_REQUEST_CAP } from './quota.js';
 import { buildUsageRecord } from './usage.js';
 import { ProxyError, normalizeProviderError } from './errors.js';
-import { resolveHostedModel } from './hostedModel.js';
+import {
+  HOSTED_BASIC_MODEL,
+  hostedBasicGenerationConfig,
+  resolveHostedModel,
+} from './hostedModel.js';
 
 /// The OpenAI key is read from process.env.OPENAI_API_KEY, which the function's
 /// declared secret (see index.ts) populates at runtime.
 export const ai = genkit({ plugins: [openAI()] });
+
+type HostedDynamicTool = ReturnType<typeof ai.dynamicTool>;
+
+export function buildHostedGenerateRequest(
+  req: ProxyRequest,
+  dynamicTools: HostedDynamicTool[] = []
+) {
+  const model = resolveHostedModel(req.model);
+  return {
+    model: openAI.model(model),
+    system: req.system,
+    messages: toGenkitMessages(req),
+    tools: dynamicTools,
+    toolChoice: dynamicTools.length > 0 ? ('auto' as const) : undefined,
+    config: hostedBasicGenerationConfig(req.maxTokens),
+    returnToolRequests: true,
+  };
+}
 
 export const llmProxyFlow = ai.defineFlow(
   {
@@ -39,24 +61,17 @@ export const llmProxyFlow = ai.defineFlow(
       );
 
       const started = Date.now();
-      const model = resolveHostedModel(req.model);
+      const generateRequest = buildHostedGenerateRequest(req, dynamicTools);
       let response;
       try {
-        response = await ai.generate({
-          model: openAI.model(model),
-          system: req.system,
-          messages: toGenkitMessages(req),
-          tools: dynamicTools,
-          toolChoice: dynamicTools.length > 0 ? 'auto' : undefined,
-          returnToolRequests: true,
-        });
+        response = await ai.generate(generateRequest);
       } catch (err) {
         throw normalizeProviderError(err);
       }
       const latencyMs = Date.now() - started;
 
       const out = fromGenkitResponse(response);
-      await recordUsage(uid, model, out.usage, latencyMs);
+      await recordUsage(uid, HOSTED_BASIC_MODEL, out.usage, latencyMs);
       return out;
     } catch (err) {
       throw toHttpsError(err);

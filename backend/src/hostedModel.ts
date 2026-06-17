@@ -1,8 +1,17 @@
 import { HttpsError } from 'firebase-functions/https';
 
-export const HOSTED_BASIC_MODEL = 'gpt-5.4-mini';
+export const HOSTED_BASIC_POLICY = {
+  productName: 'Mac Autopilot Basic',
+  model: 'gpt-5.4-mini',
+  aliases: ['automatic', 'gpt-5.4'],
+  maxOutputTokens: 4096,
+  monthlyRequestCap: 1000,
+  pricingUsdPerMillionTokens: { input: 0.75, output: 4.5 },
+} as const;
 
-const LEGACY_HOSTED_MODEL_ALIASES = new Set(['automatic', 'gpt-5.4']);
+export const HOSTED_BASIC_MODEL = HOSTED_BASIC_POLICY.model;
+
+const LEGACY_HOSTED_MODEL_ALIASES = new Set<string>(HOSTED_BASIC_POLICY.aliases);
 
 export function resolveHostedModel(requestedModel: string): string {
   const model = requestedModel.trim();
@@ -13,4 +22,28 @@ export function resolveHostedModel(requestedModel: string): string {
     'invalid-argument',
     `Mac Autopilot Basic currently runs ${HOSTED_BASIC_MODEL}.`
   );
+}
+
+export function resolveHostedMaxOutputTokens(requestedMaxTokens?: number): number {
+  if (requestedMaxTokens === undefined) {
+    return HOSTED_BASIC_POLICY.maxOutputTokens;
+  }
+
+  const wholeTokens = Math.trunc(requestedMaxTokens);
+  return Math.min(Math.max(wholeTokens, 1), HOSTED_BASIC_POLICY.maxOutputTokens);
+}
+
+export interface HostedBasicGenerationConfig {
+  maxOutputTokens: number;
+  max_completion_tokens: number;
+}
+
+export function hostedBasicGenerationConfig(
+  requestedMaxTokens?: number
+): HostedBasicGenerationConfig {
+  const maxOutputTokens = resolveHostedMaxOutputTokens(requestedMaxTokens);
+  return {
+    maxOutputTokens,
+    max_completion_tokens: maxOutputTokens,
+  };
 }

@@ -200,7 +200,9 @@ Do not commit keys, OAuth tokens, Firebase ID tokens, or provider responses.
   the UI reports a signed-in Basic account, then run a fixture task through the
   hosted path. Expected result: the app sends a Firebase-authenticated callable
   request to `llmProxy`, the backend resolves the model to `gpt-5.4-mini`, and
-  Firestore receives only usage metadata.
+  Firestore receives only usage metadata. Backend unit tests should also confirm
+  the Basic policy rejects arbitrary hosted model ids and clamps response tokens
+  before the model call.
 - **BYOK OpenAI / Anthropic.** Use a saved Keychain key from the app or a
   process-local environment key for smoke validation:
   ```sh

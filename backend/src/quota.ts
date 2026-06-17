@@ -1,7 +1,8 @@
 /// Pure usage-cap logic, kept free of Firestore so it can be unit-tested.
+import { HOSTED_BASIC_POLICY } from './hostedModel.js';
 
-/** Default per-user monthly request cap for the hosted free tier. */
-export const DEFAULT_MONTHLY_REQUEST_CAP = 1000;
+/** Default per-user monthly request cap for Mac Autopilot Basic. */
+export const DEFAULT_MONTHLY_REQUEST_CAP = HOSTED_BASIC_POLICY.monthlyRequestCap;
 
 /** A stable "YYYY-MM" key (UTC) used to bucket monthly usage. */
 export function monthKey(date: Date = new Date()): string {
