@@ -6,9 +6,10 @@ keys never live in the client and usage can be metered.
 
 - **Runtime:** Firebase Cloud Functions (2nd gen), Node 22.
 - **Orchestration:** Genkit — one flow (`llmProxyFlow`) wrapped in `onCallGenkit`.
-- **Model:** OpenAI GPT‑5.4 Mini via `@genkit-ai/compat-oai`. The backend
-  resolves Mac Autopilot Basic requests to `gpt-5.4-mini`; legacy hosted aliases
-  such as `automatic` are accepted only as aliases for that model.
+- **Basic policy:** the backend owns the Mac Autopilot Basic plan: it resolves
+  hosted requests to `gpt-5.4-mini`, accepts only legacy aliases such as
+  `automatic`, clamps client-requested output tokens to 4096, applies a
+  1000-request monthly cap, and uses the Basic pricing label for usage metadata.
 - **Auth:** the `onCallGenkit` auth policy requires a signed-in Firebase user, so
   an unauthenticated caller can never reach the model or the key.
 - **Tools:** the model **returns** tool calls (`returnToolRequests: true`) for the
@@ -23,8 +24,11 @@ OpenAI-compatible endpoint.
 ## Layout
 
 - `src/index.ts` — the `llmProxy` callable function (`onCallGenkit`, secret, auth).
-- `src/flow.ts` — the Genkit flow: quota check → `ai.generate` → usage record.
+- `src/flow.ts` — the Genkit flow: quota check → Basic policy config →
+  `ai.generate` → usage record.
 - `src/translate.ts` — neutral request/response ⇆ Genkit (pure, unit-tested).
+- `src/hostedModel.ts` — Basic model aliases, output-token cap, quota, and
+  pricing label.
 - `src/quota.ts`, `src/usage.ts`, `src/errors.ts` — pure logic (unit-tested).
 - `src/types.ts` — the neutral wire contract shared with the client.
 
@@ -76,3 +80,10 @@ then `npx genkit start` or the Firebase emulators.
 The macOS client's `HostedProvider`
 ([`AutopilotKit/Sources/AutopilotLLM/HostedProvider.swift`](../AutopilotKit/Sources/AutopilotLLM/HostedProvider.swift))
 calls `llmProxy` with the signed-in user's Firebase ID token.
+
+`llmProxy` treats the client request as untrusted policy input. A client may
+send a preferred model or `maxTokens`, but Basic always resolves to
+`gpt-5.4-mini` and clamps generation length before calling Genkit. The flow
+passes Genkit's `maxOutputTokens` to preserve the framework-level intent and
+OpenAI's `max_completion_tokens` passthrough field so the installed
+compatibility adapter sends the same server-owned cap to Chat Completions.

@@ -85,10 +85,15 @@ The user-facing access modes are **Mac Autopilot Basic** (app-managed),
 can delegate auth to a provider-supported account path. **Mac Autopilot Basic**
 is the default product path: it routes `gpt-5.4-mini` through the project's
 authenticated backend, so the user signs in instead of choosing a vendor or
-pasting a key. BYOK includes first-class OpenAI and Anthropic entries plus a
-configurable **OpenAI-compatible endpoint** for routers and local servers such as
-OpenRouter, Gemini, LiteLLM, Groq, Together, Fireworks, DeepSeek-compatible
-gateways, Qwen/GLM-compatible gateways, and Ollama-compatible local endpoints.
+pasting a key. The backend owns the Basic plan policy: arbitrary hosted model
+ids are rejected, legacy hosted aliases resolve to the Basic model, response
+tokens are capped server-side, and quota/pricing labels come from the same
+policy object used by usage accounting.
+
+BYOK includes first-class OpenAI and Anthropic entries plus a configurable
+**OpenAI-compatible endpoint** for routers and local servers such as OpenRouter,
+Gemini, LiteLLM, Groq, Together, Fireworks, DeepSeek-compatible gateways,
+Qwen/GLM-compatible gateways, and Ollama-compatible local endpoints.
 Existing account access is selectable but deliberately separated from BYOK:
 
 - The Control Center and compact assistant both surface the selected access

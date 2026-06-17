@@ -148,7 +148,9 @@ The primary app window is the **Control Center**. It defaults to **Mac Autopilot
 Basic**, the app-managed hosted path: the user signs in with Google, the app gets
 a short-lived Firebase token, and the backend routes the request through
 `llmProxy` to `gpt-5.4-mini`. The hosted OpenAI key stays in Cloud Secret
-Manager, never in the Mac app.
+Manager, never in the Mac app. The backend owns the Basic policy, including the
+allowed model, usage pricing label, monthly request cap, and response-token cap;
+the Mac app can request a shorter response but cannot raise those limits.
 
 Advanced users can choose **Bring Your Own Key** for OpenAI, Anthropic, or an
 OpenAI-compatible Chat Completions endpoint. BYOK secrets stay in Keychain.
