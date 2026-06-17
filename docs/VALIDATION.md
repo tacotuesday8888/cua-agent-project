@@ -154,7 +154,8 @@ swift run --package-path AutopilotKit AutopilotSmokeCLI \
 
 The CLI writes `trace.jsonl` plus screenshot artifacts when screenshots are
 requested. The JSON report contains pass/fail checks for the scenario's expected
-status, visible text, tool usage, action failures, and window title.
+status, visible text, tool usage, action failures, window title, approval
+requests by risk tier, and attempted actions by risk tier.
 Committed scenarios live under `docs/validation/scenarios/` and are decoded by
 the Swift package test suite so invalid fixture shapes fail early.
 
@@ -172,12 +173,24 @@ Recording permission is available. Add `--live-provider openai|anthropic` only
 when the matching provider key is available through the environment or
 Mac Autopilot Keychain entry.
 
+The committed approval-gate scenario is deterministic and headless: it resets
+the fixture input as setup, writes to the fixture once, confirms session write
+trust skips the next write-classified action, then overwrites the field to
+confirm destructive actions still request approval. `AutomaticApproval` answers
+the prompts, but the scenario asserts the approval events were still emitted
+before the answer.
+
 Committed scenario fixtures live in `docs/validation/scenarios`. Each fixture
 file should be named `<scenario-id>.json`, decode as `AgentValidationScenario`,
 target a non-empty app/task, use a positive `maxSteps` when present, and include
 at least one expectation field. The package tests load these committed fixtures
 directly so malformed or accidentally empty scenarios fail before beta
 validation is run by hand.
+
+Use `approvalRequestsByTier` and `actionsByRiskTier` for safety-policy checks.
+Keys must be `safe`, `write`, or `destructive`; each value is an exact expected
+count. Omitted tiers are ignored, so include a tier with `0` when the scenario
+must prove it never happened.
 
 ## AI Access Validation
 
@@ -394,8 +407,10 @@ in System Settings → **Re-check permissions**.
 A release candidate must pass:
 
 - automated baseline
-- `./script/validate_beta.sh` fixture and scripted-scenario reports
+- `./script/validate_beta.sh` fixture, scripted-scenario, and approval-gate
+  reports
 - fixture driver validation
 - one live smoke for each enabled provider
 - at least three safe real-app tasks
-- manual approval test for one write action and one destructive action
+- manual visible-UI approval test for one write action and one destructive
+  action

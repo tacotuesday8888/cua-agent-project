@@ -38,19 +38,25 @@ public struct AgentValidationExpectations: Codable, Equatable, Sendable {
     public var toolUsed: String?
     public var noActionFailures: Bool?
     public var windowTitleContainsText: String?
+    public var approvalRequestsByTier: [String: Int]?
+    public var actionsByRiskTier: [String: Int]?
 
     public init(
         finalStatus: String? = nil,
         stateContainsText: String? = nil,
         toolUsed: String? = nil,
         noActionFailures: Bool? = nil,
-        windowTitleContainsText: String? = nil
+        windowTitleContainsText: String? = nil,
+        approvalRequestsByTier: [String: Int]? = nil,
+        actionsByRiskTier: [String: Int]? = nil
     ) {
         self.finalStatus = finalStatus
         self.stateContainsText = stateContainsText
         self.toolUsed = toolUsed
         self.noActionFailures = noActionFailures
         self.windowTitleContainsText = windowTitleContainsText
+        self.approvalRequestsByTier = approvalRequestsByTier
+        self.actionsByRiskTier = actionsByRiskTier
     }
 }
 
@@ -149,6 +155,22 @@ public enum AgentValidationEvaluator {
             ))
         }
 
+        if let expected = expect.approvalRequestsByTier {
+            checks.append(tierCountCheck(
+                name: "approvalRequestsByTier",
+                expected: expected,
+                actual: approvalRequestCountsByTier(events)
+            ))
+        }
+
+        if let expected = expect.actionsByRiskTier {
+            checks.append(tierCountCheck(
+                name: "actionsByRiskTier",
+                expected: expected,
+                actual: actionCountsByTier(events)
+            ))
+        }
+
         return AgentValidationReport(scenarioID: scenario.id, checks: checks)
     }
 
@@ -158,5 +180,60 @@ public enum AgentValidationEvaluator {
         case .stopped: "stopped"
         case .failed: "failed"
         }
+    }
+
+    private static func approvalRequestCountsByTier(
+        _ events: [AgentEvent]
+    ) -> [String: Int] {
+        countTiers(events.compactMap { event in
+            if case .awaitingConfirmation(let request) = event {
+                return request.tier
+            }
+            return nil
+        })
+    }
+
+    private static func actionCountsByTier(_ events: [AgentEvent]) -> [String: Int] {
+        countTiers(events.compactMap { event in
+            if case .willPerform(_, _, let tier) = event {
+                return tier
+            }
+            return nil
+        })
+    }
+
+    private static func countTiers(_ tiers: [RiskLevel]) -> [String: Int] {
+        tiers.reduce(into: [:]) { counts, tier in
+            counts[tier.rawValue, default: 0] += 1
+        }
+    }
+
+    private static func tierCountCheck(
+        name: String,
+        expected: [String: Int],
+        actual: [String: Int]
+    ) -> AgentValidationCheck {
+        let invalidTiers = expected.keys.filter { RiskLevel(rawValue: $0) == nil }.sorted()
+        let mismatches = expected.keys.sorted().compactMap { tier -> String? in
+            guard RiskLevel(rawValue: tier) != nil else { return nil }
+            let expectedCount = expected[tier] ?? 0
+            let actualCount = actual[tier] ?? 0
+            guard expectedCount == actualCount else {
+                return "\(tier) expected \(expectedCount), got \(actualCount)"
+            }
+            return nil
+        }
+        let passed = invalidTiers.isEmpty && mismatches.isEmpty
+        let detail: String
+        if !invalidTiers.isEmpty {
+            detail = "unknown tier(s): \(invalidTiers.joined(separator: ", "))"
+        } else if mismatches.isEmpty {
+            detail = expected.keys.sorted()
+                .map { "\($0)=\(actual[$0] ?? 0)" }
+                .joined(separator: ", ")
+        } else {
+            detail = mismatches.joined(separator: "; ")
+        }
+        return AgentValidationCheck(name: name, passed: passed, detail: detail)
     }
 }

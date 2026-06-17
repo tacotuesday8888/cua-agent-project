@@ -1,0 +1,23 @@
+{
+  "id": "fixture-approval-gate",
+  "app": "AutopilotFixtureApp",
+  "task": "Exercise the fixture app approval gate: write once, use session trust for a second write action, then require destructive approval for an overwrite.",
+  "provider": "scripted-approval-gate",
+  "maxSteps": 8,
+  "includeScreenshot": false,
+  "expect": {
+    "finalStatus": "completed",
+    "stateContainsText": "approval gate overwrite",
+    "toolUsed": "set_value",
+    "noActionFailures": true,
+    "windowTitleContainsText": "Autopilot Fixture",
+    "approvalRequestsByTier": {
+      "write": 1,
+      "destructive": 1
+    },
+    "actionsByRiskTier": {
+      "write": 2,
+      "destructive": 1
+    }
+  }
+}

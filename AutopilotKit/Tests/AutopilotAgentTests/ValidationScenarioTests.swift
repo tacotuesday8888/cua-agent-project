@@ -18,7 +18,15 @@ struct AgentValidationScenarioTests {
             "stateContainsText": "hello",
             "toolUsed": "type_text",
             "noActionFailures": true,
-            "windowTitleContainsText": "Untitled"
+            "windowTitleContainsText": "Untitled",
+            "approvalRequestsByTier": {
+              "write": 1,
+              "destructive": 1
+            },
+            "actionsByRiskTier": {
+              "write": 2,
+              "destructive": 1
+            }
           }
         }
         """
@@ -33,6 +41,29 @@ struct AgentValidationScenarioTests {
         #expect(scenario.maxSteps == 8)
         #expect(scenario.includeScreenshot == true)
         #expect(scenario.expect.stateContainsText == "hello")
+        #expect(scenario.expect.approvalRequestsByTier == ["write": 1, "destructive": 1])
+        #expect(scenario.expect.actionsByRiskTier == ["write": 2, "destructive": 1])
+    }
+
+    @Test func decodesLegacyScenarioWithoutApprovalExpectations() throws {
+        let json = """
+        {
+          "id": "legacy-fixture",
+          "app": "AutopilotFixtureApp",
+          "task": "Exercise fixture",
+          "expect": {
+            "finalStatus": "completed"
+          }
+        }
+        """
+
+        let scenario = try JSONDecoder().decode(
+            AgentValidationScenario.self,
+            from: Data(json.utf8)
+        )
+
+        #expect(scenario.expect.approvalRequestsByTier == nil)
+        #expect(scenario.expect.actionsByRiskTier == nil)
     }
 
     @Test func committedScenarioFixturesDecodeAndHaveRunnableShape() throws {
@@ -101,6 +132,54 @@ struct AgentValidationScenarioTests {
         #expect(report.checks.allSatisfy { $0.passed })
     }
 
+    @Test func evaluatorReportsPassingRiskAndApprovalTierCounts() {
+        let scenario = AgentValidationScenario(
+            id: "approval-gate",
+            app: "Fixture",
+            task: "Exercise approvals",
+            expect: AgentValidationExpectations(
+                finalStatus: "completed",
+                approvalRequestsByTier: [
+                    "write": 1,
+                    "destructive": 1
+                ],
+                actionsByRiskTier: [
+                    "write": 2,
+                    "destructive": 1
+                ]
+            )
+        )
+        let target = ActionTarget(appName: "Fixture", description: "Set field")
+        let report = AgentValidationEvaluator.evaluate(
+            scenario: scenario,
+            outcome: AgentOutcome(status: .completed, summary: "Done."),
+            events: [
+                .willPerform(tool: .setValue, target: target, tier: .write),
+                .awaitingConfirmation(ApprovalRequest(
+                    appName: "Fixture",
+                    tier: .write,
+                    target: target,
+                    summary: "Set field"
+                )),
+                .performed(tool: .setValue, summary: "Set field"),
+                .willPerform(tool: .click, target: target, tier: .write),
+                .performed(tool: .click, summary: "Click Run"),
+                .willPerform(tool: .setValue, target: target, tier: .destructive),
+                .awaitingConfirmation(ApprovalRequest(
+                    appName: "Fixture",
+                    tier: .destructive,
+                    target: target,
+                    summary: "Overwrite field"
+                ))
+            ],
+            finalSnapshot: nil
+        )
+
+        #expect(report.passed)
+        #expect(report.checks.count == 3)
+        #expect(report.checks.allSatisfy { $0.passed })
+    }
+
     @Test func evaluatorReportsFailedChecks() {
         let scenario = AgentValidationScenario(
             id: "fixture",
@@ -130,6 +209,64 @@ struct AgentValidationScenarioTests {
 
         #expect(!report.passed)
         #expect(report.checks.filter { !$0.passed }.count == 5)
+    }
+
+    @Test func evaluatorReportsFailedRiskAndApprovalTierCounts() {
+        let scenario = AgentValidationScenario(
+            id: "approval-gate",
+            app: "Fixture",
+            task: "Exercise approvals",
+            expect: AgentValidationExpectations(
+                approvalRequestsByTier: ["write": 1, "destructive": 0],
+                actionsByRiskTier: ["write": 2, "destructive": 0]
+            )
+        )
+        let target = ActionTarget(appName: "Fixture", description: "Delete draft")
+        let report = AgentValidationEvaluator.evaluate(
+            scenario: scenario,
+            outcome: AgentOutcome(status: .completed, summary: "Done."),
+            events: [
+                .willPerform(tool: .setValue, target: target, tier: .write),
+                .awaitingConfirmation(ApprovalRequest(
+                    appName: "Fixture",
+                    tier: .write,
+                    target: target,
+                    summary: "Set field"
+                )),
+                .willPerform(tool: .click, target: target, tier: .destructive),
+                .awaitingConfirmation(ApprovalRequest(
+                    appName: "Fixture",
+                    tier: .destructive,
+                    target: target,
+                    summary: "Delete draft"
+                ))
+            ],
+            finalSnapshot: nil
+        )
+
+        #expect(!report.passed)
+        #expect(report.checks.filter { !$0.passed }.count == 2)
+    }
+
+    @Test func evaluatorFailsUnknownRiskTierExpectation() {
+        let scenario = AgentValidationScenario(
+            id: "approval-gate",
+            app: "Fixture",
+            task: "Exercise approvals",
+            expect: AgentValidationExpectations(
+                approvalRequestsByTier: ["destuctive": 1]
+            )
+        )
+        let report = AgentValidationEvaluator.evaluate(
+            scenario: scenario,
+            outcome: AgentOutcome(status: .completed, summary: "Done."),
+            events: [],
+            finalSnapshot: nil
+        )
+
+        #expect(!report.passed)
+        #expect(report.checks.first?.name == "approvalRequestsByTier")
+        #expect(report.checks.first?.detail.contains("unknown tier") == true)
     }
 
     private func snapshot(
@@ -168,6 +305,8 @@ private extension AgentValidationExpectations {
             || toolUsed != nil
             || noActionFailures != nil
             || windowTitleContainsText != nil
+            || approvalRequestsByTier?.isEmpty == false
+            || actionsByRiskTier?.isEmpty == false
     }
 }
 

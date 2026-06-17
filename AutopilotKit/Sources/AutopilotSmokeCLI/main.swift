@@ -335,6 +335,21 @@ struct AutopilotSmokeCLI {
                 fputs("Could not resolve scripted fixture scenario: \(error.localizedDescription)\n", stderr)
                 return false
             }
+        } else if providerName == "scripted-approval-gate" {
+            do {
+                let state = try await computer.getAppState(includeScreenshot: false)
+                let plan = try ComputerUseSmokePlan.autopilotFixturePlan(for: state.snapshot)
+                try await resetApprovalGateFixtureInput(computer: computer, plan: plan)
+                let resetState = try await computer.getAppState(includeScreenshot: false)
+                let resetPlan = try ComputerUseSmokePlan.autopilotFixturePlan(for: resetState.snapshot)
+                llm = ScriptedLLMProvider(approvalGateResponses(plan: resetPlan))
+                model = "scripted-approval-gate"
+                supportsImageInput = true
+            } catch {
+                fflush(stdout)
+                fputs("Could not resolve scripted approval-gate scenario: \(error.localizedDescription)\n", stderr)
+                return false
+            }
         } else if let provider = LiveProvider(rawValue: providerName) {
             let apiKeyEnvironment = value(after: "--api-key-env", in: arguments)
                 ?? provider.defaultAPIKeyEnvironment
@@ -355,7 +370,7 @@ struct AutopilotSmokeCLI {
             supportsImageInput = provider.descriptor.supportsImageInput
         } else {
             fflush(stdout)
-            fputs("Invalid scenario provider '\(providerName)'. Use scripted-fixture, openai, or anthropic.\n", stderr)
+            fputs("Invalid scenario provider '\(providerName)'. Use scripted-fixture, scripted-approval-gate, openai, or anthropic.\n", stderr)
             return false
         }
 
@@ -474,6 +489,44 @@ struct AutopilotSmokeCLI {
                 input: ["summary": "Agent smoke loop completed."]
             )
         ]
+    }
+
+    private static func approvalGateResponses(plan: ComputerUseSmokePlan) -> [LLMResponse] {
+        [
+            toolResponse(
+                id: "approval-1",
+                tool: .setValue,
+                input: [
+                    "element_index": .int(plan.textElementIndex),
+                    "value": .string("approval gate seed")
+                ]
+            ),
+            toolResponse(
+                id: "approval-2",
+                tool: .click,
+                input: ["element_index": .int(plan.clickElementIndex)]
+            ),
+            toolResponse(
+                id: "approval-3",
+                tool: .setValue,
+                input: [
+                    "element_index": .int(plan.textElementIndex),
+                    "value": .string("approval gate overwrite")
+                ]
+            ),
+            toolResponse(
+                id: "approval-4",
+                tool: .done,
+                input: ["summary": "Approval gate smoke completed."]
+            )
+        ]
+    }
+
+    private static func resetApprovalGateFixtureInput(
+        computer: MacComputer,
+        plan: ComputerUseSmokePlan
+    ) async throws {
+        try await computer.setValue(elementID: "e\(plan.textElementIndex)", value: "")
     }
 
     private static func toolResponse(
@@ -645,6 +698,7 @@ struct AutopilotSmokeCLI {
         --dump-tree prints the accessibility tree the agent would see for any
         running app, after the readiness checks pass.
         --scenario runs a JSON validation scenario with pass/fail expectations.
+        Scenario providers: scripted-fixture, scripted-approval-gate, openai, anthropic.
         --record-trajectory writes an opt-in developer trace under DIR, or
         .build/trajectories when DIR is omitted.
 
