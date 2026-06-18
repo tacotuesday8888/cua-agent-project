@@ -13,6 +13,7 @@ Run the checks that match your change:
 swift test --package-path AutopilotKit
 xcodebuild -project MacAutopilot.xcodeproj -scheme MacAutopilot -destination 'platform=macOS' build CODE_SIGNING_ALLOWED=NO
 cd backend && npm run typecheck && npm test && npm run build
+cd backend && npm run test:rules:emulator # requires Java
 ```
 
 Run `./script/validate_beta.sh` when touching the agent loop, Accessibility

@@ -12,10 +12,16 @@ Run before every implementation batch:
 swift test --package-path AutopilotKit
 xcodebuild -project MacAutopilot.xcodeproj -scheme MacAutopilot -destination 'platform=macOS' -derivedDataPath .build/xcode build
 cd backend && npm run typecheck && npm test && npm run build
+cd backend && npm run test:rules:emulator
+./script/build_release_dmg.sh --dry-run
 ```
 
 Expected result: package tests pass, the app target builds, and backend
-TypeScript/tests/build pass. Local Xcode builds may require a valid Apple
+TypeScript/tests/build pass. The Firebase emulator rules test proves direct
+client Firestore, Realtime Database, and Storage reads/writes remain deny-all
+for authenticated and unauthenticated clients; it requires Java and uses the
+Firebase Emulator Suite. The release dry run verifies Developer ID DMG preflight
+settings without Apple credentials. Local Xcode builds may require a valid Apple
 Developer provisioning profile; for compile-only validation on a machine without
 that profile, run the same Xcode command with `CODE_SIGNING_ALLOWED=NO`.
 
@@ -199,10 +205,10 @@ Do not commit keys, OAuth tokens, Firebase ID tokens, or provider responses.
 - **Mac Autopilot Basic.** Sign in with Google from the Control Center, confirm
   the UI reports a signed-in Basic account, then run a fixture task through the
   hosted path. Expected result: the app sends a Firebase-authenticated callable
-  request to `llmProxy`, the backend resolves the model to `gpt-5.4-mini`, and
-  Firestore receives only usage metadata. Backend unit tests should also confirm
-  the Basic policy rejects arbitrary hosted model ids and clamps response tokens
-  before the model call.
+  request to `llmProxy`, the backend resolves the model to Vertex AI Gemini 3.5
+  Flash (`gemini-3.5-flash`), and Firestore receives only usage metadata.
+  Backend unit tests should also confirm the Basic policy rejects arbitrary
+  hosted model ids and clamps response tokens before the model call.
 - **BYOK OpenAI / Anthropic.** Use a saved Keychain key from the app or a
   process-local environment key for smoke validation:
   ```sh
@@ -379,7 +385,8 @@ Inspect Application Support after a run:
 - Provider API keys and OAuth credentials are in Keychain, not `UserDefaults`,
   local JSON, logs, or source files.
 - Firestore direct client rules remain deny-all unless a new architecture
-  decision explicitly changes them.
+  decision explicitly changes them. The automated check is
+  `cd backend && npm run test:rules:emulator`.
 
 ## Permission Checks
 
@@ -417,6 +424,8 @@ A release candidate must pass:
 
 - automated baseline
 - `./script/check_public_hygiene.sh`
+- `cd backend && npm run test:rules:emulator`
+- `./script/build_release_dmg.sh --dry-run`
 - `./script/validate_beta.sh` fixture, scripted-scenario, and approval-gate
   reports
 - fixture driver validation

@@ -22,6 +22,9 @@
 *.xcarchive
 *.xcresult
 *.dSYM/
+*.notarization-log
+*.notarytool-log
+*.notary.json
 
 # Swift / SwiftPM
 .build/

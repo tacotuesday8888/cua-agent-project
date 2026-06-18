@@ -49,8 +49,10 @@ single-app and one-run-at-a-time for the beta.
 `MacAutopilot/GoogleService-Info.plist` contains Firebase client identifiers for
 the macOS app. It is not a server secret and cannot authorize backend calls by
 itself; the hosted callable still requires Firebase Authentication and server
-secrets remain in Cloud Secret Manager. Public deployments should restrict the
-Firebase web/API key to the intended app and APIs in Google Cloud Console.
+authorization. Hosted Basic calls Vertex AI using the deployed function's Google
+Cloud service account rather than a client-side model key. Public deployments
+should restrict the Firebase web/API key to the intended app and APIs in Google
+Cloud Console.
 
 ## Contact
 

@@ -40,7 +40,7 @@ struct AgentViewModelTests {
         model.selectedProvider = .hosted
         #expect(model.selectedProviderAccessMode == .appManaged)
         #expect(model.selectedProvider.displayName == "Mac Autopilot Basic")
-        #expect(model.selectedModelName == "gpt-5.4-mini")
+        #expect(model.selectedModelName == "gemini-3.5-flash")
         #expect(model.availableModelDescriptors.map(\.identifier).contains(model.selectedModelName))
 
         model.selectedProvider = .openAICompatible
@@ -552,7 +552,7 @@ struct AgentViewModelTests {
         #expect(model.selectedProviderDescriptor.identifier == "hosted")
         #expect(model.selectedProvider.displayName == "Mac Autopilot Basic")
         #expect(model.selectedProviderAccessMode == .appManaged)
-        #expect(model.selectedModelName == "gpt-5.4-mini")
+        #expect(model.selectedModelName == "gemini-3.5-flash")
         #expect(model.selectedProviderDescriptor.supportsImageInput)
         #expect(model.selectedModelDescriptor.supportsImageInput)
         #expect(model.selectedProviderDescriptor.supportsToolCalls)

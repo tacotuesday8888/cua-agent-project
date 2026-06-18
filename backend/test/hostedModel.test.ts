@@ -10,19 +10,20 @@ import {
 describe('hosted model policy', () => {
   it('describes the Mac Autopilot Basic server-side policy in one place', () => {
     expect(HOSTED_BASIC_POLICY.productName).toBe('Mac Autopilot Basic');
-    expect(HOSTED_BASIC_POLICY.model).toBe('gpt-5.4-mini');
+    expect(HOSTED_BASIC_POLICY.model).toBe('gemini-3.5-flash');
     expect(HOSTED_BASIC_POLICY.maxOutputTokens).toBe(4096);
     expect(HOSTED_BASIC_POLICY.monthlyRequestCap).toBe(1000);
-    expect(HOSTED_BASIC_POLICY.pricingUsdPerMillionTokens).toEqual({ input: 0.75, output: 4.5 });
+    expect(HOSTED_BASIC_POLICY.pricingUsdPerMillionTokens).toEqual({ input: 1.5, output: 9.0 });
   });
 
-  it('uses gpt-5.4-mini for Mac Autopilot Basic', () => {
-    expect(HOSTED_BASIC_MODEL).toBe('gpt-5.4-mini');
-    expect(resolveHostedModel('gpt-5.4-mini')).toBe('gpt-5.4-mini');
+  it('uses Gemini 3.5 Flash for Mac Autopilot Basic', () => {
+    expect(HOSTED_BASIC_MODEL).toBe('gemini-3.5-flash');
+    expect(resolveHostedModel('gemini-3.5-flash')).toBe('gemini-3.5-flash');
   });
 
   it('maps legacy hosted automatic selections to the Basic model', () => {
     expect(resolveHostedModel('automatic')).toBe(HOSTED_BASIC_MODEL);
+    expect(resolveHostedModel('gpt-5.4-mini')).toBe(HOSTED_BASIC_MODEL);
     expect(resolveHostedModel('gpt-5.4')).toBe(HOSTED_BASIC_MODEL);
   });
 
@@ -38,10 +39,9 @@ describe('hosted model policy', () => {
     expect(resolveHostedMaxOutputTokens(32.8)).toBe(32);
   });
 
-  it('emits Genkit and OpenAI passthrough generation config for the Basic cap', () => {
+  it('emits Vertex/Gemini generation config for the Basic cap', () => {
     expect(hostedBasicGenerationConfig(999_999)).toEqual({
       maxOutputTokens: 4096,
-      max_completion_tokens: 4096,
     });
   });
 });

@@ -49,6 +49,9 @@ while IFS= read -r -d '' path; do
         *.app|*.app/*|*.dmg|*.pkg|*.ipa)
             fail "tracked release artifact: $path"
             ;;
+        *.notarization-log|*.notarytool-log|*.notary.json)
+            fail "tracked notarization log or history artifact: $path"
+            ;;
         node_modules/*|*/node_modules/*|backend/lib/*)
             fail "tracked generated dependency/build output: $path"
             ;;

@@ -150,10 +150,12 @@ swift run --package-path AutopilotKit AutopilotSmokeCLI --app Safari --dump-tree
 The primary app window is the **Control Center**. It defaults to **Mac Autopilot
 Basic**, the app-managed hosted path: the user signs in with Google, the app gets
 a short-lived Firebase token, and the backend routes the request through
-`llmProxy` to `gpt-5.4-mini`. The hosted OpenAI key stays in Cloud Secret
-Manager, never in the Mac app. The backend owns the Basic policy, including the
-allowed model, usage pricing label, monthly request cap, and response-token cap;
-the Mac app can request a shorter response but cannot raise those limits.
+`llmProxy` to Vertex AI Gemini 3.5 Flash (`gemini-3.5-flash`). Hosted Basic uses
+the Firebase Functions service account and Google Cloud ADC; no model-provider
+API key is shipped in the Mac app or mounted as a hosted provider secret. The
+backend owns the Basic policy, including the allowed model, usage pricing label,
+monthly request cap, and response-token cap; the Mac app can request a shorter
+response but cannot raise those limits.
 
 Advanced users can choose **Bring Your Own Key** for OpenAI, Anthropic, or an
 OpenAI-compatible Chat Completions endpoint. BYOK secrets stay in Keychain.
@@ -194,10 +196,10 @@ The smoke runner process needs Accessibility permission in System Settings >
 Privacy & Security > Accessibility. Add `--include-screenshot` to also require
 Screen Recording and validate target-window screenshot bytes.
 
-Provider capabilities are explicit in code: Mac Autopilot Basic, OpenAI
-GPT-5.4 Mini, and Anthropic Claude support image input. Existing subscription
-access is text-only in the direct OAuth providers, so screenshot fallback is
-disabled for those providers. The generic OpenAI-compatible path stores its
-endpoint/model settings locally and uses a user-controlled image capability
-toggle because router/local model capabilities vary. OpenAI caches repeated
-prompt prefixes automatically; Anthropic uses explicit prompt caching.
+Provider capabilities are explicit in code: Mac Autopilot Basic on Gemini 3.5
+Flash, BYOK OpenAI, and Anthropic Claude support image input. Existing
+subscription access is text-only in the direct OAuth providers, so screenshot
+fallback is disabled for those providers. The generic OpenAI-compatible path
+stores its endpoint/model settings locally and uses a user-controlled image
+capability toggle because router/local model capabilities vary. OpenAI caches
+repeated prompt prefixes automatically; Anthropic uses explicit prompt caching.
