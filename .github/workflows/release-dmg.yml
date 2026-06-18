@@ -2,6 +2,21 @@ name: Release DMG
 
 on:
   workflow_dispatch:
+    inputs:
+      create_github_release:
+        description: Create a draft GitHub Release with the notarized DMG.
+        required: true
+        type: boolean
+        default: false
+      release_tag:
+        description: Tag to create/use when creating a draft GitHub Release, for example v0.1.0-beta.1.
+        required: false
+        type: string
+      prerelease:
+        description: Mark the draft GitHub Release as a prerelease.
+        required: true
+        type: boolean
+        default: true
 
 concurrency:
   group: release-dmg-${{ github.ref }}
@@ -14,8 +29,12 @@ jobs:
   build-sign-notarize:
     runs-on: macos-latest
     timeout-minutes: 60
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Show toolchain
         run: |
@@ -29,7 +48,12 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APP_SPECIFIC_PASSWORD: ${{ secrets.APP_SPECIFIC_PASSWORD }}
+          CREATE_GITHUB_RELEASE: ${{ inputs.create_github_release }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+
           missing=0
           require_secret() {
             if [ -z "${!1:-}" ]; then
@@ -43,6 +67,35 @@ jobs:
           require_secret APPLE_TEAM_ID
           require_secret APPLE_ID
           require_secret APP_SPECIFIC_PASSWORD
+
+          if [ "$CREATE_GITHUB_RELEASE" = "true" ] && [ -z "$RELEASE_TAG" ]; then
+            echo "::error title=Missing release tag::release_tag is required when create_github_release is true"
+            missing=1
+          fi
+
+          resolve_release_tag_commit() {
+            local tag_ref tag_type tag_sha
+            tag_ref="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$1" --jq '.object.type + " " + .object.sha' 2>/dev/null || true)"
+            if [ -z "$tag_ref" ]; then
+              return 1
+            fi
+
+            tag_type="${tag_ref%% *}"
+            tag_sha="${tag_ref#* }"
+            if [ "$tag_type" = "tag" ]; then
+              tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_sha" --jq '.object.sha')"
+            fi
+
+            printf '%s\n' "$tag_sha"
+          }
+
+          if [ "$CREATE_GITHUB_RELEASE" = "true" ] && [ -n "$RELEASE_TAG" ]; then
+            existing_tag_sha="$(resolve_release_tag_commit "$RELEASE_TAG" || true)"
+            if [ -n "$existing_tag_sha" ] && [ "$existing_tag_sha" != "$GITHUB_SHA" ]; then
+              echo "::error title=Release tag points at another commit::$RELEASE_TAG resolves to $existing_tag_sha, but this workflow will build $GITHUB_SHA"
+              missing=1
+            fi
+          fi
 
           exit "$missing"
 
@@ -81,7 +134,7 @@ jobs:
       - name: Generate release checksums
         run: |
           test -f .build/release/MacAutopilot.dmg
-          shasum -a 256 .build/release/MacAutopilot.dmg | tee .build/release/MacAutopilot.dmg.sha256
+          (cd .build/release && shasum -a 256 MacAutopilot.dmg | tee MacAutopilot.dmg.sha256)
           ls -lh .build/release/MacAutopilot.dmg .build/release/MacAutopilot.dmg.sha256
 
       - uses: actions/upload-artifact@v6
@@ -97,3 +150,93 @@ jobs:
         if: always()
         run: |
           security delete-keychain "$RUNNER_TEMP/macautopilot-signing.keychain-db" >/dev/null 2>&1 || true
+
+  create-draft-release:
+    if: ${{ inputs.create_github_release == true }}
+    needs: build-sign-notarize
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: MacAutopilot-DMG-${{ github.sha }}
+          path: .build/release
+
+      - name: Verify release asset checksums
+        run: |
+          cd .build/release
+          shasum -a 256 -c MacAutopilot.dmg.sha256
+
+      - name: Create draft GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$RELEASE_TAG" ]; then
+            echo "::error title=Missing release tag::release_tag is required when create_github_release is true"
+            exit 1
+          fi
+
+          resolve_release_tag_commit() {
+            local tag_ref tag_type tag_sha
+            tag_ref="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$1" --jq '.object.type + " " + .object.sha' 2>/dev/null || true)"
+            if [ -z "$tag_ref" ]; then
+              return 1
+            fi
+
+            tag_type="${tag_ref%% *}"
+            tag_sha="${tag_ref#* }"
+            if [ "$tag_type" = "tag" ]; then
+              tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_sha" --jq '.object.sha')"
+            fi
+
+            printf '%s\n' "$tag_sha"
+          }
+
+          existing_tag_sha="$(resolve_release_tag_commit "$RELEASE_TAG" || true)"
+          if [ -n "$existing_tag_sha" ]; then
+            if [ "$existing_tag_sha" != "$GITHUB_SHA" ]; then
+              echo "::error title=Release tag points at another commit::$RELEASE_TAG resolves to $existing_tag_sha, but this workflow built $GITHUB_SHA"
+              exit 1
+            fi
+          fi
+
+          NOTES_FILE="$RUNNER_TEMP/release-notes.md"
+          cat > "$NOTES_FILE" <<EOF
+          Mac Autopilot direct-download DMG.
+
+          This draft release was created by the Release DMG workflow from commit $GITHUB_SHA after signing, notarization, stapling, and Gatekeeper verification completed.
+
+          Download both files:
+          - MacAutopilot.dmg
+          - MacAutopilot.dmg.sha256
+
+          Verify the download:
+
+              shasum -a 256 -c MacAutopilot.dmg.sha256
+
+          Before publishing, confirm the release notes, privacy/security copy, hosted Basic Firebase/Vertex configuration, and website/download page are ready.
+          EOF
+
+          args=(
+            "$RELEASE_TAG"
+            ".build/release/MacAutopilot.dmg#MacAutopilot.dmg"
+            ".build/release/MacAutopilot.dmg.sha256#MacAutopilot.dmg.sha256"
+            --draft
+            --target "$GITHUB_SHA"
+            --title "Mac Autopilot $RELEASE_TAG"
+            --notes-file "$NOTES_FILE"
+          )
+
+          if [ "$PRERELEASE" = "true" ]; then
+            args+=(--prerelease)
+          fi
+
+          gh release create "${args[@]}"
