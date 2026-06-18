@@ -1,5 +1,5 @@
 import { genkit, z } from 'genkit';
-import { openAI } from '@genkit-ai/compat-oai/openai';
+import { vertexAI } from '@genkit-ai/google-genai';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/https';
 import { ProxyRequestSchema, type ProxyRequest, type ProxyResponse, type ProxyUsage } from './types.js';
@@ -13,9 +13,14 @@ import {
   resolveHostedModel,
 } from './hostedModel.js';
 
-/// The OpenAI key is read from process.env.OPENAI_API_KEY, which the function's
-/// declared secret (see index.ts) populates at runtime.
-export const ai = genkit({ plugins: [openAI()] });
+const hostedBasicLocation =
+  process.env.VERTEX_AI_LOCATION || process.env.GCLOUD_LOCATION || 'global';
+
+/// Vertex AI uses Google Cloud Application Default Credentials. In Firebase
+/// Functions this means the runtime service account, with the Firebase project
+/// id supplied by the platform. Local live tests can use `gcloud auth
+/// application-default login` plus GCLOUD_PROJECT / VERTEX_AI_LOCATION.
+export const ai = genkit({ plugins: [vertexAI({ location: hostedBasicLocation })] });
 
 type HostedDynamicTool = ReturnType<typeof ai.dynamicTool>;
 
@@ -25,7 +30,7 @@ export function buildHostedGenerateRequest(
 ) {
   const model = resolveHostedModel(req.model);
   return {
-    model: openAI.model(model),
+    model: vertexAI.model(model),
     system: req.system,
     messages: toGenkitMessages(req),
     tools: dynamicTools,

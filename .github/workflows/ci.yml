@@ -46,6 +46,15 @@ jobs:
         timeout-minutes: 8
         run: xcodebuild test-without-building -project MacAutopilot.xcodeproj -scheme MacAutopilot -destination 'platform=macOS' -derivedDataPath .build/xcode CODE_SIGNING_ALLOWED=NO
 
+  release-dry-run:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Direct DMG release dry run
+        run: ./script/build_release_dmg.sh --dry-run
+
   backend:
     runs-on: ubuntu-latest
     timeout-minutes: 10

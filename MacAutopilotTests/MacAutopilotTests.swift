@@ -39,7 +39,7 @@ struct MacAutopilotTests {
         #expect(model.selectedProvider == .hosted)
         #expect(model.selectedProviderAccessMode == .appManaged)
         #expect(model.selectedProviderDescriptor.displayName == "Mac Autopilot Basic")
-        #expect(model.selectedModelDescriptor.identifier == "gpt-5.4-mini")
+        #expect(model.selectedModelDescriptor.identifier == "gemini-3.5-flash")
         #expect(model.selectedModelDescriptor.supportsImageInput)
     }
 

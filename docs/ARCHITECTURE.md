@@ -86,12 +86,12 @@ That product shape implies a few hard technical boundaries:
 The user-facing access modes are **Mac Autopilot Basic** (app-managed),
 **bring-your-own-key** providers, and **existing account access** where the app
 can delegate auth to a provider-supported account path. **Mac Autopilot Basic**
-is the default product path: it routes `gpt-5.4-mini` through the project's
-authenticated backend, so the user signs in instead of choosing a vendor or
-pasting a key. The backend owns the Basic plan policy: arbitrary hosted model
-ids are rejected, legacy hosted aliases resolve to the Basic model, response
-tokens are capped server-side, and quota/pricing labels come from the same
-policy object used by usage accounting.
+is the default product path: it routes Vertex AI Gemini 3.5 Flash
+(`gemini-3.5-flash`) through the project's authenticated backend, so the user
+signs in instead of choosing a vendor or pasting a key. The backend owns the
+Basic plan policy: arbitrary hosted model ids are rejected, legacy hosted
+aliases resolve to the Basic model, response tokens are capped server-side, and
+quota/pricing labels come from the same policy object used by usage accounting.
 
 BYOK includes first-class OpenAI and Anthropic entries plus a configurable
 **OpenAI-compatible endpoint** for routers and local servers such as OpenRouter,
@@ -116,9 +116,11 @@ run paths:
   used by Pi-like tools, again with app-owned Keychain storage and structured
   output into the same tool-call loop.
 
-- OpenAI / hosted: Chat Completions shape, function tools with
-  `tool_choice: auto`. BYOK uses `Authorization: Bearer <api-key>`; hosted sends
-  the signed-in account's Firebase ID token to the `llmProxy` backend.
+- Hosted Basic: Vertex AI Gemini through Genkit's Google GenAI plugin, with
+  function calling set to automatic when tools are present. Hosted sends the
+  signed-in account's Firebase ID token to the `llmProxy` backend.
+- OpenAI BYOK: Chat Completions shape, function tools with `tool_choice: auto`,
+  and `Authorization: Bearer <api-key>`.
 - OpenAI-compatible BYOK: user supplies the full Chat Completions URL, model id,
   optional API key, and image-input capability. The UI ships presets for
   OpenRouter, Gemini, Groq, Together AI, Fireworks AI, DeepSeek, Qwen/DashScope,
@@ -250,8 +252,8 @@ users who want direct provider control.
 What's shipped:
 
 - **`llmProxy`** — Firebase Functions 2nd gen, written with **Genkit** + the
-  `@genkit-ai/compat-oai` plugin, fronting **OpenAI GPT-5.4 Mini** for Mac
-  Autopilot Basic. Source lives under `backend/`.
+  `@genkit-ai/google-genai` plugin, fronting **Vertex AI Gemini 3.5 Flash** for
+  Mac Autopilot Basic. Source lives under `backend/`.
 - **Auth gate** — `onCallGenkit`'s `authPolicy` rejects anything without a
   signed-in Firebase user, so the function can't be invoked anonymously.
 - **Sign-in** — Firebase Authentication with the Google provider. The client
@@ -272,5 +274,6 @@ What's shipped:
   without linking Firebase into `AutopilotUI`.
 
 Security stays server-side: Firestore rules are deny-all (clients never read
-or write directly), the OpenAI key lives in **Cloud Secret Manager**, and the
-client-shipped `GoogleService-Info.plist` carries only client identifiers.
+or write directly), hosted Basic uses the Firebase Functions service account /
+Google Cloud ADC to call Vertex AI, and the client-shipped
+`GoogleService-Info.plist` carries only client identifiers.

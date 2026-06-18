@@ -11,7 +11,8 @@ Before publishing a build:
 - Apple Developer Team configured in Xcode.
 - Developer ID Application certificate available locally or in CI.
 - Hardened Runtime enabled for release signing.
-- App archive exported as a signed `.app` or `.dmg`.
+- App archive exported as a signed `.app`.
+- Release DMG created, signed, notarized, stapled, and Gatekeeper-checked.
 - Notarization submitted and stapled.
 - Privacy copy explains Accessibility, Screen Recording, local memory, local run
   history, hosted usage metadata, provider API-key handling, and subscription
@@ -20,6 +21,52 @@ Before publishing a build:
   and CI is green before publishing a public repo or public beta link.
 - `CONTRIBUTING.md`, `.github/pull_request_template.md`, `.github/dependabot.yml`,
   and `LICENSE` are present so public repo expectations are explicit.
+
+## DMG Release Script
+
+CI runs a credential-free release preflight:
+
+```sh
+./script/build_release_dmg.sh --dry-run
+```
+
+The dry run verifies the real Xcode Release settings: bundle id
+`com.langqi.MacAutopilot`, Hardened Runtime, wrapper name, and committed
+entitlements. It does not create archives or touch Apple credentials.
+
+For a real direct-download release, first create a notarytool profile locally:
+
+```sh
+xcrun notarytool store-credentials mac-autopilot-notary
+```
+
+Then run:
+
+```sh
+APPLE_TEAM_ID=TEAMID1234 \
+DEVELOPER_ID_APPLICATION="Developer ID Application: Your Name (TEAMID1234)" \
+NOTARYTOOL_PROFILE=mac-autopilot-notary \
+./script/build_release_dmg.sh
+```
+
+The script performs:
+
+1. `xcodebuild archive` with Developer ID signing.
+2. `xcodebuild -exportArchive` using generated `method=developer-id` export
+   options under `.build/release`.
+3. `codesign --verify --deep --strict --verbose=2` on the exported `.app`.
+4. `codesign -dvvv --entitlements :-` on the exported `.app`.
+5. `hdiutil create` for `MacAutopilot.dmg`.
+6. `codesign` on the DMG.
+7. `xcrun notarytool submit --wait`.
+8. `xcrun stapler staple` and `xcrun stapler validate`.
+9. `spctl -a -vv --type open` on the final DMG.
+
+If a Developer ID identity is present in Keychain, `DEVELOPER_ID_APPLICATION`
+can be omitted and the script will use the first `Developer ID Application`
+identity it finds. Notarization can also use `APPLE_ID`,
+`APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` instead of a keychain profile, but
+the keychain profile is the preferred local flow.
 
 Apple reference points:
 
@@ -35,6 +82,8 @@ Apple reference points:
   credentials.
 - Hardened Runtime is enabled in build settings, but local ad-hoc builds may
   disable it.
+- `script/build_release_dmg.sh --dry-run` validates the Release build settings
+  without requiring Developer ID credentials.
 - The app now has an asset catalog and `AppIcon` set.
 - CI builds and package tests do not run TCC-dependent smoke tests.
 

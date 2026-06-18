@@ -17,7 +17,7 @@ status; do not treat the notch as the differentiator.
 - Grant and re-check Accessibility and Screen Recording permissions.
 - Choose AI access:
   - **Mac Autopilot Basic**: default hosted AI, Google/Firebase sign-in,
-    backend `llmProxy`, `gpt-5.4-mini`, no local provider key.
+    backend `llmProxy`, Vertex AI Gemini 3.5 Flash, no local provider key.
   - **Bring Your Own Key**: OpenAI, Anthropic, or OpenAI-compatible Chat
     Completions endpoint. Keys stay in Keychain. Compatible endpoints need
     preset/custom URL, model id, optional API key, and image-capability toggle.

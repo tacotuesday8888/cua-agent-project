@@ -89,8 +89,8 @@ struct LLMProviderDescriptorTests {
         #expect(LLMProviderDescriptor.hosted.identifier == "hosted")
         #expect(LLMProviderDescriptor.hosted.displayName == "Mac Autopilot Basic")
         #expect(LLMProviderDescriptor.hosted.accessMode == .appManaged)
-        #expect(LLMProviderDescriptor.hosted.defaultModel == "gpt-5.4-mini")
-        #expect(LLMProviderDescriptor.hosted.defaultModelDescriptor.displayName == "GPT-5.4 Mini")
+        #expect(LLMProviderDescriptor.hosted.defaultModel == "gemini-3.5-flash")
+        #expect(LLMProviderDescriptor.hosted.defaultModelDescriptor.displayName == "Gemini 3.5 Flash")
         #expect(LLMProviderDescriptor.hosted.supportsToolCalls)
         #expect(LLMProviderDescriptor.hosted.supportsImageInput)
         #expect(LLMProviderDescriptor.hosted.apiKeyEnvironment.isEmpty)
@@ -1087,7 +1087,7 @@ struct HostedProviderTests {
 
         do {
             _ = try await makeProvider(token: nil)
-                .send(LLMRequest(model: "gpt-5.4", messages: [.user("hi")]))
+                .send(LLMRequest(model: "gemini-3.5-flash", messages: [.user("hi")]))
             Issue.record("expected a sign-in error")
         } catch {
             #expect(error as? LLMError == .service(message: "Sign in to use hosted AI."))
@@ -1106,7 +1106,7 @@ struct HostedProviderTests {
         defer { HostedStubURLProtocol.responder = nil }
 
         let response = try await makeProvider(token: "tok")
-            .send(LLMRequest(model: "gpt-5.4", messages: [.user("hi")]))
+            .send(LLMRequest(model: "gemini-3.5-flash", messages: [.user("hi")]))
         #expect(response.text == "Hi")
         #expect(response.stopReason == .toolUse)
         #expect(response.toolUses.first?.name == "done")
@@ -1129,7 +1129,7 @@ struct HostedProviderTests {
         }
 
         _ = try await makeProvider(token: "tok").send(
-            LLMRequest(model: "gpt-5.4", system: "sys", messages: [.user("hello")])
+            LLMRequest(model: "gemini-3.5-flash", system: "sys", messages: [.user("hello")])
         )
 
         let request = try #require(HostedStubURLProtocol.capturedRequest)
@@ -1138,7 +1138,7 @@ struct HostedProviderTests {
         let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
         let envelope = try #require(json)
         let data = try #require(envelope["data"] as? [String: Any])
-        #expect(data["model"] as? String == "gpt-5.4")
+        #expect(data["model"] as? String == "gemini-3.5-flash")
         #expect(data["system"] as? String == "sys")
         let messages = try #require(data["messages"] as? [[String: Any]])
         #expect(messages.first?["role"] as? String == "user")
@@ -1157,7 +1157,7 @@ struct HostedProviderTests {
         }
 
         _ = try await makeProvider(token: "tok").send(LLMRequest(
-            model: "gpt-5.4",
+            model: "gemini-3.5-flash",
             messages: [
                 LLMMessage(role: .assistant, content: [
                     .toolUse(ToolUse(id: "c1", name: "get_app_state", input: .object([:]))),
@@ -1205,7 +1205,7 @@ struct HostedProviderTests {
 
         do {
             _ = try await makeProvider(token: "tok", retryPolicy: RetryPolicy(maxRetries: 2, baseDelaySeconds: 0))
-                .send(LLMRequest(model: "gpt-5.4", messages: [.user("hi")]))
+                .send(LLMRequest(model: "gemini-3.5-flash", messages: [.user("hi")]))
             Issue.record("expected a service error")
         } catch {
             #expect(error as? LLMError == .service(message: "Monthly usage limit reached."))
@@ -1217,7 +1217,7 @@ struct HostedProviderTests {
         HostedStubURLProtocol.responder = nil // makes the stub fail the request
         do {
             _ = try await makeProvider(token: "tok", retryPolicy: RetryPolicy(maxRetries: 0, baseDelaySeconds: 0))
-                .send(LLMRequest(model: "gpt-5.4", messages: [.user("hi")]))
+                .send(LLMRequest(model: "gemini-3.5-flash", messages: [.user("hi")]))
             Issue.record("expected a network error")
         } catch {
             guard case LLMError.network = error else {

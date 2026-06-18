@@ -2,11 +2,11 @@ import { HttpsError } from 'firebase-functions/https';
 
 export const HOSTED_BASIC_POLICY = {
   productName: 'Mac Autopilot Basic',
-  model: 'gpt-5.4-mini',
-  aliases: ['automatic', 'gpt-5.4'],
+  model: 'gemini-3.5-flash',
+  aliases: ['automatic', 'gpt-5.4-mini', 'gpt-5.4'],
   maxOutputTokens: 4096,
   monthlyRequestCap: 1000,
-  pricingUsdPerMillionTokens: { input: 0.75, output: 4.5 },
+  pricingUsdPerMillionTokens: { input: 1.5, output: 9.0 },
 } as const;
 
 export const HOSTED_BASIC_MODEL = HOSTED_BASIC_POLICY.model;
@@ -35,7 +35,6 @@ export function resolveHostedMaxOutputTokens(requestedMaxTokens?: number): numbe
 
 export interface HostedBasicGenerationConfig {
   maxOutputTokens: number;
-  max_completion_tokens: number;
 }
 
 export function hostedBasicGenerationConfig(
@@ -44,6 +43,5 @@ export function hostedBasicGenerationConfig(
   const maxOutputTokens = resolveHostedMaxOutputTokens(requestedMaxTokens);
   return {
     maxOutputTokens,
-    max_completion_tokens: maxOutputTokens,
   };
 }

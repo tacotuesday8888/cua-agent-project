@@ -41,7 +41,7 @@ export const ToolDefSchema = z.object({
 });
 
 export const ProxyRequestSchema = z.object({
-  /** Logical model id, e.g. "gpt-5.4-mini". */
+  /** Logical hosted model id, e.g. "gemini-3.5-flash". */
   model: z.string(),
   system: z.string().optional(),
   messages: z.array(MessageSchema),

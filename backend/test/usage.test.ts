@@ -2,12 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { estimateCostUsd, buildUsageRecord } from '../src/usage.js';
 
 describe('usage', () => {
-  it('estimates Mac Autopilot Basic gpt-5.4-mini cost from token counts', () => {
-    // 1M input @ $0.75 + 1M output @ $4.50 = $5.25
+  it('estimates Mac Autopilot Basic Gemini 3.5 Flash cost from token counts', () => {
+    // 1M input @ $1.50 + 1M output @ $9.00 = $10.50.
     expect(
-      estimateCostUsd('gpt-5.4-mini', { inputTokens: 1_000_000, outputTokens: 1_000_000 })
-    ).toBeCloseTo(5.25, 6);
-    expect(estimateCostUsd('gpt-5.4-mini', { inputTokens: 0, outputTokens: 0 })).toBe(0);
+      estimateCostUsd('gemini-3.5-flash', { inputTokens: 1_000_000, outputTokens: 1_000_000 })
+    ).toBeCloseTo(10.5, 6);
+    expect(estimateCostUsd('gemini-3.5-flash', { inputTokens: 0, outputTokens: 0 })).toBe(0);
   });
 
   it('returns 0 for unknown models', () => {
@@ -18,7 +18,7 @@ describe('usage', () => {
     const at = new Date('2026-05-25T00:00:00Z');
     const rec = buildUsageRecord({
       uid: 'u1',
-      model: 'gpt-5.4-mini',
+      model: 'gemini-3.5-flash',
       usage: { inputTokens: 100, outputTokens: 50 },
       latencyMs: 1234,
       status: 'ok',
@@ -26,10 +26,10 @@ describe('usage', () => {
     });
     expect(rec).toEqual({
       uid: 'u1',
-      model: 'gpt-5.4-mini',
+      model: 'gemini-3.5-flash',
       inputTokens: 100,
       outputTokens: 50,
-      costUsd: estimateCostUsd('gpt-5.4-mini', { inputTokens: 100, outputTokens: 50 }),
+      costUsd: estimateCostUsd('gemini-3.5-flash', { inputTokens: 100, outputTokens: 50 }),
       latencyMs: 1234,
       status: 'ok',
       at: '2026-05-25T00:00:00.000Z',

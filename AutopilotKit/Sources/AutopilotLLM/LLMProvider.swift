@@ -197,14 +197,14 @@ public struct LLMProviderDescriptor: Sendable, Hashable, Codable {
         identifier: "hosted",
         displayName: "Mac Autopilot Basic",
         accessMode: .appManaged,
-        defaultModel: "gpt-5.4-mini",
+        defaultModel: "gemini-3.5-flash",
         supportsToolCalls: true,
         supportsImageInput: true,
         supportsPromptCaching: false,
         availableModels: [
             LLMModelDescriptor(
-                identifier: "gpt-5.4-mini",
-                displayName: "GPT-5.4 Mini",
+                identifier: "gemini-3.5-flash",
+                displayName: "Gemini 3.5 Flash",
                 supportsToolCalls: true,
                 supportsImageInput: true,
                 supportsPromptCaching: false
