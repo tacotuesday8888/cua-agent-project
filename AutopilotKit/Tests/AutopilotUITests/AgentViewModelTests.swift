@@ -94,6 +94,129 @@ struct AgentViewModelTests {
         #expect(model.runPresentation.tone == .neutral)
     }
 
+    @Test func runReadinessBlocksEmptyPrompt() {
+        let saved = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+        defer { Self.restoreProviderDefault(saved) }
+
+        let model = AgentViewModel()
+        configureReadyOpenAI(model)
+        model.selectedAppName = "Notes"
+        model.promptText = "  "
+
+        let readiness = model.runReadiness
+        #expect(!readiness.canRun)
+        #expect(readiness.title == "Add a goal")
+        #expect(readiness.items.first?.id == "goal")
+        #expect(readiness.items.first?.status == .blocked)
+    }
+
+    @Test func runReadinessAllowsExplicitMemoryWithoutPermissionsOrProvider() {
+        let saved = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+        defer { Self.restoreProviderDefault(saved) }
+
+        let model = AgentViewModel()
+        model.selectedProvider = .hosted
+        model.setPermissionsForTesting(accessibility: false, screenRecording: false)
+        model.selectedAppName = ""
+        model.promptText = "remember: I prefer dark mode"
+
+        let readiness = model.runReadiness
+        #expect(readiness.canRun)
+        #expect(readiness.title == "Ready to save memory")
+        #expect(readiness.items.contains { $0.id == "memory" && $0.status == .ready })
+    }
+
+    @Test func runReadinessBlocksMissingAccessibilityBeforeRun() {
+        let saved = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+        defer { Self.restoreProviderDefault(saved) }
+
+        let model = AgentViewModel()
+        configureReadyOpenAI(model)
+        model.setPermissionsForTesting(accessibility: false, screenRecording: false)
+        model.selectedAppName = "Notes"
+        model.promptText = "Make a note"
+
+        let readiness = model.runReadiness
+        #expect(!readiness.canRun)
+        #expect(readiness.title == "Accessibility required")
+        #expect(readiness.items.contains { $0.id == "accessibility" && $0.status == .blocked })
+    }
+
+    @Test func runReadinessBlocksHostedSignInBeforeTargetLookup() {
+        let saved = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+        defer { Self.restoreProviderDefault(saved) }
+
+        let model = AgentViewModel()
+        model.selectedProvider = .hosted
+        model.setPermissionsForTesting(accessibility: true, screenRecording: true)
+        model.selectedAppName = "NoSuchApp9X8Y7Z"
+        model.promptText = "Do something"
+        model.runningAppResolverOverride = { _ in
+            Issue.record("target lookup should wait until hosted setup is ready")
+            return .notFound
+        }
+
+        let readiness = model.runReadiness
+        #expect(!readiness.canRun)
+        #expect(readiness.title == "AI access needed")
+        #expect(readiness.detail.contains("Sign in"))
+        #expect(!readiness.detail.contains("NoSuchApp9X8Y7Z"))
+    }
+
+    @Test func runReadinessUsesAppMentionTarget() {
+        let saved = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+        defer { Self.restoreProviderDefault(saved) }
+
+        let model = AgentViewModel()
+        configureReadyOpenAI(model)
+        model.selectedAppName = "Finder"
+        model.promptText = "@Notes make a short note"
+        model.runningAppResolverOverride = { query in
+            if query == "Notes" {
+                return .matched(AppLocator.RunningApp(
+                    name: "Notes",
+                    bundleIdentifier: "com.apple.Notes",
+                    processID: 42
+                ))
+            }
+            return .notFound
+        }
+
+        let readiness = model.runReadiness
+        #expect(readiness.canRun)
+        #expect(readiness.targetAppName == "Notes")
+        #expect(readiness.detail == "Targeting Notes.")
+        #expect(readiness.items.contains { $0.id == "screen-recording" && $0.status == .warning })
+    }
+
+    @Test func runReadinessBlocksAmbiguousAppMention() {
+        let saved = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
+        defer { Self.restoreProviderDefault(saved) }
+
+        let model = AgentViewModel()
+        configureReadyOpenAI(model)
+        model.promptText = "@Note clean this up"
+        model.runningAppResolverOverride = { _ in
+            .ambiguous([
+                AppLocator.RunningApp(
+                    name: "Notes",
+                    bundleIdentifier: "com.apple.Notes",
+                    processID: 42
+                ),
+                AppLocator.RunningApp(
+                    name: "Noted",
+                    bundleIdentifier: "com.example.Noted",
+                    processID: 43
+                )
+            ])
+        }
+
+        let readiness = model.runReadiness
+        #expect(!readiness.canRun)
+        #expect(readiness.title == "Pick a more specific app")
+        #expect(readiness.items.contains { $0.id == "target" && $0.status == .blocked })
+    }
+
     @Test func pendingInteractionPriorityMatchesSharedUISurfaces() {
         let model = AgentViewModel()
         model.pendingWorkflow = AgentViewModel.PendingWorkflow(
@@ -439,16 +562,20 @@ struct AgentViewModelTests {
     }
 
     @Test func hostedProviderIsSelectableInThePicker() {
-        #expect(AgentViewModel.Provider.allCases.contains(.hosted))
+        #expect(AgentViewModel.Provider.betaSelectableCases.contains(.hosted))
     }
 
     @Test func openAICompatibleProviderIsSelectableInThePicker() {
-        #expect(AgentViewModel.Provider.allCases.contains(.openAICompatible))
+        #expect(AgentViewModel.Provider.betaSelectableCases.contains(.openAICompatible))
     }
 
-    @Test func existingAccountProvidersAreSelectableInThePicker() {
+    @Test func existingAccountProvidersKeepDescriptorsButAreNotBetaSelectable() {
         #expect(AgentViewModel.Provider.allCases.contains(.chatGPTAccount))
         #expect(AgentViewModel.Provider.allCases.contains(.anthropicSubscription))
+        #expect(!AgentViewModel.Provider.betaSelectableCases.contains(.chatGPTAccount))
+        #expect(!AgentViewModel.Provider.betaSelectableCases.contains(.anthropicSubscription))
+        #expect(!AgentViewModel.Provider.chatGPTAccount.isBetaSelectable)
+        #expect(!AgentViewModel.Provider.anthropicSubscription.isBetaSelectable)
     }
 
     @Test func openAICompatiblePresetsExposeMainstreamRoutersAndLocalEndpoints() {
@@ -473,21 +600,21 @@ struct AgentViewModelTests {
         #expect(presets["custom"]?.requiresAPIKey == false)
     }
 
-    @Test func existingAccountAccessModeIsVisibleAndAvailable() {
+    @Test func existingAccountAccessModeIsVisibleButUnavailableInBeta() {
         let model = AgentViewModel()
         let status = model.existingAccountAccessStatus
 
         #expect(status.accessMode == .existingSubscription)
         #expect(status.title == "Existing AI Account Access")
-        #expect(status.isAvailable)
+        #expect(!status.isAvailable)
         #expect(status.summary.contains("ChatGPT"))
-        #expect(status.summary.contains("Claude Pro/Max"))
+        #expect(status.summary.contains("planned"))
         #expect(status.detail.contains("ChatGPT"))
-        #expect(status.detail.contains("OAuth"))
-        #expect(status.detail.contains("structured output"))
+        #expect(status.detail.contains("Claude"))
+        #expect(status.detail.contains("beta"))
     }
 
-    @Test func savedAccountProviderRestoresFromUserDefaults() {
+    @Test func savedAccountProviderFallsBackToHostedInBeta() {
         let saved = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
         UserDefaults.standard.set(
             AgentViewModel.Provider.anthropicSubscription.rawValue,
@@ -496,8 +623,8 @@ struct AgentViewModelTests {
         defer { Self.restoreProviderDefault(saved) }
 
         let model = AgentViewModel()
-        #expect(model.selectedProvider == .anthropicSubscription)
-        #expect(model.selectedProviderAccessMode == .existingSubscription)
+        #expect(model.selectedProvider == .hosted)
+        #expect(model.selectedProviderAccessMode == .appManaged)
     }
 
     @Test func chatGPTAccountProviderExposesSubscriptionOAuthMetadata() {
@@ -513,7 +640,8 @@ struct AgentViewModelTests {
         #expect(!model.selectedProviderRequiresAPIKey)
         #expect(model.selectedModelDescriptor.identifier == "automatic")
         #expect(!model.selectedModelDescriptor.supportsImageInput)
-        #expect(model.selectedSubscriptionAccountRequirement?.providerID == .chatGPTCodex)
+        #expect(model.selectedProvider.authStyle == .subscriptionOAuth(providerID: .chatGPTCodex))
+        #expect(model.selectedSubscriptionAccountRequirement == nil)
     }
 
     @Test func claudeAccountProviderExposesSubscriptionOAuthMetadata() {
@@ -529,10 +657,11 @@ struct AgentViewModelTests {
         #expect(!model.selectedProviderRequiresAPIKey)
         #expect(model.selectedModelDescriptor.identifier == "automatic")
         #expect(!model.selectedModelDescriptor.supportsImageInput)
-        #expect(model.selectedSubscriptionAccountRequirement?.providerID == .anthropic)
+        #expect(model.selectedProvider.authStyle == .subscriptionOAuth(providerID: .anthropic))
+        #expect(model.selectedSubscriptionAccountRequirement == nil)
     }
 
-    @Test func subscriptionAccountProviderBlocksRunWhenSignedOut() {
+    @Test func subscriptionAccountProviderIsBlockedBeforeSignInChecksInBeta() {
         let saved = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
         defer { Self.restoreProviderDefault(saved) }
 
@@ -548,12 +677,12 @@ struct AgentViewModelTests {
             Issue.record("expected signed-out account failure")
             return
         }
-        #expect(reason.contains("Sign in"))
+        #expect(reason.contains("not available in this beta"))
         #expect(reason.contains("ChatGPT subscription"))
         #expect(!reason.contains("NoSuchApp9X8Y7Z"))
     }
 
-    @Test func subscriptionAccountProviderBlocksRunUntilStatusIsKnown() {
+    @Test func subscriptionAccountProviderDoesNotAskForUnknownStatusInBeta() {
         let saved = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
         defer { Self.restoreProviderDefault(saved) }
 
@@ -569,12 +698,12 @@ struct AgentViewModelTests {
             Issue.record("expected unknown account status failure")
             return
         }
-        #expect(reason.contains("Check"))
-        #expect(reason.contains("sign-in status"))
+        #expect(reason.contains("not available in this beta"))
+        #expect(!reason.contains("sign-in status"))
         #expect(!reason.contains("NoSuchApp9X8Y7Z"))
     }
 
-    @Test func subscriptionAccountProviderAllowsRunAfterKnownSignIn() {
+    @Test func subscriptionAccountProviderDoesNotRunEvenAfterKnownSignInInBeta() {
         let saved = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
         defer { Self.restoreProviderDefault(saved) }
 
@@ -590,7 +719,8 @@ struct AgentViewModelTests {
             Issue.record("expected app lookup failure after account readiness passed")
             return
         }
-        #expect(reason.contains("NoSuchApp9X8Y7Z"))
+        #expect(reason.contains("not available in this beta"))
+        #expect(!reason.contains("NoSuchApp9X8Y7Z"))
         #expect(!reason.contains("Sign in"))
     }
 
@@ -762,6 +892,19 @@ struct AgentViewModelTests {
         }
         #expect(reason.contains("Groq"))
         #expect(reason.contains("API key"))
+    }
+
+    private func configureReadyOpenAI(_ model: AgentViewModel) {
+        model.selectedProvider = .openai
+        model.apiKey = "test-key"
+        model.setPermissionsForTesting(accessibility: true, screenRecording: false)
+        model.runningAppResolverOverride = { query in
+            .matched(AppLocator.RunningApp(
+                name: query,
+                bundleIdentifier: "com.example.\(query.lowercased())",
+                processID: 42
+            ))
+        }
     }
 
     private static func restoreProviderDefault(_ saved: String?) {

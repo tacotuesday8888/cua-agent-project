@@ -16,6 +16,10 @@ Before publishing a build:
 - Privacy copy explains Accessibility, Screen Recording, local memory, local run
   history, hosted usage metadata, provider API-key handling, and subscription
   OAuth credentials.
+- `PRIVACY.md`, `SECURITY.md`, and `script/check_public_hygiene.sh` are present
+  and CI is green before publishing a public repo or public beta link.
+- `CONTRIBUTING.md`, `.github/pull_request_template.md`, `.github/dependabot.yml`,
+  and `LICENSE` are present so public repo expectations are explicit.
 
 Apple reference points:
 

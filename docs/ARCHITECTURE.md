@@ -53,6 +53,10 @@ That product shape implies a few hard technical boundaries:
   app target owns one instance for the Control Center and compact assistant, so
   phase, feed, approvals, questions, memory proposals, workflow proposals,
   selected access path, and stop requests are shared.
+- `AgentViewModel.runReadiness` is the shared preflight contract for one-off
+  runs. It checks prompt presence, local `remember:` prompts, Accessibility,
+  optional Screen Recording status, AI access setup, and exact target-app
+  resolution before either UI surface enables Run.
 - `AutopilotUI.NotchController` owns the notch panel lifecycle and keeps the
   placeholder notch surface aligned to the physical notch (or a top-center
   fallback on non-notch Macs).
@@ -92,8 +96,10 @@ policy object used by usage accounting.
 BYOK includes first-class OpenAI and Anthropic entries plus a configurable
 **OpenAI-compatible endpoint** for routers and local servers such as OpenRouter,
 Gemini, LiteLLM, Groq, Together, Fireworks, DeepSeek-compatible gateways,
-Qwen/GLM-compatible gateways, and Ollama-compatible local endpoints.
-Existing account access is selectable but deliberately separated from BYOK:
+Qwen/GLM-compatible gateways, and Ollama-compatible local endpoints. Existing
+account access descriptors remain in the model layer for future OAuth/Keychain
+work, but beta builds expose only Mac Autopilot Basic and BYOK as selectable
+run paths:
 
 - The Control Center and compact assistant both surface the selected access
   path. Hosted sign-in state is injected from the app target, keeping
@@ -101,12 +107,12 @@ Existing account access is selectable but deliberately separated from BYOK:
   the OpenAI-compatible BYOK preset, endpoint, model id, image capability, and
   API-key controls so router/local-model setup is available from the run
   surface.
-- ChatGPT subscription access follows the OpenAI Codex OAuth subscription
+- ChatGPT subscription access is planned to follow the OpenAI Codex OAuth subscription
   pattern used by Pi-like tools, but the app owns the connector: OAuth
   credentials are stored in Mac Autopilot's Keychain entries, not in Pi or
   browser storage. The direct provider returns structured text/tool output to the
   existing tool-call loop.
-- Claude subscription access follows the Anthropic Claude Pro/Max OAuth pattern
+- Claude subscription access is planned to follow the Anthropic Claude Pro/Max OAuth pattern
   used by Pi-like tools, again with app-owned Keychain storage and structured
   output into the same tool-call loop.
 

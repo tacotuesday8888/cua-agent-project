@@ -157,7 +157,13 @@ struct ContentView: View {
 
                 TextField("Goal for one app, or use @App / remember: …", text: $model.promptText)
                     .textFieldStyle(.roundedBorder)
-                    .onSubmit { model.submit() }
+                    .onSubmit {
+                        if model.runReadiness.canRun {
+                            model.submit()
+                        }
+                    }
+
+                runPreflightView
 
                 HStack {
                     Text("Saved workflows are adaptive goals, not recorded clicks.")
@@ -167,6 +173,56 @@ struct ContentView: View {
                     runButton
                 }
             }
+        }
+    }
+
+    private var runPreflightView: some View {
+        let readiness = model.runReadiness
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: readiness.canRun ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(readiness.canRun ? .green : .orange)
+                Text(readiness.title)
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                if let targetAppName = readiness.targetAppName {
+                    Text(targetAppName)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Text(readiness.detail)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(readiness.items) { item in
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: item.systemImage)
+                            .font(.caption2)
+                            .foregroundStyle(readinessColor(for: item.status))
+                            .frame(width: 14)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(item.title)
+                                .font(.caption2.weight(.medium))
+                            Text(item.detail)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(8)
+        .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func readinessColor(for status: AgentViewModel.RunReadiness.ItemStatus) -> Color {
+        switch status {
+        case .ready: .green
+        case .warning: .orange
+        case .blocked: .red
         }
     }
 
@@ -227,7 +283,7 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Picker("Mode", selection: $model.selectedProvider) {
-                        ForEach(AgentViewModel.Provider.allCases) { provider in
+                        ForEach(AgentViewModel.Provider.betaSelectableCases) { provider in
                             Text("\(provider.displayName) · \(provider.accessMode.displayName)")
                                 .tag(provider)
                         }
@@ -502,7 +558,7 @@ struct ContentView: View {
                 .disabled(true)
         case .idle, .stopped, .finished, .failed:
             Button("Run") { model.submit() }
-                .disabled(model.promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(!model.runReadiness.canRun)
         }
     }
 
@@ -861,7 +917,7 @@ struct ContentView: View {
                                     workflowBindings[workflow.id] = [:]
                                 }
                                 .controlSize(.small)
-                                .disabled(model.isRunInProgress)
+                                .disabled(model.isRunInProgress || !missingWorkflowSlots(workflow).isEmpty)
                                 Button("Edit") {
                                     beginEditing(workflow)
                                 }
@@ -879,6 +935,7 @@ struct ContentView: View {
                                 )
                                 .textFieldStyle(.roundedBorder)
                             }
+                            workflowRunPreview(workflow)
                         }
                     }
                     .onAppear {
@@ -925,6 +982,34 @@ struct ContentView: View {
         .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
     }
 
+    private func workflowRunPreview(_ workflow: AgentViewModel.StoredWorkflow) -> some View {
+        let missing = missingWorkflowSlots(workflow)
+        let resolvedGoal = resolvedWorkflowGoal(workflow)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: missing.isEmpty ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(missing.isEmpty ? .green : .orange)
+                Text(missing.isEmpty ? "Ready workflow goal" : "Fill workflow fields")
+                    .font(.caption2.weight(.medium))
+            }
+            Text(resolvedGoal)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+            if !missing.isEmpty {
+                Text(missing.map { "{{\($0)}}" }.joined(separator: ", "))
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
+            Text("Typed slot values are used once and are not saved.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(8)
+        .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+    }
+
     private func workflowBinding(
         workflowID: UUID,
         variable: WorkflowVariable
@@ -949,6 +1034,32 @@ struct ContentView: View {
             bindings[variable.name] = variable.defaultValue ?? ""
         }
         workflowBindings[workflow.id] = bindings
+    }
+
+    private func workflowRunBindings(_ workflow: AgentViewModel.StoredWorkflow) -> [String: String] {
+        var bindings = Dictionary(uniqueKeysWithValues: workflow.variables.map {
+            ($0.name, $0.defaultValue ?? "")
+        })
+        for (key, value) in workflowBindings[workflow.id] ?? [:] {
+            bindings[key] = value
+        }
+        return bindings
+    }
+
+    private func missingWorkflowSlots(_ workflow: AgentViewModel.StoredWorkflow) -> [String] {
+        WorkflowRenderer.missingSlotNames(
+            in: workflow.goalTemplate,
+            variables: workflow.variables,
+            bindings: workflowRunBindings(workflow)
+        )
+    }
+
+    private func resolvedWorkflowGoal(_ workflow: AgentViewModel.StoredWorkflow) -> String {
+        let bindings = WorkflowRenderer.resolvedBindings(
+            variables: workflow.variables,
+            bindings: workflowRunBindings(workflow)
+        )
+        return WorkflowRenderer.resolveGoal(template: workflow.goalTemplate, bindings: bindings)
     }
 
     private func placeholder(for variable: WorkflowVariable) -> String {

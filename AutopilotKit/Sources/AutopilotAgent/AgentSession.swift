@@ -93,6 +93,13 @@ public actor AgentSession {
     private var lastActionSignature: String?
     /// How many times in a row the same action signature has been seen.
     private var consecutiveActionRepeats = 0
+    /// Exact risky actions declined by the user during this run.
+    ///
+    /// A denial is a local safety rule, not just a hint to the model. If the
+    /// model retries the same normalized tool call later, the action is blocked
+    /// without asking again. A different element/action can still be proposed
+    /// and reviewed normally.
+    private var declinedActionSignatures: Set<String> = []
     /// Consecutive action failures where the app could not be re-read — a
     /// strong signal the target app has closed or stopped responding.
     private var consecutiveUnreadableFailures = 0
@@ -390,6 +397,32 @@ public actor AgentSession {
                 return nil
             }
 
+            var signature = actionSignature(tool: tool, input: use.input)
+            if declinedActionSignatures.contains(signature) {
+                if shouldRefreshDeclinedActionSignature(tool: tool, input: use.input) {
+                    do {
+                        _ = try await observeTree()
+                        try preflightAction(tool: tool, input: use.input)
+                        signature = actionSignature(tool: tool, input: use.input)
+                    } catch {
+                        appendToolInputError(error, toolUseID: use.id, into: &results)
+                        return nil
+                    }
+                }
+            }
+            if declinedActionSignatures.contains(signature) {
+                results.append(.toolResult(ToolResult(
+                    toolUseID: use.id,
+                    text: """
+                    The user already declined this exact action. Do not retry \
+                    it; choose a different current element or approach, ask \
+                    for clarification, or call done.
+                    """,
+                    isError: true
+                )))
+                return nil
+            }
+
             let repeats = registerAction(tool: tool, input: use.input)
             let guarded = Self.loopGuardedTools.contains(tool)
             if guarded, repeats >= 2 {
@@ -464,31 +497,141 @@ public actor AgentSession {
     }
 
     private func normalizedActionInput(tool: AgentTool, input: JSONValue) -> JSONValue {
-        guard var object = input.objectValue else { return input }
+        guard input.objectValue != nil else { return input }
+        var object: [String: JSONValue] = [:]
         func normalize(primaryKey: String, canonicalKey: String = "element_id") {
             guard let id = try? ElementReference.optionalID(
                 from: input,
                 primaryKey: primaryKey,
                 tool: tool
             ) else { return }
-            object[canonicalKey] = .string(id)
-            object.removeValue(forKey: primaryKey)
-            if canonicalKey != "element_id" {
-                object.removeValue(forKey: "element_id")
+            object[canonicalKey] = .string(actionElementFingerprint(id))
+        }
+
+        func copyString(_ key: String) {
+            if let value = input[key]?.stringValue {
+                object[key] = .string(value)
+            }
+        }
+
+        func copyInteger(_ key: String) {
+            if let value = input[key]?.intValue {
+                object[key] = .int(value)
+            }
+        }
+
+        func normalizeKeyPress() {
+            if let key = input["key"]?.stringValue {
+                object["key"] = .string(Self.canonicalKeyName(key))
+            }
+            if let modifiers = try? keyModifiers(input, tool: tool) {
+                object["modifiers"] = .array(
+                    modifiers
+                        .map(\.rawValue)
+                        .sorted()
+                        .map(JSONValue.string)
+                )
             }
         }
 
         switch tool {
-        case .click, .setValue, .typeText, .scroll, .performSecondaryAction:
+        case .click:
             normalize(primaryKey: "element_index")
+        case .setValue:
+            normalize(primaryKey: "element_index")
+            copyString("value")
+        case .typeText:
+            normalize(primaryKey: "element_index")
+            copyString("text")
+        case .scroll:
+            normalize(primaryKey: "element_index")
+            copyString("direction")
+            copyInteger("amount")
+        case .performSecondaryAction:
+            normalize(primaryKey: "element_index")
+            copyString("action")
         case .drag:
             normalize(primaryKey: "from_element_index", canonicalKey: "from_element_id")
             normalize(primaryKey: "to_element_index", canonicalKey: "to_element_id")
-        case .listApps, .getAppState, .pressKey, .wait, .askUser, .proposeMemory,
+        case .pressKey:
+            normalizeKeyPress()
+        case .listApps, .getAppState, .wait, .askUser, .proposeMemory,
              .proposeWorkflow, .done:
             break
         }
         return .object(object)
+    }
+
+    private func shouldRefreshDeclinedActionSignature(
+        tool: AgentTool,
+        input: JSONValue
+    ) -> Bool {
+        switch tool {
+        case .click, .setValue, .scroll, .performSecondaryAction:
+            return (try? optionalElementID(input, primaryKey: "element_index", tool: tool)) != nil
+        case .typeText:
+            return (try? optionalElementID(input, primaryKey: "element_index", tool: tool)) != nil
+        case .drag:
+            return (try? optionalElementID(input, primaryKey: "from_element_index", tool: tool)) != nil
+                || (try? optionalElementID(input, primaryKey: "to_element_index", tool: tool)) != nil
+        case .listApps, .getAppState, .pressKey, .wait, .askUser, .proposeMemory,
+             .proposeWorkflow, .done:
+            return false
+        }
+    }
+
+    private func actionElementFingerprint(_ elementID: String) -> String {
+        guard let element = latestSnapshot?.element(id: elementID) else {
+            return "missing:\(elementID)"
+        }
+
+        let frame = element.frame
+        let roundedFrame = [
+            Int(frame.x.rounded()),
+            Int(frame.y.rounded()),
+            Int(frame.width.rounded()),
+            Int(frame.height.rounded())
+        ]
+            .map(String.init)
+            .joined(separator: ",")
+
+        let parts = [
+            "app=\(computer.appName)",
+            "window=\(latestSnapshot?.windowTitle ?? "")",
+            "role=\(element.role)",
+            "subrole=\(element.subrole ?? "")",
+            "identifier=\(element.identifier ?? "")",
+            "label=\(element.label ?? "")",
+            "value=\(element.value ?? "")",
+            "frame=\(roundedFrame)"
+        ]
+        return parts.joined(separator: "|")
+    }
+
+    private static func canonicalKeyName(_ key: String) -> String {
+        let compact = key.filter { $0.isLetter || $0.isNumber }.lowercased()
+        switch compact {
+        case "del", "delete", "backspace", "backwarddelete":
+            return "delete"
+        case "forwarddel", "forwarddelete":
+            return "forwarddelete"
+        case "return", "enter":
+            return "return"
+        case "esc", "escape":
+            return "escape"
+        case "space", "spacebar":
+            return "space"
+        case "uparrow", "arrowup":
+            return "uparrow"
+        case "downarrow", "arrowdown":
+            return "downarrow"
+        case "leftarrow", "arrowleft":
+            return "leftarrow"
+        case "rightarrow", "arrowright":
+            return "rightarrow"
+        default:
+            return compact.isEmpty ? key.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() : compact
+        }
     }
 
     /// End the run because the model is stuck repeating one action.
@@ -653,6 +796,7 @@ public actor AgentSession {
         emit(.willPerform(tool: tool, target: target, tier: tier))
 
         guard await gate(tier: tier, target: target) else {
+            declinedActionSignatures.insert(actionSignature(tool: tool, input: use.input))
             emit(.confirmationDenied(summary: target.description))
             results.append(.toolResult(ToolResult(
                 toolUseID: use.id,

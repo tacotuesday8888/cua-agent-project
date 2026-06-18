@@ -45,6 +45,29 @@ public final class AgentViewModel: UserInteraction {
         public let tone: PresentationTone
     }
 
+    /// Product-facing setup check for the current prompt.
+    public struct RunReadiness: Sendable, Equatable {
+        public enum ItemStatus: Sendable, Equatable {
+            case ready
+            case warning
+            case blocked
+        }
+
+        public struct Item: Sendable, Equatable, Identifiable {
+            public let id: String
+            public let title: String
+            public let detail: String
+            public let status: ItemStatus
+            public let systemImage: String
+        }
+
+        public let canRun: Bool
+        public let title: String
+        public let detail: String
+        public let targetAppName: String?
+        public let items: [Item]
+    }
+
     /// One line in the live status feed.
     public struct FeedItem: Identifiable, Sendable {
         public let id = UUID()
@@ -366,6 +389,18 @@ public final class AgentViewModel: UserInteraction {
             .openAICompatible
         ]
 
+        /// Providers that are ready for the current beta surface.
+        ///
+        /// Existing-account descriptors stay in the model layer so the future
+        /// OAuth/Keychain path has a stable shape, but they are intentionally
+        /// not selectable until the account integrations are production-ready.
+        public static let betaSelectableCases: [Provider] = [
+            .hosted,
+            .openai,
+            .anthropic,
+            .openAICompatible
+        ]
+
         public var id: String { rawValue }
 
         public var descriptor: LLMProviderDescriptor {
@@ -385,6 +420,10 @@ public final class AgentViewModel: UserInteraction {
 
         public var accessMode: LLMAccessMode {
             descriptor.accessMode
+        }
+
+        public var isBetaSelectable: Bool {
+            Self.betaSelectableCases.contains(self)
         }
 
         /// How this provider authenticates. Drives the settings UI: API key
@@ -809,17 +848,174 @@ public final class AgentViewModel: UserInteraction {
             false
         }
     }
+
+    public var runReadiness: RunReadiness {
+        let task = promptText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !isRunInProgress else {
+            return RunReadiness(
+                canRun: false,
+                title: "Run in progress",
+                detail: "Stop the current run before starting another one.",
+                targetAppName: nil,
+                items: [
+                    readinessItem(
+                        "run",
+                        title: "One run at a time",
+                        detail: "Mac Autopilot is already working.",
+                        status: .blocked,
+                        image: "bolt.fill"
+                    )
+                ]
+            )
+        }
+        guard !task.isEmpty else {
+            return RunReadiness(
+                canRun: false,
+                title: "Add a goal",
+                detail: "Describe the single-app task to run, or use remember: to save a memory.",
+                targetAppName: nil,
+                items: [
+                    readinessItem(
+                        "goal",
+                        title: "Goal",
+                        detail: "Waiting for a task.",
+                        status: .blocked,
+                        image: "text.cursor"
+                    )
+                ]
+            )
+        }
+
+        var items: [RunReadiness.Item] = [
+            readinessItem(
+                "goal",
+                title: "Goal",
+                detail: "Ready.",
+                status: .ready,
+                image: "checkmark.circle.fill"
+            )
+        ]
+
+        if !promptParser.explicitMemories(in: task).isEmpty {
+            items.append(readinessItem(
+                "memory",
+                title: "Local memory",
+                detail: "This will save approved memory locally without using an AI provider.",
+                status: .ready,
+                image: "lock.fill"
+            ))
+            return RunReadiness(
+                canRun: true,
+                title: "Ready to save memory",
+                detail: "No app target or provider call is needed for remember: prompts.",
+                targetAppName: nil,
+                items: items
+            )
+        }
+
+        guard accessibilityTrusted else {
+            items.append(readinessItem(
+                "accessibility",
+                title: "Accessibility",
+                detail: "Grant Accessibility so Mac Autopilot can read and operate the target app.",
+                status: .blocked,
+                image: "hand.raised.fill"
+            ))
+            return RunReadiness(
+                canRun: false,
+                title: "Accessibility required",
+                detail: "Grant Accessibility, then re-check permissions.",
+                targetAppName: nil,
+                items: items
+            )
+        }
+        items.append(readinessItem(
+            "accessibility",
+            title: "Accessibility",
+            detail: "Granted.",
+            status: .ready,
+            image: "checkmark.circle.fill"
+        ))
+        items.append(readinessItem(
+            "screen-recording",
+            title: "Screen Recording",
+            detail: screenRecordingTrusted
+                ? "Granted for screenshot fallback."
+                : "Optional. Needed only for screenshot fallback.",
+            status: screenRecordingTrusted ? .ready : .warning,
+            image: screenRecordingTrusted ? "checkmark.circle.fill" : "camera.viewfinder"
+        ))
+
+        if let message = providerSetupErrorMessage() {
+            items.append(readinessItem(
+                "provider",
+                title: "AI access",
+                detail: message,
+                status: .blocked,
+                image: "key.fill"
+            ))
+            return RunReadiness(
+                canRun: false,
+                title: "AI access needed",
+                detail: message,
+                targetAppName: nil,
+                items: items
+            )
+        }
+        items.append(readinessItem(
+            "provider",
+            title: "AI access",
+            detail: "\(selectedProvider.displayName) is ready.",
+            status: .ready,
+            image: "checkmark.circle.fill"
+        ))
+
+        switch targetReadiness(for: task) {
+        case .ready(let appName, let detail):
+            items.append(readinessItem(
+                "target",
+                title: "Target app",
+                detail: detail,
+                status: .ready,
+                image: "macwindow"
+            ))
+            return RunReadiness(
+                canRun: true,
+                title: "Ready to run",
+                detail: "Targeting \(appName).",
+                targetAppName: appName,
+                items: items
+            )
+        case .blocked(let title, let detail):
+            items.append(readinessItem(
+                "target",
+                title: "Target app",
+                detail: detail,
+                status: .blocked,
+                image: "macwindow.badge.exclamationmark"
+            ))
+            return RunReadiness(
+                canRun: false,
+                title: title,
+                detail: detail,
+                targetAppName: nil,
+                items: items
+            )
+        }
+    }
+
     public var existingAccountAccessStatus: ExistingAccountAccessStatus {
         ExistingAccountAccessStatus(
             accessMode: .existingSubscription,
             title: "Existing AI Account Access",
-            summary: "ChatGPT Plus/Pro and Claude Pro/Max use subscription login.",
-            detail: "Mac Autopilot owns ChatGPT/Claude OAuth credential storage in Keychain and asks subscription-backed models for structured output.",
-            isAvailable: true
+            summary: "ChatGPT and Claude subscription account access is planned after beta.",
+            detail: "ChatGPT and Claude subscription OAuth descriptors remain in the app, but beta builds only expose Mac Autopilot Basic and BYOK providers until those account paths are verified for public use.",
+            isAvailable: false
         )
     }
 
     public var selectedSubscriptionAccountRequirement: SubscriptionAccountRequirement? {
+        guard selectedProvider.isBetaSelectable else { return nil }
         switch selectedProvider.authStyle {
         case .subscriptionOAuth(let providerID):
             return SubscriptionAccountRequirement(
@@ -849,6 +1045,71 @@ public final class AgentViewModel: UserInteraction {
         let shown = names.prefix(3).joined(separator: ", ")
         guard names.count > 3 else { return shown }
         return "\(shown), and \(names.count - 3) more"
+    }
+
+    private enum TargetReadiness {
+        case ready(appName: String, detail: String)
+        case blocked(title: String, detail: String)
+    }
+
+    private func targetReadiness(for task: String) -> TargetReadiness {
+        if let mention = promptParser.appMention(in: task) {
+            switch resolveRunningApp(matching: mention) {
+            case .matched(let resolved):
+                return .ready(
+                    appName: resolved.name,
+                    detail: "Targeting \(resolved.name) from @\(mention)."
+                )
+            case .notFound:
+                return .blocked(
+                    title: "Open the target app",
+                    detail: "No running app matched @\(mention)."
+                )
+            case .ambiguous(let apps):
+                return .blocked(
+                    title: "Pick a more specific app",
+                    detail: "@\(mention) matches \(Self.appList(apps))."
+                )
+            }
+        }
+
+        let appName = selectedAppName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !appName.isEmpty else {
+            return .blocked(
+                title: "Pick a target app",
+                detail: "Choose the one app Mac Autopilot should operate."
+            )
+        }
+        switch resolveRunningApp(matching: appName) {
+        case .matched(let resolved):
+            return .ready(appName: resolved.name, detail: "Targeting \(resolved.name).")
+        case .notFound:
+            return .blocked(
+                title: "Open the target app",
+                detail: "Open \(appName), then refresh running apps."
+            )
+        case .ambiguous(let apps):
+            return .blocked(
+                title: "Pick a more specific app",
+                detail: "\(appName) matches \(Self.appList(apps))."
+            )
+        }
+    }
+
+    private func readinessItem(
+        _ id: String,
+        title: String,
+        detail: String,
+        status: RunReadiness.ItemStatus,
+        image: String
+    ) -> RunReadiness.Item {
+        RunReadiness.Item(
+            id: id,
+            title: title,
+            detail: detail,
+            status: status,
+            systemImage: image
+        )
     }
 
     // MARK: - Private
@@ -917,7 +1178,9 @@ public final class AgentViewModel: UserInteraction {
         self.apiKeyStorage = apiKeyStorage
         let storedProvider = UserDefaults.standard.string(forKey: Self.providerDefaultsKey)
             .flatMap(Provider.init(rawValue:))
-        let savedProvider = storedProvider.flatMap { Provider.allCases.contains($0) ? $0 : nil }
+        let savedProvider = storedProvider.flatMap {
+            Provider.betaSelectableCases.contains($0) ? $0 : nil
+        }
             ?? .hosted
         self.selectedProvider = savedProvider
         self.selectedModelID = Self.savedModelID(for: savedProvider)
@@ -1360,6 +1623,11 @@ public final class AgentViewModel: UserInteraction {
     public func refreshPermissions() {
         accessibilityTrusted = SystemPermissions.accessibilityTrusted
         screenRecordingTrusted = SystemPermissions.screenRecordingTrusted
+    }
+
+    func setPermissionsForTesting(accessibility: Bool, screenRecording: Bool) {
+        accessibilityTrusted = accessibility
+        screenRecordingTrusted = screenRecording
     }
 
     /// Prompt for Accessibility permission, then re-read the state.
@@ -1811,6 +2079,9 @@ public final class AgentViewModel: UserInteraction {
     /// Returns a user-facing error message if the selected provider can't run
     /// yet (missing API key, not signed in), or `nil` if ready.
     private func providerSetupErrorMessage() -> String? {
+        if !selectedProvider.isBetaSelectable {
+            return "\(selectedProvider.displayName) is not available in this beta. Use Mac Autopilot Basic, OpenAI, Anthropic, or an OpenAI-compatible endpoint."
+        }
         if selectedProvider == .hosted, !hostedAccountStatusProvider().isSignedIn {
             return "Sign in with Google to use Mac Autopilot Basic."
         }

@@ -41,7 +41,10 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the Control Center product
 shape, safety model, local session-state approach, and backend/account plan.
 Use [docs/VALIDATION.md](docs/VALIDATION.md) for repeatable fixture, live
 provider, and safe real-app validation. See [docs/RELEASE.md](docs/RELEASE.md)
-for direct-distribution and App Store readiness notes.
+for direct-distribution and App Store readiness notes. See [PRIVACY.md](PRIVACY.md)
+and [SECURITY.md](SECURITY.md) for public repo, privacy, and vulnerability
+handling boundaries. This repository is source-available under an all-rights-
+reserved notice; see [LICENSE](LICENSE).
 
 ## Permissions
 
@@ -159,7 +162,18 @@ API key, and a user-controlled image-capability toggle.
 
 Existing account paths are separate from BYOK: `ChatGPT subscription` and
 `Claude subscription` use app-owned OAuth credentials stored in Keychain. They do
-not scrape browser cookies or ask users to paste sessions.
+not scrape browser cookies or ask users to paste sessions. These descriptors
+remain in the codebase, but beta builds expose Mac Autopilot Basic and BYOK as
+the ready user-facing paths until subscription account access is verified for
+public use.
+
+## Public Repo Hygiene
+
+This repo is intended to be public-safe. Product code stays in the open, while
+local machine state, build output, `.env` files, provider keys, certificates,
+provisioning profiles, and generated validation reports stay untracked. CI runs
+`./script/check_public_hygiene.sh` on every push and pull request to catch common
+mistakes.
 
 ## Live provider smoke test
 
