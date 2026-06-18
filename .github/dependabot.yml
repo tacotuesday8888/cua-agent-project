@@ -17,6 +17,18 @@ updates:
       backend-npm:
         patterns:
           - "*"
+    ignore:
+      # firebase-functions 7.2.x peers firebase-admin through v13 only. Keep
+      # semver-major backend runtime moves manual until the Functions peer range
+      # and Firebase deployment target are verified together.
+      - dependency-name: "firebase-admin"
+        update-types:
+          - "version-update:semver-major"
+      # TypeScript majors can change emitted JS and checker behavior. Take them
+      # deliberately after the backend deploy/runtime matrix is validated.
+      - dependency-name: "typescript"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "swift"
     directory: "/AutopilotKit"
