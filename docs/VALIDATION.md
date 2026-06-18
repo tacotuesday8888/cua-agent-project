@@ -117,6 +117,12 @@ The same fixture checks can be run with:
 ./script/validate_fixture.sh --include-screenshot
 ```
 
+Both `validate_fixture.sh` and `validate_beta.sh` retry the initial
+`AutopilotFixtureApp` launch up to three times before failing. This only covers
+the fragile app-activation window; driver smoke, agent-loop, screenshot, and
+scenario failures still fail immediately. Set `AUTOPILOT_FIXTURE_LAUNCH_ATTEMPTS`
+to tune that retry count while debugging local TCC or launch-service behavior.
+
 ## Trajectory And Scenario Validation
 
 For real-world reliability work, run agent loops with opt-in trajectory output.

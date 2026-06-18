@@ -6,6 +6,7 @@ LIVE_PROVIDER=""
 LIVE_ARGS=()
 LIVE_ARGS_COUNT=0
 STEP_TIMEOUT_SECONDS="${AUTOPILOT_FIXTURE_STEP_TIMEOUT_SECONDS:-240}"
+FIXTURE_LAUNCH_ATTEMPTS="${AUTOPILOT_FIXTURE_LAUNCH_ATTEMPTS:-3}"
 
 usage() {
   cat >&2 <<'USAGE'
@@ -57,6 +58,13 @@ case "$LIVE_PROVIDER" in
     ;;
   *)
     usage
+    exit 2
+    ;;
+esac
+
+case "$FIXTURE_LAUNCH_ATTEMPTS" in
+  ""|*[!0-9]*|0)
+    echo "AUTOPILOT_FIXTURE_LAUNCH_ATTEMPTS must be a positive integer." >&2
     exit 2
     ;;
 esac
@@ -147,12 +155,57 @@ stop_existing_fixture_apps() {
 }
 
 FIXTURE_PID=""
+LAST_FIXTURE_READINESS_STATUS=0
 cleanup() {
   if [ -n "$FIXTURE_PID" ] && kill -0 "$FIXTURE_PID" >/dev/null 2>&1; then
     kill "$FIXTURE_PID" >/dev/null 2>&1 || true
     wait "$FIXTURE_PID" >/dev/null 2>&1 || true
   fi
   stop_existing_fixture_apps
+}
+
+stop_fixture_process() {
+  if [ -n "$FIXTURE_PID" ] && kill -0 "$FIXTURE_PID" >/dev/null 2>&1; then
+    kill "$FIXTURE_PID" >/dev/null 2>&1 || true
+    wait "$FIXTURE_PID" >/dev/null 2>&1 || true
+  fi
+  FIXTURE_PID=""
+}
+
+launch_fixture_app() {
+  local attempt
+
+  : >"$FIXTURE_LOG"
+  for attempt in $(seq 1 "$FIXTURE_LAUNCH_ATTEMPTS"); do
+    echo "Launching AutopilotFixtureApp (attempt $attempt/$FIXTURE_LAUNCH_ATTEMPTS)..."
+    {
+      echo "== launch attempt $attempt/$FIXTURE_LAUNCH_ATTEMPTS =="
+      date
+    } >>"$FIXTURE_LOG"
+
+    "$FIXTURE_BINARY" >>"$FIXTURE_LOG" 2>&1 &
+    FIXTURE_PID=$!
+
+    if wait_for_fixture_app; then
+      echo "PASS fixture-app"
+      return 0
+    fi
+
+    LAST_FIXTURE_READINESS_STATUS=$?
+    stop_fixture_process
+    stop_existing_fixture_apps
+
+    if [ "$attempt" -lt "$FIXTURE_LAUNCH_ATTEMPTS" ]; then
+      if [ "$LAST_FIXTURE_READINESS_STATUS" -eq 2 ]; then
+        echo "AutopilotFixtureApp exited before readiness; retrying launch." >&2
+      else
+        echo "AutopilotFixtureApp was not visible before readiness timeout; retrying launch." >&2
+      fi
+      sleep 1
+    fi
+  done
+
+  return "$LAST_FIXTURE_READINESS_STATUS"
 }
 
 on_error() {
@@ -170,13 +223,10 @@ run_step build-smoke-cli swift build "${SWIFT_PACKAGE_ARGS[@]}" --product Autopi
 
 stop_existing_fixture_apps
 
-"$FIXTURE_BINARY" >"$FIXTURE_LOG" 2>&1 &
-FIXTURE_PID=$!
-if wait_for_fixture_app; then
-  echo "PASS fixture-app"
+if launch_fixture_app; then
+  :
 else
-  readiness_status=$?
-  if [ "$readiness_status" -eq 2 ]; then
+  if [ "$LAST_FIXTURE_READINESS_STATUS" -eq 2 ]; then
     echo "AutopilotFixtureApp exited before validation could start." >&2
   else
     echo "AutopilotFixtureApp did not become visible to the smoke runner." >&2
