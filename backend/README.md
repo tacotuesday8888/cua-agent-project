@@ -41,11 +41,17 @@ npm ci            # or: npm install
 npm run typecheck # tsc --noEmit
 npm test          # vitest (pure logic)
 npm run build     # emits lib/
+npm run test:rules:emulator # Firebase emulator proof that direct client rules deny all
 ```
 
 For a live end-to-end run you need a Firebase project with Vertex AI enabled and
 the function service account allowed to call Vertex AI, then `npx genkit start`
 or the Firebase emulators.
+
+The rules emulator test starts Firestore, Realtime Database, and Storage
+emulators through the Firebase CLI and requires Java. It exercises Firebase
+client SDK contexts, not Admin SDK bypasses, so it proves public clients cannot
+directly read or write Firestore, Realtime Database, or Storage.
 
 > Note: if `npm install` fails with an `EACCES`/root-owned cache error on a shared
 > machine, point npm at a fresh cache: `npm install --cache /tmp/npm-cache`.

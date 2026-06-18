@@ -55,6 +55,32 @@ jobs:
       - name: Direct DMG release dry run
         run: ./script/build_release_dmg.sh --dry-run
 
+  firebase-rules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install
+        run: npm ci
+
+      - name: Firebase direct-client deny-all rules
+        run: npm run test:rules:emulator
+
   backend:
     runs-on: ubuntu-latest
     timeout-minutes: 10

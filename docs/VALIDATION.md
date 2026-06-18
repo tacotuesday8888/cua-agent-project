@@ -12,15 +12,18 @@ Run before every implementation batch:
 swift test --package-path AutopilotKit
 xcodebuild -project MacAutopilot.xcodeproj -scheme MacAutopilot -destination 'platform=macOS' -derivedDataPath .build/xcode build
 cd backend && npm run typecheck && npm test && npm run build
+cd backend && npm run test:rules:emulator
 ./script/build_release_dmg.sh --dry-run
 ```
 
 Expected result: package tests pass, the app target builds, and backend
-TypeScript/tests/build pass. The release dry run verifies Developer ID DMG
-preflight settings without Apple credentials. Local Xcode builds may require a
-valid Apple Developer provisioning profile; for compile-only validation on a
-machine without that profile, run the same Xcode command with
-`CODE_SIGNING_ALLOWED=NO`.
+TypeScript/tests/build pass. The Firebase emulator rules test proves direct
+client Firestore, Realtime Database, and Storage reads/writes remain deny-all
+for authenticated and unauthenticated clients; it requires Java and uses the
+Firebase Emulator Suite. The release dry run verifies Developer ID DMG preflight
+settings without Apple credentials. Local Xcode builds may require a valid Apple
+Developer provisioning profile; for compile-only validation on a machine without
+that profile, run the same Xcode command with `CODE_SIGNING_ALLOWED=NO`.
 
 For local app launch verification, use the project run entrypoint:
 
@@ -382,7 +385,8 @@ Inspect Application Support after a run:
 - Provider API keys and OAuth credentials are in Keychain, not `UserDefaults`,
   local JSON, logs, or source files.
 - Firestore direct client rules remain deny-all unless a new architecture
-  decision explicitly changes them.
+  decision explicitly changes them. The automated check is
+  `cd backend && npm run test:rules:emulator`.
 
 ## Permission Checks
 
@@ -420,6 +424,7 @@ A release candidate must pass:
 
 - automated baseline
 - `./script/check_public_hygiene.sh`
+- `cd backend && npm run test:rules:emulator`
 - `./script/build_release_dmg.sh --dry-run`
 - `./script/validate_beta.sh` fixture, scripted-scenario, and approval-gate
   reports

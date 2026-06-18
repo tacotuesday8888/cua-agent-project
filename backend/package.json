@@ -10,7 +10,9 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:rules": "FIREBASE_RULES_TEST=1 vitest run test/firebaseRules.test.ts",
+    "test:rules:emulator": "cd .. && npx --yes firebase-tools@15.21.0 emulators:exec --project demo-macautopilot-rules --only firestore,database,storage \"npm --prefix backend run test:rules\""
   },
   "dependencies": {
     "@genkit-ai/google-genai": "^1.37.0",
@@ -19,7 +21,9 @@
     "genkit": "^1.37.0"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
     "@types/node": "^25.9.1",
+    "firebase": "^12.15.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.7"
   },
