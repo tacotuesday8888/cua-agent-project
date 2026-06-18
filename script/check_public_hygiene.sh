@@ -55,7 +55,7 @@ while IFS= read -r -d '' path; do
         node_modules/*|*/node_modules/*|backend/lib/*)
             fail "tracked generated dependency/build output: $path"
             ;;
-        *.pem|*.key|*.p8|*.p12|*.cer|*.crt|*.mobileprovision|*.provisionprofile)
+        *.pem|*.key|*.p8|*.p12|*.cer|*.crt|*.mobileprovision|*.provisionprofile|*.p12.base64|*.p8.base64|*.key.base64|*.cer.base64|*.crt.base64|*.mobileprovision.base64|*.provisionprofile.base64|*.keychain-db)
             fail "tracked credential, certificate, or provisioning file: $path"
             ;;
     esac

@@ -426,6 +426,8 @@ A release candidate must pass:
 - `./script/check_public_hygiene.sh`
 - `cd backend && npm run test:rules:emulator`
 - `./script/build_release_dmg.sh --dry-run`
+- the manual **Release DMG** GitHub workflow after Apple Developer ID and
+  notarization secrets are configured
 - `./script/validate_beta.sh` fixture, scripted-scenario, and approval-gate
   reports
 - fixture driver validation
