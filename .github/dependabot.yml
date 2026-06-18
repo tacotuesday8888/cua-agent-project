@@ -39,3 +39,10 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      # GoogleSignIn 9.1.x depends on GTMAppAuth 5.0.x, which still requires
+      # GTMSessionFetcher 3.x. Keep GTMSessionFetcher major updates manual until
+      # the Google auth chain allows 5.x and sign-in/token smoke tests pass.
+      - dependency-name: "github.com/google/gtm-session-fetcher"
+        update-types:
+          - "version-update:semver-major"
