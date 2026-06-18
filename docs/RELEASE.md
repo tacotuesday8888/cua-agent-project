@@ -1,21 +1,20 @@
-# Release And Distribution Notes
+# Distribution Checklist
 
-Mac Autopilot should ship as a local-first Mac power tool with a small hosted AI
-path. The first practical distribution path is a signed and notarized direct
-download. A Mac App Store path needs a separate feasibility review because the
-product depends on Accessibility control and optional Screen Recording.
+Mac Autopilot is distributed as a signed and notarized macOS app. App Store
+distribution requires a separate compatibility review because the product uses
+Accessibility control and optional Screen Recording.
 
-## Direct Distribution Baseline
+## Direct Distribution
 
-Required before a public build:
+Before publishing a build:
 
 - Apple Developer Team configured in Xcode.
 - Developer ID Application certificate available locally or in CI.
 - Hardened Runtime enabled for release signing.
 - App archive exported as a signed `.app` or `.dmg`.
 - Notarization submitted and stapled.
-- Privacy copy explaining Accessibility, Screen Recording, local memory, local
-  run history, hosted usage metadata, provider API-key handling, and subscription
+- Privacy copy explains Accessibility, Screen Recording, local memory, local run
+  history, hosted usage metadata, provider API-key handling, and subscription
   OAuth credentials.
 
 Apple reference points:
@@ -25,23 +24,19 @@ Apple reference points:
 - App Sandbox: https://developer.apple.com/documentation/security/app-sandbox
 - App Review Guidelines: https://developer.apple.com/app-store/review/guidelines/
 
-## Current Build State
+## Build State
 
 - Bundle identifier: `com.langqi.MacAutopilot`.
 - Entitlements include Keychain access for local provider keys and OAuth
-  credentials. The app is intentionally not sandboxed while Accessibility
-  control is being validated.
+  credentials.
 - Hardened Runtime is enabled in build settings, but local ad-hoc builds may
   disable it.
 - The app now has an asset catalog and `AppIcon` set.
 - CI builds and package tests do not run TCC-dependent smoke tests.
 
-## Distribution Decision
+## Validation
 
-Default decision for now: direct notarized distribution first.
-
-Ship direct notarized distribution first. Mac Autopilot Basic, BYOK, and
-subscription account access can ship only after the validation matrix passes and
-privacy copy is reviewed. Keep remote sync, multi-app workflows, scheduling,
-voice/files, and payment entitlements out of the first user-testable build unless
-a separate release decision is made.
+Release candidates should pass the validation checklist in
+[`docs/VALIDATION.md`](VALIDATION.md), including package tests, app build,
+deterministic fixture validation, and any explicitly enabled live-provider
+smoke tests.

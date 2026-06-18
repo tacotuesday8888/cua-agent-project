@@ -26,9 +26,8 @@ That product shape implies a few hard technical boundaries:
   and the compact assistant surface can render.
 - The action layer must expose target metadata before acting so the UI can show
   what will be clicked, typed into, overwritten, or deleted.
-- The run model remains single-app and single-run-at-a-time. Multi-app,
-  scheduled, synced, voice, file-driven, and payment-gated workflows are future
-  product work, not hidden MVP behavior.
+- The run model remains single-app and single-run-at-a-time. Broader automation
+  modes should be designed explicitly before they are added.
 
 ## Current Local-First Stack
 
@@ -178,11 +177,9 @@ the core difference from rule-based automation (Shortcuts, Automator, macros):
 the recipe is guidance, the live loop is the source of truth, so a workflow
 adapts to UI and edge-case changes instead of breaking.
 
-Scope and guarantees for the current phase:
+Scope and guarantees:
 
-- **Single-app only.** A workflow runs exactly one app. Cross-app workflows are
-  future product work. The `Workflow` model isolates the app name so that change
-  needs no data migration.
+- **Single-app only.** A workflow runs exactly one app.
 - **On-demand only.** Workflows run when the user triggers them; scheduling and
   unattended runs are out of scope.
 - **Not auto-trusted.** A re-run goes through the same risk gate as any task —
@@ -271,31 +268,3 @@ What's shipped:
 Security stays server-side: Firestore rules are deny-all (clients never read
 or write directly), the OpenAI key lives in **Cloud Secret Manager**, and the
 client-shipped `GoogleService-Info.plist` carries only client identifiers.
-
-### Future Product Work
-
-- Payments and entitlements.
-- Multi-provider routing on the backend (e.g. Anthropic via the same proxy).
-- Voice input, file attachments, and unattended scheduling.
-- Optional remote sync of memories, history, or workflows — deliberately
-  postponed; today's persistence stays local + redacted.
-
-## Work That Can Continue Before Final UI
-
-- Better prompt/tool-choice recovery for stale or missing AX elements.
-- More robust driver diagnostics for permission and target-window failures.
-- App-picker polish around duplicate app names and saved workflow target-app
-  edits.
-- Refining `NotchAssistantView` behind the existing `AgentViewModel` and
-  `NotchController` contracts.
-- More safety tests around destructive labels, overwrites, and app trust.
-
-## Work That Should Wait For Compact Assistant Decisions
-
-- Hover animation and dwell timing.
-- Final collapsed/expanded dimensions.
-- App-chip layout and picker behavior.
-- Highlight overlay placement and animation.
-- Whether approvals interrupt with a fully expanded panel or a compact inline
-  confirmation.
-- Global hotkey and menu-bar affordance polish.
