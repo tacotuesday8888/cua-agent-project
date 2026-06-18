@@ -5,6 +5,22 @@
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+*.p8
+*.p12
+*.cer
+*.crt
+*.mobileprovision
+*.provisionprofile
+*.p12.base64
+*.p8.base64
+*.key.base64
+*.cer.base64
+*.crt.base64
+*.mobileprovision.base64
+*.provisionprofile.base64
+*.keychain-db
 
 # Editor / IDE
 .vscode/

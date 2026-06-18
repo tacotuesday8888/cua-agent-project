@@ -68,6 +68,37 @@ identity it finds. Notarization can also use `APPLE_ID`,
 `APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` instead of a keychain profile, but
 the keychain profile is the preferred local flow.
 
+## GitHub Release Workflow
+
+After Apple Developer ID credentials exist, the manual **Release DMG** workflow
+can build the direct-download artifact in GitHub Actions. The workflow imports a
+Developer ID Application `.p12` into a temporary keychain, runs
+`script/build_release_dmg.sh`, notarizes and staples the DMG, writes a SHA-256
+checksum, uploads both files as a workflow artifact, then deletes the temporary
+keychain.
+
+Configure these repository secrets before running it:
+
+- `MACOS_DEVELOPER_ID_CERTIFICATE_P12_BASE64` — base64 text for the exported
+  Developer ID Application `.p12`.
+- `MACOS_DEVELOPER_ID_CERTIFICATE_PASSWORD` — password used when exporting the
+  `.p12`.
+- `APPLE_TEAM_ID` — Apple Developer Team ID.
+- `APPLE_ID` — Apple ID for notarization.
+- `APP_SPECIFIC_PASSWORD` — Apple app-specific password for `notarytool`.
+- `DEVELOPER_ID_APPLICATION` — optional exact signing identity name. Leave unset
+  only if the temporary keychain contains one Developer ID Application identity.
+
+Create the certificate secret from a local `.p12` without committing the file:
+
+```sh
+base64 -i DeveloperIDApplication.p12 | tr -d '\n' | pbcopy
+```
+
+Then paste the clipboard into the GitHub secret. Files matching certificate,
+provisioning, keychain, and base64 credential patterns are ignored by
+`.gitignore` and rejected by `script/check_public_hygiene.sh`.
+
 Apple reference points:
 
 - Notarization: https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution
