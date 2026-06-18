@@ -148,7 +148,7 @@ public struct NotchAssistantView: View {
         VStack(spacing: 6) {
             HStack(spacing: 8) {
                 Picker("AI", selection: $model.selectedProvider) {
-                    ForEach(AgentViewModel.Provider.allCases) { provider in
+                    ForEach(AgentViewModel.Provider.betaSelectableCases) { provider in
                         Text("\(provider.displayName) · \(provider.accessMode.displayName)")
                             .tag(provider)
                     }
@@ -221,6 +221,12 @@ public struct NotchAssistantView: View {
             openAICompatibleSetup
             hostedAccountPrompt
             subscriptionAccountPrompt
+            if !model.runReadiness.canRun {
+                Text(model.runReadiness.detail)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             HStack(spacing: 8) {
                 TextField("What should I do?", text: $model.promptText)
@@ -245,6 +251,7 @@ public struct NotchAssistantView: View {
                         Image(systemName: "paperplane.fill")
                     }
                     .buttonStyle(.borderedProminent)
+                    .disabled(!model.runReadiness.canRun)
                     .help("Run")
                 }
             }
@@ -721,6 +728,7 @@ public struct NotchAssistantView: View {
     }
 
     private func submit() {
+        guard model.runReadiness.canRun else { return }
         model.submit()
         if model.isRunInProgress {
             setExpanded(false)
@@ -912,7 +920,7 @@ private struct WorkflowRow: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                .disabled(model.isRunInProgress)
+                .disabled(model.isRunInProgress || !missingSlots.isEmpty)
             }
         }
         .padding(8)
@@ -943,6 +951,14 @@ private struct WorkflowRow: View {
         for variable in workflow.variables where bindings[variable.name] == nil {
             bindings[variable.name] = variable.defaultValue ?? ""
         }
+    }
+
+    private var missingSlots: [String] {
+        WorkflowRenderer.missingSlotNames(
+            in: workflow.goalTemplate,
+            variables: workflow.variables,
+            bindings: bindings
+        )
     }
 }
 

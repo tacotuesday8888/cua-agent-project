@@ -1,6 +1,7 @@
 import AutopilotCore
 import AutopilotLLM
 import AutopilotMemory
+import Foundation
 import Testing
 @testable import AutopilotAgent
 
@@ -67,6 +68,159 @@ struct ApprovalGateTests {
         #expect(interaction.approvalsRequested == 2)
     }
 
+    @Test func declinedActionRetryIsBlockedWithoutPromptingAgain() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "t1", tool: "click", input: ["element_index": 4]),
+            toolResponse(id: "t2", tool: "click", input: ["element_id": "e4"]),
+            toolResponse(id: "t3", tool: "done", input: ["summary": "Done."])
+        ])
+        let interaction = CountingDenyingInteraction()
+        let computer = notesComputer()
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: interaction,
+            configuration: config(),
+            memory: makeTestMemory()
+        )
+
+        let outcome = await session.run(task: "try saving")
+
+        #expect(outcome.status == .completed)
+        #expect(interaction.approvalsRequested == 1)
+        #expect(await computer.performedActions.isEmpty)
+    }
+
+    @Test func declinedActionRetryIgnoresUnusedJSONFields() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "t1", tool: "click", input: ["element_index": 4]),
+            toolResponse(
+                id: "t2",
+                tool: "click",
+                input: ["element_id": "e4", "unused_reason": "try again"]
+            ),
+            toolResponse(id: "t3", tool: "done", input: ["summary": "Done."])
+        ])
+        let interaction = CountingDenyingInteraction()
+        let computer = notesComputer()
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: interaction,
+            configuration: config(),
+            memory: makeTestMemory()
+        )
+
+        _ = await session.run(task: "try saving")
+
+        #expect(interaction.approvalsRequested == 1)
+        #expect(await computer.performedActions.isEmpty)
+    }
+
+    @Test func decliningOneActionStillAllowsAReviewOfADifferentAction() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "t1", tool: "click", input: ["element_index": 4]),
+            toolResponse(id: "t2", tool: "type_text", input: ["element_index": 2, "text": "safe note"]),
+            toolResponse(id: "t3", tool: "done", input: ["summary": "Done."])
+        ])
+        let interaction = CountingDenyingInteraction()
+        let session = AgentSession(
+            llm: llm,
+            computer: notesComputer(),
+            interaction: interaction,
+            configuration: config(),
+            memory: makeTestMemory()
+        )
+
+        _ = await session.run(task: "try two alternatives")
+
+        #expect(interaction.approvalsRequested == 2)
+    }
+
+    @Test func decliningOneClickStillAllowsAReviewOfADifferentTarget() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "t1", tool: "click", input: ["element_index": 4]),
+            toolResponse(id: "t2", tool: "click", input: ["element_index": 3]),
+            toolResponse(id: "t3", tool: "done", input: ["summary": "Done."])
+        ])
+        let interaction = CountingDenyingInteraction()
+        let session = AgentSession(
+            llm: llm,
+            computer: notesComputer(),
+            interaction: interaction,
+            configuration: config(),
+            memory: makeTestMemory()
+        )
+
+        _ = await session.run(task: "try two buttons")
+
+        #expect(interaction.approvalsRequested == 2)
+    }
+
+    @Test func declinedElementIDIsReReviewedWhenTheTargetChanges() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(id: "t1", tool: "click", input: ["element_id": "e4"]),
+            toolResponse(id: "t2", tool: "click", input: ["element_id": "e4"]),
+            toolResponse(id: "t3", tool: "done", input: ["summary": "Done."])
+        ])
+        let computer = notesComputer()
+        let interaction = RetargetingDenyingInteraction(
+            computer: computer,
+            replacementRoot: UIElement(
+                id: "e1",
+                role: "AXWindow",
+                label: "Notes",
+                children: [
+                    UIElement(id: "e2", role: "AXTextField", label: "Note", value: ""),
+                    UIElement(id: "e3", role: "AXButton", label: "Delete Note"),
+                    UIElement(id: "e4", role: "AXButton", label: "Archive")
+                ]
+            )
+        )
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: interaction,
+            configuration: config(),
+            memory: makeTestMemory()
+        )
+
+        _ = await session.run(task: "try a changed button")
+
+        #expect(interaction.approvalsRequested == 2)
+        #expect(await computer.performedActions.isEmpty)
+    }
+
+    @Test func declinedKeyPressRetryUsesCanonicalKeysAndModifiers() async {
+        let llm = ScriptedLLMProvider([
+            toolResponse(
+                id: "t1",
+                tool: "press_key",
+                input: ["key": "Delete", "modifiers": ["shift", "command", "command"]]
+            ),
+            toolResponse(
+                id: "t2",
+                tool: "press_key",
+                input: ["key": "del", "modifiers": ["command", "shift"]]
+            ),
+            toolResponse(id: "t3", tool: "done", input: ["summary": "Done."])
+        ])
+        let interaction = CountingDenyingInteraction()
+        let computer = notesComputer()
+        let session = AgentSession(
+            llm: llm,
+            computer: computer,
+            interaction: interaction,
+            configuration: config(),
+            memory: makeTestMemory()
+        )
+
+        _ = await session.run(task: "try destructive shortcut")
+
+        #expect(interaction.approvalsRequested == 1)
+        #expect(await computer.performedActions.isEmpty)
+    }
+
     @Test func permanentlyTrustedAppSkipsTheFirstWritePrompt() async {
         let llm = ScriptedLLMProvider([
             toolResponse(id: "t1", tool: "type_text", input: ["element_index": 2, "text": "hi"]),
@@ -110,5 +264,54 @@ struct ApprovalGateTests {
         #expect(target?.elementID == "e4")
         #expect(target?.label == "Save")
         #expect(target?.description == "Click \"Save\"")
+    }
+}
+
+private final class CountingDenyingInteraction: UserInteraction, @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    func requestApproval(_ request: ApprovalRequest) async -> Bool {
+        lock.withLock { count += 1 }
+        return false
+    }
+
+    func askQuestion(_ question: String) async -> String { "" }
+    func confirmMemory(_ proposal: MemoryProposal) async -> Bool { false }
+    func confirmWorkflow(_ proposal: WorkflowProposal) async -> Bool { false }
+
+    var approvalsRequested: Int {
+        lock.withLock { count }
+    }
+}
+
+private final class RetargetingDenyingInteraction: UserInteraction, @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    private let computer: MockComputer
+    private let replacementRoot: UIElement
+
+    init(computer: MockComputer, replacementRoot: UIElement) {
+        self.computer = computer
+        self.replacementRoot = replacementRoot
+    }
+
+    func requestApproval(_ request: ApprovalRequest) async -> Bool {
+        let currentCount = lock.withLock {
+            count += 1
+            return count
+        }
+        if currentCount == 1 {
+            await computer.replaceRoot(replacementRoot)
+        }
+        return false
+    }
+
+    func askQuestion(_ question: String) async -> String { "" }
+    func confirmMemory(_ proposal: MemoryProposal) async -> Bool { false }
+    func confirmWorkflow(_ proposal: WorkflowProposal) async -> Bool { false }
+
+    var approvalsRequested: Int {
+        lock.withLock { count }
     }
 }

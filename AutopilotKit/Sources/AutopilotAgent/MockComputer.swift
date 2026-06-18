@@ -19,6 +19,19 @@ public actor MockComputer: ComputerControl {
         snapshot
     }
 
+    public func replaceRoot(_ root: UIElement, windowTitle: String? = nil) {
+        snapshot = UITreeSnapshot(
+            appName: snapshot.appName,
+            bundleIdentifier: snapshot.bundleIdentifier,
+            processIdentifier: snapshot.processIdentifier,
+            windowTitle: windowTitle ?? snapshot.windowTitle,
+            windowIdentifier: snapshot.windowIdentifier,
+            turnIdentifier: (snapshot.turnIdentifier ?? 0) + 1,
+            root: root,
+            isTruncated: snapshot.isTruncated
+        )
+    }
+
     public func listApps() async throws -> [ComputerAppInfo] {
         [
             ComputerAppInfo(

@@ -337,6 +337,11 @@ These are manual app checks for the shared-state workflow milestone.
   pressed, Done after a successful finish, Stopped after a cooperative stop, and
   Needs attention after a permission, provider, or runtime error. Confirm the
   Control Center and compact assistant use the same label for the same run.
+- **Run preflight.** Confirm the Control Center disables Run and explains the
+  blocker for an empty goal, missing Accessibility, missing hosted sign-in,
+  missing BYOK key or compatible endpoint, no selected/running app, and
+  ambiguous `@App` mentions. Confirm `remember:` prompts remain runnable without
+  provider setup or a target app because they store local memory only.
 - **Stopped is not a failure.** Start a safe run, press Stop, and let the agent
   wind down. Expected result: both surfaces show Stopping while the stop is in
   progress, then Stopped after it completes; the history record stores
@@ -349,8 +354,10 @@ These are manual app checks for the shared-state workflow milestone.
   Confirm the saved workflow uses the edited values, not the raw proposal.
 - **Saved workflow edit and slot privacy.** Edit an existing saved workflow in
   the Control Center, including its optional recipe hints. Relaunch the app and
-  confirm the change was persisted through the local workflow store. Run it with
-  distinctive slot values, then inspect
+  confirm the change was persisted through the local workflow store. Confirm the
+  workflow row shows the resolved goal preview, disables Run until required
+  `{{slot}}` values are filled, and warns that typed values are one-run only.
+  Run it with distinctive slot values, then inspect
   `~/Library/Application Support/MacAutopilot/workflows.json`; it should contain
   the template, slot names, and optional secret-free hints, but not the typed
   slot values used for that run.
@@ -409,6 +416,7 @@ in System Settings → **Re-check permissions**.
 A release candidate must pass:
 
 - automated baseline
+- `./script/check_public_hygiene.sh`
 - `./script/validate_beta.sh` fixture, scripted-scenario, and approval-gate
   reports
 - fixture driver validation
