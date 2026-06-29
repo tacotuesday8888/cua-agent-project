@@ -29,6 +29,11 @@ updates:
       - dependency-name: "typescript"
         update-types:
           - "version-update:semver-major"
+      # The Firebase Functions runtime is Node 22. Keep ambient Node typings on
+      # that major until the runtime itself moves.
+      - dependency-name: "@types/node"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "swift"
     directory: "/AutopilotKit"
